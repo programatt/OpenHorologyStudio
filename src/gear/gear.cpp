@@ -159,6 +159,11 @@ mesh::Ring outline(const GearSpec& s) {
     return ring;
 }
 
+mesh::Ring tooth_flank(const GearSpec& s) {
+    validate(s);
+    return right_side(s);
+}
+
 mesh::Region wheel_region(const GearSpec& s) {
     mesh::Region region;
     region.rings.push_back(outline(s));

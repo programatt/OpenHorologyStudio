@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "open-horology-studio",
+  "version": "1.0.0",
+  "description": "Watch movement design and analysis",
+  "license": "Apache-2.0",
+  "builtin-baseline": "664933b8d385dfc01f4e0cdff4c7c74e71f6a740",
+  "dependencies": [
+    "opencascade",
+    "eigen3",
+    "cli11",
+    "spdlog",
+    "nlohmann-json",
+    "tomlplusplus",
+    "catch2"
+  ]
+}

@@ -28,6 +28,11 @@ struct GearSpec {
 /// the tooth is pointed or the parameters are impossible.
 mesh::Ring outline(const GearSpec& spec);
 
+/// One side of a tooth in the tooth's own frame (tooth centred on +x): from the root circle through the
+/// fillet and up the flank to the tip. The other side is its mirror image about the x axis. Used to
+/// build exact (spline) CAD geometry instead of a polygon.
+mesh::Ring tooth_flank(const GearSpec& spec);
+
 /// The wheel with its bore as a hole.
 mesh::Region wheel_region(const GearSpec& spec);
 

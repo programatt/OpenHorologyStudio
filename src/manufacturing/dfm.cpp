@@ -411,7 +411,7 @@ std::vector<Finding> run_dfm(const ProcessRules& p, const PartGeometry& g) {
             }
             const P2 centre{cx / static_cast<double>(rings[k].size()), cy / static_cast<double>(rings[k].size())};
             Finding f;
-            if (interference < lo || interference > hi) {
+            if (interference < lo - 1e-9 || interference > hi + 1e-9) {  // a hair of slack: the window edges are inclusive
                 f = make(p, g, "jewel_fit", Severity::Error,
                          "hole of " + num(d_hole, 4) + " mm for a " + num(nearest, 2) + " mm jewel gives " + num(interference * 1000, 1) + " um interference (want " + num(lo * 1000, 0) + " to " + num(hi * 1000, 0) + " um)",
                          "ream the seat to " + num(nearest - 0.5 * (lo + hi), 4) + " mm", interference, interference < lo ? lo : hi);

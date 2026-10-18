@@ -8,6 +8,8 @@
 
 #include "cases/cases.hpp"
 #include "core/error.hpp"
+#include "core/parallel.hpp"
+#include "plugins/plugin_loader.hpp"
 #include "dynamics/timekeeping.hpp"
 #include "dynamics/torque_chain.hpp"
 #include "explain/explain.hpp"
@@ -202,6 +204,41 @@ report::Document build_report(const model::Movement& m, const ReportOptions& o) 
         geometry_note = "no STEP file was given";
     }
 
+    // The mid-height section of every part, computed once and shared by the DFM and collision sections.
+    struct Section {
+        int component;
+        manufacturing::PartGeometry geometry;
+    };
+    std::vector<Section> section_cache;
+    bool sections_built = false;
+    auto sections = [&]() -> const std::vector<Section>& {
+        if (sections_built) return section_cache;
+        sections_built = true;
+        for (std::size_t ci = 0; ci < m.components.size(); ++ci) {
+            const auto& c = m.components[ci];
+            if (c.features.volume <= 0) continue;
+            const geometry::ImportedPart* found = nullptr;
+            for (const auto& p : step_parts) {
+                if (p.name == c.features.name) found = &p;
+            }
+            if (!found) continue;
+            manufacturing::PartGeometry g;
+            g.name = c.features.name;
+            g.role = c.role;
+            g.thickness = c.features.thickness();
+            g.teeth = c.features.teeth;
+            g.module = c.gear ? c.gear->module : 0.0;
+            if (c.gear && c.gear->pressure_angle_deg > 5) g.pressure_angle_deg = c.gear->pressure_angle_deg;
+            try {
+                g.region = geometry::section_region(geometry::orient_dial_axis_to_z(found->shape, o.up), 0.5 * (c.features.z_min + c.features.z_max), 0.001, 0.002);
+            } catch (const Error&) {
+                continue;
+            }
+            section_cache.push_back({static_cast<int>(ci), std::move(g)});
+        }
+        return section_cache;
+    };
+
     if (o.dfm) {
         section([&](report::Document& d) {
             d.heading("Design for manufacturing");
@@ -225,26 +262,12 @@ report::Document build_report(const model::Movement& m, const ReportOptions& o) 
                 d.paragraph(rules->description);
                 std::vector<std::vector<std::string>> rows;
                 std::vector<Status> st;
-                for (const auto& c : m.components) {
-                    if (c.features.volume <= 0) continue;
-                    const geometry::ImportedPart* found = nullptr;
-                    for (const auto& p : step_parts) {
-                        if (p.name == c.features.name) found = &p;
-                    }
-                    if (!found) continue;
-                    manufacturing::PartGeometry g;
-                    g.name = c.features.name;
-                    g.role = c.role;
-                    g.thickness = c.features.thickness();
-                    g.teeth = c.features.teeth;
-                    g.module = c.gear ? c.gear->module : 0.0;
-                    if (c.gear && c.gear->pressure_angle_deg > 5) g.pressure_angle_deg = c.gear->pressure_angle_deg;
-                    try {
-                        g.region = geometry::section_region(geometry::orient_dial_axis_to_z(found->shape, o.up), 0.5 * (c.features.z_min + c.features.z_max), 0.002, 0.002);
-                    } catch (const Error&) {
-                        continue;
-                    }
-                    for (const auto& f : manufacturing::run_dfm(*rules, g)) {
+                // The rules are pure functions of the outlines, so the parts are checked on threads; the
+                // findings are collected in part order, so the report does not depend on scheduling.
+                std::vector<std::vector<manufacturing::Finding>> per_part(sections().size());
+                ohs::parallel_for(per_part.size(), [&](std::size_t i) { per_part[i] = manufacturing::run_dfm(*rules, sections()[i].geometry); });
+                for (const auto& findings : per_part) {
+                    for (const auto& f : findings) {
                         ++checks;
                         errors += f.severity == manufacturing::Severity::Error;
                         warnings += f.severity == manufacturing::Severity::Warning;
@@ -255,6 +278,31 @@ report::Document build_report(const model::Movement& m, const ReportOptions& o) 
                 }
                 if (rows.empty()) d.callout(Status::Pass, "No findings for this process.");
                 else d.table({"part", "rule", "finding", "fix"}, rows, st);
+            }
+            for (const std::string& path : o.plugins) {
+                try {
+                    const auto plugin = plugins::DfmPlugin::load(path);
+                    d.heading("Plugin: " + plugin->name(), 3);
+                    d.paragraph(plugin->description() + " (version " + plugin->version() + ")");
+                    std::vector<std::vector<std::string>> rows;
+                    std::vector<Status> st;
+                    for (const auto& sec : sections()) {
+                        for (const auto& f : plugin->check(sec.geometry)) {
+                            ++checks;
+                            errors += f.severity == manufacturing::Severity::Error;
+                            warnings += f.severity == manufacturing::Severity::Warning;
+                            if (f.severity == manufacturing::Severity::Info) continue;
+                            rows.push_back({f.part, f.rule, f.message, f.fix});
+                            st.push_back(f.severity == manufacturing::Severity::Error ? Status::Fail : Status::Warn);
+                        }
+                    }
+                    if (rows.empty()) d.callout(Status::Pass, "No findings from this plugin.");
+                    else d.table({"part", "rule", "finding", "fix"}, rows, st);
+                } catch (const Error& e) {
+                    d.callout(Status::Fail, e.what());
+                    overall = Status::Fail;
+                    ++errors;
+                }
             }
             overall = errors ? Status::Fail : warnings ? Status::Warn : overall;
             const std::string text = std::to_string(checks) + " checks: " + std::to_string(errors) + " errors, " + std::to_string(warnings) + " warnings";
@@ -272,7 +320,11 @@ report::Document build_report(const model::Movement& m, const ReportOptions& o) 
                 return;
             }
             try {
-                const auto parts = manufacturing::collision_parts(m, step_parts, o.up);
+                std::vector<manufacturing::CollisionPart> parts;
+                for (const auto& sec : sections()) {
+                    const auto& c = m.components[static_cast<std::size_t>(sec.component)];
+                    parts.push_back({c.features.name, sec.geometry.region, c.features.z_min, c.features.z_max, m.mobile_of(sec.component)});
+                }
                 const auto r = manufacturing::sweep_collisions(m, train, parts);
                 std::vector<std::vector<std::string>> rows;
                 std::vector<Status> st;
@@ -304,6 +356,13 @@ report::Document build_report(const model::Movement& m, const ReportOptions& o) 
                     dynamics::Calibre cal = o.calibre ? *o.calibre : dynamics::default_calibre(vph > 0 ? vph : 25200);
                     const auto chain = dynamics::build_chain(m, train, cal);
                     const auto torques = dynamics::torque_table(chain, cal, 1.0);
+                    struct Job {
+                        std::size_t component;
+                        cases::ToothCaseInput input;
+                        std::optional<cases::ToothCaseResult> result;
+                        std::string error;
+                    };
+                    std::vector<Job> jobs;
                     for (std::size_t ci = 0; ci < m.components.size(); ++ci) {
                         const auto& c = m.components[ci];
                         if (c.features.teeth < 6) continue;
@@ -314,23 +373,36 @@ report::Document build_report(const model::Movement& m, const ReportOptions& o) 
                             if (row.mobile == m.mobiles[static_cast<std::size_t>(mi)].name) torque = row.torque_nmm;
                         }
                         if (torque <= 0) continue;
-                        cases::ToothCaseInput in;
-                        in.spec.teeth = c.features.teeth;
-                        in.spec.module = c.gear && c.gear->module > 0 ? c.gear->module : model::module_from_tip(c.features.outer_radius, c.features.teeth);
-                        if (c.gear && c.gear->pressure_angle_deg > 5) in.spec.pressure_angle_deg = c.gear->pressure_angle_deg;
-                        in.spec.bore_radius = c.features.bore_radius;
-                        in.face_width = c.features.thickness();
-                        in.tangential_load_n = torque / in.spec.pitch_radius();
-                        in.material = fea::find_material(c.role == model::Role::Pinion ? "steel_hardened" : "brass_leaded");
+                        Job job;
+                        job.component = ci;
+                        job.input.spec.teeth = c.features.teeth;
+                        job.input.spec.module = c.gear && c.gear->module > 0 ? c.gear->module : model::module_from_tip(c.features.outer_radius, c.features.teeth);
+                        if (c.gear && c.gear->pressure_angle_deg > 5) job.input.spec.pressure_angle_deg = c.gear->pressure_angle_deg;
+                        job.input.spec.bore_radius = c.features.bore_radius;
+                        job.input.face_width = c.features.thickness();
+                        job.input.tangential_load_n = torque / job.input.spec.pitch_radius();
+                        job.input.material = fea::find_material(c.role == model::Role::Pinion ? "steel_hardened" : "brass_leaded");
+                        jobs.push_back(std::move(job));
+                    }
+                    // Each wheel is an independent finite-element model: solve them on threads.
+                    ohs::parallel_for(jobs.size(), [&](std::size_t k) {
                         try {
-                            const auto r = cases::run_tooth_case(in);
+                            jobs[k].result = cases::run_tooth_case(jobs[k].input);
+                        } catch (const Error& e) {
+                            jobs[k].error = e.what();
+                        }
+                    });
+                    for (const Job& job : jobs) {
+                        const auto& c = m.components[job.component];
+                        if (job.result) {
+                            const auto& r = *job.result;
                             const Status s = r.safety_factor < 1.0 ? Status::Fail : r.safety_factor < o.min_safety_factor ? Status::Warn : Status::Pass;
                             overall = worse(overall, s);
-                            rows.push_back({c.features.name, in.material.name, num(in.tangential_load_n, 4) + " N", num(r.lewis_mpa, 2) + " MPa", num(r.fe_max_principal_mpa, 2) + " MPa",
-                                            num(r.concentration, 2), num(r.safety_factor, 0)});
+                            rows.push_back({c.features.name, job.input.material.name, num(job.input.tangential_load_n, 4) + " N", num(r.lewis_mpa, 2) + " MPa",
+                                            num(r.fe_max_principal_mpa, 2) + " MPa", num(r.concentration, 2), num(r.safety_factor, 0)});
                             st.push_back(s);
-                        } catch (const Error& e) {
-                            rows.push_back({c.features.name, in.material.name, num(in.tangential_load_n, 4) + " N", "-", "-", "-", e.what()});
+                        } else {
+                            rows.push_back({c.features.name, job.input.material.name, num(job.input.tangential_load_n, 4) + " N", "-", "-", "-", job.error});
                             st.push_back(Status::Warn);
                             overall = worse(overall, Status::Warn);
                         }

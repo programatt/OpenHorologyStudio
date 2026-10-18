@@ -1,0 +1,43 @@
+site_name: Open Horology Studio
+site_description: Design and analysis of watch movements from CAD to the workshop
+repo_url: https://github.com/openhorologystudio/openhorologystudio
+docs_dir: docs
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+nav:
+  - Home: index.md
+  - Getting started:
+      - Install: install.md
+      - Quickstart: quickstart.md
+      - Concepts: concepts.md
+  - Guide:
+      - Import and rig: import-and-rig.md
+      - Timekeeping: timekeeping.md
+      - Structural analysis: structural.md
+      - Manufacturing: manufacturing.md
+  - Learn:
+      - Guided lessons: lessons.md
+      - OM10 tutorial: om10.md
+  - Extend:
+      - Python API: python.md
+      - Plugins: plugins.md
+      - CAD add-ins: cad-addins.md
+  - Reference:
+      - Command line: reference/cli.md
+      - Limitations: limitations.md
+      - Decisions:
+          - "M0 scope and tooling": adr/0001-m0-scope-and-tooling.md
+          - "M2 timekeeping models": adr/0002-m2-timekeeping-models.md
+          - "M3 structural analysis": adr/0003-m3-structural-analysis.md
+          - "M4 manufacturing": adr/0004-m4-manufacturing.md
+          - "M5 release": adr/0005-m5-release.md

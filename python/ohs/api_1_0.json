@@ -1,0 +1,595 @@
+{
+  "API_VERSION": {
+    "kind": "constant",
+    "value": "1.0"
+  },
+  "OhsError": {
+    "kind": "class",
+    "methods": {
+      "__init__": [
+        {
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "message",
+          "required": true
+        },
+        {
+          "default": "2",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "exit_code",
+          "required": false
+        },
+        {
+          "default": "''",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "stderr",
+          "required": false
+        }
+      ]
+    }
+  },
+  "Project": {
+    "kind": "class",
+    "methods": {
+      "__init__": [
+        {
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "path",
+          "required": true
+        }
+      ],
+      "collisions": [
+        {
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "step",
+          "required": false
+        }
+      ],
+      "dfm": [
+        {
+          "default": "'mill,wheel-cutting'",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "process",
+          "required": false
+        },
+        {
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "rules",
+          "required": false
+        },
+        {
+          "default": "()",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "plugins",
+          "required": false
+        },
+        {
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "step",
+          "required": false
+        }
+      ],
+      "draw": [
+        {
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "part",
+          "required": true
+        },
+        {
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "output",
+          "required": true
+        },
+        {
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "step",
+          "required": false
+        }
+      ],
+      "explain": [
+        {
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "part",
+          "required": false
+        },
+        {
+          "default": "False",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "train",
+          "required": false
+        }
+      ],
+      "fea_shock": [
+        {
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "part",
+          "required": true
+        },
+        {
+          "default": "5000.0",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "g",
+          "required": false
+        },
+        {
+          "default": "0.2",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "size",
+          "required": false
+        },
+        {
+          "default": "0",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "modes",
+          "required": false
+        },
+        {
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "material",
+          "required": false
+        },
+        {
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "step",
+          "required": false
+        }
+      ],
+      "fea_tooth": [
+        {
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "part",
+          "required": true
+        },
+        {
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "load_n",
+          "required": false
+        },
+        {
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "material",
+          "required": false
+        },
+        {
+          "default": "1.0",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "wind",
+          "required": false
+        }
+      ],
+      "kinematics": [
+        {
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "beat_rate",
+          "required": false
+        }
+      ],
+      "report": [
+        {
+          "default": null,
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "prefix",
+          "required": true
+        },
+        {
+          "default": "('html', 'pdf')",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "formats",
+          "required": false
+        },
+        {
+          "default": "True",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "structural",
+          "required": false
+        },
+        {
+          "default": "True",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "timekeeping",
+          "required": false
+        },
+        {
+          "default": "10000",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "samples",
+          "required": false
+        },
+        {
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "step",
+          "required": false
+        },
+        {
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "calibre",
+          "required": false
+        }
+      ],
+      "rig_check": [
+        {
+          "default": "False",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "strict",
+          "required": false
+        }
+      ],
+      "simulate": [
+        {
+          "default": "'60s'",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "duration",
+          "required": false
+        },
+        {
+          "default": "'reduced'",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "level",
+          "required": false
+        },
+        {
+          "default": "'dial_up'",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "position",
+          "required": false
+        },
+        {
+          "default": "1.0",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "wind",
+          "required": false
+        },
+        {
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "calibre",
+          "required": false
+        }
+      ],
+      "timegrapher": [
+        {
+          "default": "'30s'",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "duration",
+          "required": false
+        },
+        {
+          "default": "'dial_up'",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "position",
+          "required": false
+        },
+        {
+          "default": "1.0",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "wind",
+          "required": false
+        },
+        {
+          "default": "0.0",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "jitter_us",
+          "required": false
+        },
+        {
+          "default": "1",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "seed",
+          "required": false
+        },
+        {
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "calibre",
+          "required": false
+        }
+      ],
+      "timekeeping": [
+        {
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "calibre",
+          "required": false
+        }
+      ],
+      "tolerance": [
+        {
+          "default": "10000",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "samples",
+          "required": false
+        },
+        {
+          "default": "42",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "seed",
+          "required": false
+        },
+        {
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "table",
+          "required": false
+        },
+        {
+          "default": "0.02",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "fail_above",
+          "required": false
+        }
+      ],
+      "torque": [
+        {
+          "default": "1.0",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "wind",
+          "required": false
+        },
+        {
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "calibre",
+          "required": false
+        }
+      ],
+      "whatif": [
+        {
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "changes",
+          "required": false
+        },
+        {
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "study",
+          "required": false
+        },
+        {
+          "default": "'what-if'",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "name",
+          "required": false
+        },
+        {
+          "default": "False",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "verify",
+          "required": false
+        },
+        {
+          "default": "None",
+          "kind": "POSITIONAL_OR_KEYWORD",
+          "name": "calibre",
+          "required": false
+        }
+      ]
+    }
+  },
+  "Result": {
+    "kind": "class",
+    "methods": {}
+  },
+  "calibre_template": {
+    "kind": "function",
+    "signature": [
+      {
+        "default": "25200",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "beat_rate",
+        "required": false
+      }
+    ]
+  },
+  "check_lesson": {
+    "kind": "function",
+    "signature": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "lesson_id",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "project",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "answer",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "study",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "cutout",
+        "required": false
+      },
+      {
+        "default": "False",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "solution",
+        "required": false
+      }
+    ]
+  },
+  "gear": {
+    "kind": "function",
+    "signature": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "teeth",
+        "required": true
+      },
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "module",
+        "required": true
+      },
+      {
+        "default": "20.0",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "pressure_angle",
+        "required": false
+      },
+      {
+        "default": "0.0",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "bore",
+        "required": false
+      },
+      {
+        "default": "0.5",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "thickness",
+        "required": false
+      },
+      {
+        "default": "'gear'",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "name",
+        "required": false
+      },
+      {
+        "default": "'brass_leaded'",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "material",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "step",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "dxf",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "svg",
+        "required": false
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "pdf",
+        "required": false
+      },
+      {
+        "default": "False",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "profile_only",
+        "required": false
+      }
+    ]
+  },
+  "lesson": {
+    "kind": "function",
+    "signature": [
+      {
+        "default": null,
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "lesson_id",
+        "required": true
+      },
+      {
+        "default": "None",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "project",
+        "required": false
+      }
+    ]
+  },
+  "lessons": {
+    "kind": "function",
+    "signature": []
+  },
+  "materials": {
+    "kind": "function",
+    "signature": []
+  },
+  "run": {
+    "kind": "function",
+    "signature": [
+      {
+        "default": null,
+        "kind": "VAR_POSITIONAL",
+        "name": "args",
+        "required": true
+      },
+      {
+        "default": "True",
+        "kind": "KEYWORD_ONLY",
+        "name": "json",
+        "required": false
+      },
+      {
+        "default": "True",
+        "kind": "KEYWORD_ONLY",
+        "name": "check",
+        "required": false
+      }
+    ]
+  },
+  "thermal": {
+    "kind": "function",
+    "signature": [
+      {
+        "default": "'nife_hairspring'",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "hairspring",
+        "required": false
+      },
+      {
+        "default": "'brass_leaded'",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "balance",
+        "required": false
+      }
+    ]
+  },
+  "verify_physics": {
+    "kind": "function",
+    "signature": [
+      {
+        "default": "False",
+        "kind": "POSITIONAL_OR_KEYWORD",
+        "name": "full",
+        "required": false
+      }
+    ]
+  }
+}

@@ -25,6 +25,7 @@ struct ReportOptions {
 
     std::vector<std::string> processes = {"mill", "wheel-cutting"};
     std::vector<manufacturing::ProcessRules> extra_rules;
+    std::vector<std::string> plugins;   ///< DFM plugin libraries whose rules run next to the process rules
     manufacturing::ToleranceConfig tolerance_config;
     std::optional<dynamics::Calibre> calibre;
     double beat_rate_vph = 0;         ///< overrides the project's beat rate

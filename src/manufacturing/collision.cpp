@@ -8,6 +8,7 @@
 #include <unordered_map>
 
 #include "core/error.hpp"
+#include "core/parallel.hpp"
 #include "geometry/section.hpp"
 
 namespace ohs::manufacturing {
@@ -204,6 +205,15 @@ CollisionReport sweep_collisions(const model::Movement& m, const kinematics::Tra
         }
     }
 
+    // Candidate pairs first, then the sweeps on threads: each pair is independent, and results are
+    // collected in pair order so the report does not depend on scheduling.
+    struct Candidate {
+        std::size_t i, j;
+        double ra, rb, sweep_phi, faster;
+        int steps;
+        bool meshing;
+    };
+    std::vector<Candidate> candidates;
     for (std::size_t i = 0; i < parts.size(); ++i) {
         for (std::size_t j = i + 1; j < parts.size(); ++j) {
             const CollisionPart &A = parts[i], &B = parts[j];
@@ -214,41 +224,47 @@ CollisionReport sweep_collisions(const model::Movement& m, const kinematics::Tra
             // Static parts and mobiles with ratio 0 do not move; a moving part sweeps a disc about its axis.
             const double dist = std::hypot(mid[i].x - mid[j].x, mid[i].y - mid[j].y);
             if (dist > reach[i] + reach[j] + cfg.search_range) continue;
-
-            CollisionPair cp;
-            cp.a = A.name;
-            cp.b = B.name;
-            double sweep_phi, faster;
-            int steps;
+            Candidate c{i, j, ra, rb, 0, 0, 0, false};
             const auto pitch = mesh_pitch.find({A.name, B.name});
             if (pitch != mesh_pitch.end() && ra != 0.0) {
-                cp.meshing = true;
-                steps = cfg.steps_per_pitch;
-                sweep_phi = pitch->second / std::abs(ra);
-                faster = std::abs(ra);
+                c.meshing = true;
+                c.steps = cfg.steps_per_pitch;
+                c.sweep_phi = pitch->second / std::abs(ra);
+                c.faster = std::abs(ra);
             } else {
-                steps = cfg.steps_per_revolution;
-                faster = std::max(std::abs(ra), std::abs(rb));
-                sweep_phi = 2 * kPi / faster;
+                c.steps = cfg.steps_per_revolution;
+                c.faster = std::max(std::abs(ra), std::abs(rb));
+                c.sweep_phi = 2 * kPi / c.faster;
             }
-            cp.steps = steps + 1;
-            cp.min_clearance = 1e30;
-            for (int s = 0; s <= steps; ++s) {
-                const double phi = sweep_phi * s / steps;
-                const Region pa = rotated(A.region, centre(A.mobile), ra * phi);
-                const Region pb = rotated(B.region, centre(B.mobile), rb * phi);
-                const Relation rel = relate(pa, pb, cfg.search_range);
-                if (rel.overlap && rel.clearance < -cfg.overlap_tolerance) ++cp.overlapping_steps;
-                if (rel.clearance < cp.min_clearance) {
-                    cp.min_clearance = rel.clearance;
-                    cp.at_degrees = faster * phi * 180.0 / kPi;
-                }
-            }
-            ++report.pairs_checked;
-            if (cp.overlapping_steps > 0) ++report.overlaps;
-            else if (cp.min_clearance < cfg.warn_clearance) ++report.close_calls;
-            report.pairs.push_back(std::move(cp));
+            candidates.push_back(c);
         }
+    }
+    report.pairs.resize(candidates.size());
+    ohs::parallel_for(candidates.size(), [&](std::size_t k) {
+        const Candidate& c = candidates[k];
+        const CollisionPart &A = parts[c.i], &B = parts[c.j];
+        CollisionPair& cp = report.pairs[k];
+        cp.a = A.name;
+        cp.b = B.name;
+        cp.meshing = c.meshing;
+        cp.steps = c.steps + 1;
+        cp.min_clearance = 1e30;
+        for (int s = 0; s <= c.steps; ++s) {
+            const double phi = c.sweep_phi * s / c.steps;
+            const Region pa = rotated(A.region, centre(A.mobile), c.ra * phi);
+            const Region pb = rotated(B.region, centre(B.mobile), c.rb * phi);
+            const Relation rel = relate(pa, pb, cfg.search_range);
+            if (rel.overlap && rel.clearance < -cfg.overlap_tolerance) ++cp.overlapping_steps;
+            if (rel.clearance < cp.min_clearance) {
+                cp.min_clearance = rel.clearance;
+                cp.at_degrees = c.faster * phi * 180.0 / kPi;
+            }
+        }
+    });
+    for (const CollisionPair& cp : report.pairs) {
+        ++report.pairs_checked;
+        if (cp.overlapping_steps > 0) ++report.overlaps;
+        else if (cp.min_clearance < cfg.warn_clearance) ++report.close_calls;
     }
     return report;
 }

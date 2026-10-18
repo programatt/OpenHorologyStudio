@@ -6,6 +6,7 @@
 #include <numbers>
 
 #include "core/error.hpp"
+#include "core/parallel.hpp"
 
 namespace ohs::dynamics {
 
@@ -79,21 +80,31 @@ double isochronism_slope(const std::vector<WindPoint>& points) {
     return (n * sxy - sx * sy) / den;
 }
 
-PositionalResult positional_error(const Calibre& c, const TorqueChain& chain, double wind) {
+namespace {
+
+PositionalResult summarize_positions(std::vector<WindPoint> points) {
     PositionalResult r;
     double lo = 1e300, hi = -1e300, flat = 0, vert = 0;
     int nflat = 0, nvert = 0;
-    for (Position pos : all_positions()) {
-        const WindPoint p = wind_point(c, chain, wind, pos);
-        r.points.push_back(p);
+    for (const WindPoint& p : points) {
         lo = std::min(lo, p.rate_s_per_day);
         hi = std::max(hi, p.rate_s_per_day);
-        (is_vertical(pos) ? vert : flat) += p.amplitude_deg;
-        (is_vertical(pos) ? nvert : nflat) += 1;
+        (is_vertical(p.position) ? vert : flat) += p.amplitude_deg;
+        (is_vertical(p.position) ? nvert : nflat) += 1;
     }
+    r.points = std::move(points);
     r.spread_s_per_day = hi - lo;
     r.flat_to_vertical_amplitude_deg = flat / nflat - vert / nvert;
     return r;
+}
+
+}  // namespace
+
+PositionalResult positional_error(const Calibre& c, const TorqueChain& chain, double wind) {
+    // The six orientations are independent runs: do them on threads (results land in fixed slots).
+    std::vector<WindPoint> points(all_positions().size());
+    ohs::parallel_for(points.size(), [&](std::size_t i) { points[i] = wind_point(c, chain, wind, all_positions()[i]); });
+    return summarize_positions(std::move(points));
 }
 
 EnergyBudget energy_budget(const Calibre& c, double wheel_torque_nm, double amplitude_deg, Position position) {
@@ -138,13 +149,21 @@ Calibre regulate(const Calibre& calibre, const TorqueChain& chain, double target
 
 Timekeeping evaluate(const Calibre& c, const TorqueChain& chain) {
     Timekeeping t;
-    t.full = wind_point(c, chain, 1.0);
-    t.half = wind_point(c, chain, 0.5);
-    t.low = wind_point(c, chain, 0.1);
+    // Nine independent settled runs (three states of wind, six orientations at half wind) and the
+    // power-reserve search: all on threads, each writing its own slot.
+    std::vector<WindPoint> positions(all_positions().size());
+    ohs::parallel_for(4 + positions.size(), [&](std::size_t k) {
+        switch (k) {
+            case 0: t.full = wind_point(c, chain, 1.0); break;
+            case 1: t.half = wind_point(c, chain, 0.5); break;
+            case 2: t.low = wind_point(c, chain, 0.1); break;
+            case 3: t.power_reserve_h = power_reserve_hours(c, chain); break;
+            default: positions[k - 4] = wind_point(c, chain, 0.5, all_positions()[k - 4]);
+        }
+    });
     t.isochronism_s_per_day_per_deg = isochronism_slope({t.full, t.half, t.low});
     t.full_wind_h = full_wind_hours(c, chain);
-    t.power_reserve_h = power_reserve_hours(c, chain);
-    t.positions = positional_error(c, chain, 0.5);
+    t.positions = summarize_positions(std::move(positions));
     t.budget = energy_budget(c, t.full.wheel_torque_nm, t.full.amplitude_deg, Position::DialUp);
     return t;
 }

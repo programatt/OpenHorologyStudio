@@ -19,6 +19,7 @@
 #include "manufacturing/gear_export.hpp"
 #include "manufacturing/part_drawing.hpp"
 #include "manufacturing/tolerance.hpp"
+#include "plugins/plugin_loader.hpp"
 #include "model/rig_io.hpp"
 #include "report/document.hpp"
 #include "reports/report_builder.hpp"
@@ -36,6 +37,7 @@ constexpr int kExitCheckFailed = 1;
 struct MfgOptions {
     std::string project, part, step_override, up = "z", out, rules_file, process = "mill,wheel-cutting", tolerance_file, calibre_file, material = "brass_leaded";
     std::string out_step, out_dxf, out_svg, out_pdf, name = "gear", formats = "html,pdf";
+    std::vector<std::string> plugins;
     gear::GearSpec gear;
     double thickness = 0.5, beat_rate = 0, fail_above = 0.02;
     int samples = 10000;
@@ -216,38 +218,52 @@ int cmd_dfm(const MfgOptions& o, bool as_json) {
     }
     const model::Movement m = model::load_rig(o.project);
     const auto step_parts = load_parts(o, m);
+
+    // One section per part, shared by every process and plugin.
+    std::vector<manufacturing::PartGeometry> parts;
+    for (const auto& c : m.components) {
+        if (c.features.volume <= 0) continue;
+        const geometry::ImportedPart* found = nullptr;
+        for (const auto& p : step_parts) {
+            if (p.name == c.features.name) found = &p;
+        }
+        if (!found) continue;
+        manufacturing::PartGeometry g;
+        g.name = c.features.name;
+        g.role = c.role;
+        g.thickness = c.features.thickness();
+        g.teeth = c.features.teeth;
+        g.module = c.gear ? c.gear->module : 0.0;
+        if (c.gear && c.gear->pressure_angle_deg > 5) g.pressure_angle_deg = c.gear->pressure_angle_deg;
+        try {
+            g.region = geometry::section_region(geometry::orient_dial_axis_to_z(found->shape, axis_of(o.up)), 0.5 * (c.features.z_min + c.features.z_max), 0.002, 0.002);
+        } catch (const Error&) {
+            continue;
+        }
+        parts.push_back(std::move(g));
+    }
+
     int errors = 0, warnings = 0;
     json out = json::array();
+    auto record = [&](const manufacturing::Finding& f) {
+        errors += f.severity == manufacturing::Severity::Error;
+        warnings += f.severity == manufacturing::Severity::Warning;
+        out.push_back({{"process", f.process}, {"rule", f.rule}, {"part", f.part}, {"severity", to_string(f.severity)}, {"message", f.message}, {"fix", f.fix},
+                       {"value", f.value}, {"limit", f.limit}});
+        if (!as_json && f.severity != manufacturing::Severity::Info) {
+            std::cout << to_string(f.severity) << ": [" << f.process << "/" << f.rule << "] " << f.part << ": " << f.message << (f.fix.empty() ? "" : " -> " + f.fix) << '\n';
+        }
+    };
     for (const std::string& pname : split(o.process)) {
         const auto& rules = manufacturing::find_process(pname, extra);
-        for (const auto& c : m.components) {
-            if (c.features.volume <= 0) continue;
-            const geometry::ImportedPart* found = nullptr;
-            for (const auto& p : step_parts) {
-                if (p.name == c.features.name) found = &p;
-            }
-            if (!found) continue;
-            manufacturing::PartGeometry g;
-            g.name = c.features.name;
-            g.role = c.role;
-            g.thickness = c.features.thickness();
-            g.teeth = c.features.teeth;
-            g.module = c.gear ? c.gear->module : 0.0;
-            if (c.gear && c.gear->pressure_angle_deg > 5) g.pressure_angle_deg = c.gear->pressure_angle_deg;
-            try {
-                g.region = geometry::section_region(geometry::orient_dial_axis_to_z(found->shape, axis_of(o.up)), 0.5 * (c.features.z_min + c.features.z_max), 0.002, 0.002);
-            } catch (const Error&) {
-                continue;
-            }
-            for (const auto& f : manufacturing::run_dfm(rules, g)) {
-                errors += f.severity == manufacturing::Severity::Error;
-                warnings += f.severity == manufacturing::Severity::Warning;
-                out.push_back({{"process", f.process}, {"rule", f.rule}, {"part", f.part}, {"severity", to_string(f.severity)}, {"message", f.message}, {"fix", f.fix},
-                               {"value", f.value}, {"limit", f.limit}});
-                if (!as_json && f.severity != manufacturing::Severity::Info) {
-                    std::cout << to_string(f.severity) << ": [" << f.process << "/" << f.rule << "] " << f.part << ": " << f.message << (f.fix.empty() ? "" : " -> " + f.fix) << '\n';
-                }
-            }
+        for (const auto& g : parts) {
+            for (const auto& f : manufacturing::run_dfm(rules, g)) record(f);
+        }
+    }
+    for (const std::string& path : o.plugins) {
+        const auto plugin = plugins::DfmPlugin::load(path);
+        for (const auto& g : parts) {
+            for (const auto& f : plugin->check(g)) record(f);
         }
     }
     if (as_json) std::cout << json{{"errors", errors}, {"warnings", warnings}, {"findings", out}}.dump(2) << '\n';
@@ -285,6 +301,7 @@ int cmd_report(const MfgOptions& o, bool as_json) {
     ro.up = axis_of(o.up);
     ro.processes = split(o.process);
     ro.extra_rules = extra_rules(o);
+    ro.plugins = o.plugins;
     ro.tolerance_config = o.tolerance_file.empty() ? manufacturing::ToleranceConfig{} : manufacturing::load_tolerance(o.tolerance_file);
     ro.tolerance_config.samples = o.samples;
     ro.tolerance_config.seed = o.seed;
@@ -369,6 +386,7 @@ void add_manufacturing_commands(CLI::App& app, const bool& json_flag, std::funct
     f->add_option("--process", o->process, "Comma-separated processes (ohs dfm --list)")->capture_default_str();
     f->add_option("--rules", o->rules_file, "Your own rule sets (TOML, same format as data/dfm/rules.toml)")->check(CLI::ExistingFile);
     f->add_flag("--list", o->list, "List the processes and exit");
+    f->add_option("--plugin", o->plugins, "A DFM plugin (shared library, see docs/plugins.md); repeatable")->check(CLI::ExistingFile);
     f->callback([&chosen, &json_flag, o] {
         chosen = [&json_flag, o] {
             if (!o->list && o->project.empty()) throw Error("give a project file, or --list");
@@ -387,6 +405,7 @@ void add_manufacturing_commands(CLI::App& app, const bool& json_flag, std::funct
     r->add_option("--format", o->formats, "html, pdf or html,pdf")->capture_default_str();
     r->add_option("--process", o->process, "Processes for the DFM section")->capture_default_str();
     r->add_option("--rules", o->rules_file, "Your own DFM rule sets")->check(CLI::ExistingFile);
+    r->add_option("--plugin", o->plugins, "A DFM plugin library; repeatable")->check(CLI::ExistingFile);
     r->add_option("--tolerances", o->tolerance_file, "Tolerance table TOML")->check(CLI::ExistingFile);
     r->add_option("--calibre", o->calibre_file, "Calibre parameters TOML")->check(CLI::ExistingFile);
     r->add_option("--samples", o->samples, "Tolerance samples")->capture_default_str();

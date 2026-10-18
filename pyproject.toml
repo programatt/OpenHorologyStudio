@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+# `pip install .` builds the ohs extension and installs the Python package. It needs the same system
+# libraries as ./build.sh (Open CASCADE and the others listed in docs/install.md).
+[build-system]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "ohs"
+version = "1.0.0"
+description = "Open Horology Studio: design and analysis of watch movements"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: C++",
+    "License :: OSI Approved :: Apache Software License",
+    "Topic :: Scientific/Engineering",
+]
+
+[tool.scikit-build]
+cmake.version = ">=3.28"
+cmake.build-type = "Release"
+cmake.args = ["-DOHS_BUILD_PYTHON=ON", "-DOHS_BUILD_TESTS=OFF"]
+wheel.packages = ["python/ohs"]

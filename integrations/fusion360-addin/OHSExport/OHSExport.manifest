@@ -1,0 +1,13 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "addin",
+    "id": "5f2f5d86-6c0b-4a1a-9b39-0e5d5a2b9a11",
+    "author": "Open Horology Studio contributors",
+    "description": {
+        "": "Exports the active design as STEP AP242 plus a role preset for Open Horology Studio."
+    },
+    "version": "1.0.0",
+    "runOnStartup": false,
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

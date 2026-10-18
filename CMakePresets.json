@@ -17,16 +17,37 @@
     {
       "name": "asan", "inherits": "base",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "OHS_ASAN": "ON", "OHS_WARNINGS_AS_ERRORS": "ON" }
-    }
+    },
+    {
+      "name": "macos-release", "inherits": "base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "OHS_WARNINGS_AS_ERRORS": "ON", "CMAKE_PREFIX_PATH": "/opt/homebrew;/usr/local" }
+    },
+    {
+      "name": "windows-base", "hidden": true,
+      "generator": "Visual Studio 17 2022", "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": { "OHS_WARNINGS_AS_ERRORS": "OFF" }
+    },
+    { "name": "windows-release", "inherits": "windows-base" },
+    { "name": "windows-debug", "inherits": "windows-base" }
   ],
   "buildPresets": [
     { "name": "release", "configurePreset": "release" },
     { "name": "debug", "configurePreset": "debug" },
-    { "name": "asan", "configurePreset": "asan" }
+    { "name": "asan", "configurePreset": "asan" },
+    { "name": "macos-release", "configurePreset": "macos-release" },
+    { "name": "windows-release", "configurePreset": "windows-release", "configuration": "Release" },
+    { "name": "windows-debug", "configurePreset": "windows-debug", "configuration": "Debug" }
   ],
   "testPresets": [
     { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } },
     { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true } },
-    { "name": "asan", "configurePreset": "asan", "output": { "outputOnFailure": true } }
+    { "name": "asan", "configurePreset": "asan", "output": { "outputOnFailure": true } },
+    { "name": "macos-release", "configurePreset": "macos-release", "output": { "outputOnFailure": true } },
+    { "name": "windows-release", "configurePreset": "windows-release", "configuration": "Release", "output": { "outputOnFailure": true } },
+    { "name": "windows-debug", "configurePreset": "windows-debug", "configuration": "Debug", "output": { "outputOnFailure": true } }
   ]
 }

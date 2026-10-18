@@ -15,7 +15,9 @@
 #include "fea/calculix.hpp"
 #include "fea/fea.hpp"
 #include "fea/results.hpp"
+#include "gear/gear.hpp"
 #include "geometry/section.hpp"
+#include "manufacturing/gear_export.hpp"
 #include "mesh/tetmesh.hpp"
 
 using namespace ohs;
@@ -64,6 +66,48 @@ TEST_CASE("section of a plate with holes gives the outline and the bores") {
     CHECK(thin.rings[1].size() < region.rings[1].size() * 3);
     CHECK(area(thin.rings[1]) == Approx(std::numbers::pi * 0.25).epsilon(0.02));
     CHECK_THROWS_AS(geometry::section_region(plate_with_holes(), 5.0), Error);
+}
+
+TEST_CASE("section of a part with a pocket is not mistaken for an extrusion") {
+    // A 10 x 10 x 1 plate with a 4 x 4 pocket cut 0.5 deep from the top: below the pocket floor the
+    // section is the full plate, above it the plate has a hole. The bottom face alone cannot say that.
+    TopoDS_Shape plate = BRepPrimAPI_MakeBox(10, 10, 1).Shape();
+    const TopoDS_Shape pocket = BRepPrimAPI_MakeBox(gp_Pnt(3, 3, 0.5), 4, 4, 1).Shape();
+    plate = BRepAlgoAPI_Cut(plate, pocket).Shape();
+    auto area = [](const mesh::Ring& r) {
+        double a = 0;
+        for (std::size_t i = 0; i < r.size(); ++i) a += r[i].x * r[(i + 1) % r.size()].y - r[(i + 1) % r.size()].x * r[i].y;
+        return std::abs(0.5 * a);
+    };
+    const auto low = geometry::section_region(plate, 0.25);
+    REQUIRE(low.rings.size() == 1);
+    CHECK(area(low.rings[0]) == Approx(100.0));
+    const auto high = geometry::section_region(plate, 0.75);
+    REQUIRE(high.rings.size() == 2);
+    CHECK(area(high.rings[0]) == Approx(100.0));
+    CHECK(area(high.rings[1]) == Approx(16.0));
+}
+
+TEST_CASE("section of a generated spline wheel uses the extrusion shortcut and agrees with its outline") {
+    gear::GearSpec s;
+    s.teeth = 30;
+    s.module = 0.4;
+    s.bore_radius = 1.0;
+    const TopoDS_Shape solid = manufacturing::gear_solid(s, 0.5);
+    const auto region = geometry::section_region(solid, 0.25, 0.0005);
+    REQUIRE(region.rings.size() == 2);
+    auto area = [](const mesh::Ring& r) {
+        double a = 0;
+        for (std::size_t i = 0; i < r.size(); ++i) a += r[i].x * r[(i + 1) % r.size()].y - r[(i + 1) % r.size()].x * r[i].y;
+        return std::abs(0.5 * a);
+    };
+    gear::GearSpec fine = s;
+    fine.points_per_flank = 48;
+    CHECK(area(region.rings[0]) == Approx(area(gear::outline(fine))).epsilon(2e-3));
+    CHECK(area(region.rings[1]) == Approx(std::numbers::pi * 1.0).epsilon(1e-3));
+    // The same shape cut at a different height gives the same outline.
+    const auto other = geometry::section_region(solid, 0.1, 0.0005);
+    CHECK(area(other.rings[0]) == Approx(area(region.rings[0])).epsilon(1e-9));
 }
 
 TEST_CASE("a part under shock: mass, linearity in g, clamped holes, modes") {

@@ -13,7 +13,14 @@
 #include <spdlog/spdlog.h>
 
 #include "animation/gltf_animation.hpp"
+#include <Message.hxx>
+#include <Message_Messenger.hxx>
+#include <Message_PrinterOStream.hxx>
+#include <spdlog/sinks/stdout_sinks.h>
+
+#include "cli/cli_run.hpp"
 #include "cli/dynamics_cli.hpp"
+#include "cli/lessons_cli.hpp"
 #include "cli/fea_cli.hpp"
 #include "cli/manufacturing_cli.hpp"
 #include "app/import.hpp"
@@ -300,6 +307,11 @@ int cmd_gen_movement(const Options& o) {
 
 fs::path find_script(const std::string& name) {
     if (const char* dir = std::getenv("OHS_SCRIPTS_DIR")) return fs::path(dir) / "thirdparty" / name;
+    // The source tree first (development), then where the packages install it.
+    for (const char* base : {OHS_SOURCE_DIR "/scripts", "/usr/share/ohs/scripts", "/usr/local/share/ohs/scripts"}) {
+        const fs::path p = fs::path(base) / "thirdparty" / name;
+        if (fs::exists(p)) return p;
+    }
     return fs::path(OHS_SOURCE_DIR) / "scripts" / "thirdparty" / name;
 }
 
@@ -313,7 +325,16 @@ int cmd_om10_fetch(const Options& o) {
 
 }  // namespace
 
-int main(int argc, char** argv) {
+int ohs::cli::run(int argc, char** argv) {
+    // OCCT prints transfer statistics to standard output, which would corrupt --json output.
+    Message::DefaultMessenger()->RemovePrinters(STANDARD_TYPE(Message_PrinterOStream));
+    {
+        static const bool stderr_logging = [] {
+            spdlog::set_default_logger(spdlog::stderr_logger_mt("ohs"));
+            return true;
+        }();
+        (void)stderr_logging;
+    }
     Options o;
     CLI::App app{"Open Horology Studio: watch movement design and analysis", "ohs"};
     app.set_version_flag("--version", OHS_VERSION);
@@ -384,7 +405,7 @@ int main(int argc, char** argv) {
     third->require_subcommand(1);
     auto* om10 = third->add_subcommand("om10", "openmovement OM10");
     om10->require_subcommand(1);
-    auto* fetch = om10->add_subcommand("fetch", "Install and import a user-supplied OM10 STEP file");
+    auto* fetch = om10->add_subcommand("fetch", "Install and import a user-supplied OM10 STEP file. Options after the command go to scripts/thirdparty/fetch_om10.py: --file PATH, --accept, --no-import, --ohs PATH");
     fetch->allow_extras();
     fetch->callback([&] {
         o.om10_args = fetch->remaining();
@@ -395,6 +416,7 @@ int main(int argc, char** argv) {
     ohs::cli::add_dynamics_commands(app, o.json_output, custom);
     ohs::cli::add_fea_commands(app, o.json_output, custom);
     ohs::cli::add_manufacturing_commands(app, o.json_output, custom);
+    ohs::cli::add_lesson_commands(app, o.json_output, custom);
 
     try {
         app.parse(argc, argv);

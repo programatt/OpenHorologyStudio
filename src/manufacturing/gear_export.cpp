@@ -8,7 +8,12 @@
 
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
-#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <GC_MakeArcOfCircle.hxx>
+#include <GeomAPI_Interpolate.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <TColgp_HArray1OfPnt.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <gp_Ax2.hxx>
@@ -37,12 +42,46 @@ std::string num(double v, int prec = 3) {
 
 TopoDS_Shape gear_solid(const gear::GearSpec& spec, double thickness) {
     if (thickness <= 0) throw Error("the wheel needs a positive thickness");
-    const mesh::Ring ring = gear::outline(fine(spec));
-    BRepBuilderAPI_MakePolygon poly;
-    for (const auto& p : ring) poly.Add(gp_Pnt(p.x, p.y, 0));
-    poly.Close();
-    if (!poly.IsDone()) throw Error("the wheel outline could not be turned into a wire");
-    BRepBuilderAPI_MakeFace face(poly.Wire());
+    gear::outline(spec);  // validates the specification with the usual messages
+
+    // Exact geometry: per tooth two cubic splines through the flank points (fillet and involute
+    // together, tangent-continuous) and circular arcs for the tip and the root, a few hundred edges
+    // for a whole wheel instead of thousands of straight segments.
+    const mesh::Ring flank = gear::tooth_flank(fine(spec));
+    const double pitch = 2 * std::numbers::pi / spec.teeth;
+    auto point = [](const mesh::P2& p, double turn, bool mirror) {
+        const double y = mirror ? -p.y : p.y;
+        return gp_Pnt(p.x * std::cos(turn) - y * std::sin(turn), p.x * std::sin(turn) + y * std::cos(turn), 0);
+    };
+    auto spline = [&](double turn, bool mirror) {
+        Handle(TColgp_HArray1OfPnt) pts = new TColgp_HArray1OfPnt(1, static_cast<int>(flank.size()));
+        for (std::size_t i = 0; i < flank.size(); ++i) {
+            const std::size_t k = mirror ? flank.size() - 1 - i : i;  // the left side runs from the tip down to the root
+            pts->SetValue(static_cast<int>(i) + 1, point(flank[k], turn, mirror));
+        }
+        GeomAPI_Interpolate interpolate(pts, false, 1e-7);
+        interpolate.Perform();
+        if (!interpolate.IsDone()) throw Error("the tooth flank could not be interpolated");
+        return BRepBuilderAPI_MakeEdge(interpolate.Curve()).Edge();
+    };
+    auto arc = [&](const gp_Pnt& a, double mid_radius, double mid_angle, const gp_Pnt& b) {
+        const gp_Pnt mid(mid_radius * std::cos(mid_angle), mid_radius * std::sin(mid_angle), 0);
+        GC_MakeArcOfCircle maker(a, mid, b);
+        if (!maker.IsDone()) throw Error("an arc of the wheel outline could not be made");
+        return BRepBuilderAPI_MakeEdge(maker.Value()).Edge();
+    };
+    BRepBuilderAPI_MakeWire wire;
+    for (int t = 0; t < spec.teeth; ++t) {
+        const double turn = t * pitch;
+        const double tip_angle = turn;  // the tooth is centred on its own axis
+        wire.Add(spline(turn, false));
+        wire.Add(arc(point(flank.back(), turn, false), spec.tip_radius(), tip_angle, point(flank.back(), turn, true)));
+        wire.Add(spline(turn, true));
+        const gp_Pnt from = point(flank.front(), turn, true), to = point(flank.front(), turn + pitch, false);
+        wire.Add(arc(from, spec.root_radius(), turn + 0.5 * pitch, to));
+    }
+    if (!wire.IsDone()) throw Error("the wheel outline could not be turned into a wire");
+    BRepBuilderAPI_MakeFace face(wire.Wire(), true);
     if (!face.IsDone()) throw Error("the wheel outline could not be turned into a face");
     TopoDS_Shape solid = BRepPrimAPI_MakePrism(face.Face(), gp_Vec(0, 0, thickness)).Shape();
     if (spec.bore_radius > 0) {

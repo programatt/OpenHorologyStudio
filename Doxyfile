@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+# C++ API reference: `doxygen Doxyfile` writes docs-build/api/html.
+PROJECT_NAME           = "Open Horology Studio"
+PROJECT_BRIEF          = "Watch movement design and analysis"
+OUTPUT_DIRECTORY       = docs-build/api
+INPUT                  = src include README.md
+FILE_PATTERNS          = *.hpp *.h *.md
+RECURSIVE              = YES
+EXCLUDE_PATTERNS       = */cli/*
+USE_MDFILE_AS_MAINPAGE = README.md
+EXTRACT_ALL            = NO
+EXTRACT_STATIC         = NO
+JAVADOC_AUTOBRIEF      = YES
+QUIET                  = YES
+GENERATE_LATEX         = NO
+GENERATE_HTML          = YES
+WARN_IF_UNDOCUMENTED   = NO

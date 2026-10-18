@@ -400,6 +400,29 @@ TEST_CASE("ohs manufacturing commands end to end") {
         CHECK(bad.output.find("no cutter within") != std::string::npos);
         CHECK(run("dfm " + proj + " --process laser", dir).exit_code == 2);
         CHECK(run("dfm", dir).exit_code == 2);
+
+        // Plugins: the example rule set runs next to the built-in one; an incompatible ABI is refused.
+        const auto with_plugin = run("--json dfm " + proj + " --process wheel-cutting --plugin " + std::string(OHS_EXAMPLE_PLUGIN), dir);
+        REQUIRE(with_plugin.exit_code == 0);
+        bool plugin_finding = false;
+        const auto plugin_json = nlohmann::json::parse(with_plugin.output);
+        for (const auto& f : plugin_json["findings"]) {
+            if (f["process"] == "min-hole-example") {
+                plugin_finding = true;
+                CHECK(f["severity"] == "ok");  // the 1.6 mm bore is above the smallest drill
+                CHECK(f["part"] == "wheel20");
+            }
+        }
+        CHECK(plugin_finding);
+        const auto refused = run("dfm " + proj + " --plugin " + std::string(OHS_ABI_V2_PLUGIN), dir);
+        CHECK(refused.exit_code == 2);
+        CHECK(refused.error.find("built for plugin ABI 2.0") != std::string::npos);
+        CHECK(run("dfm " + proj + " --plugin " + std::string(OHS_NO_ENTRY_PLUGIN), dir).exit_code == 2);
+        CHECK(run("dfm " + proj + " --plugin /nonexistent.so", dir).exit_code == 2);
+        // A plugin that reports an error makes the command exit 1.
+        const auto many = run("--json dfm " + proj + " --process wheel-cutting --plugin " + std::string(OHS_MANY_PLUGIN), dir);
+        CHECK(many.exit_code == 1);
+        CHECK(nlohmann::json::parse(many.output)["errors"].get<int>() > 10);
     }
 
     SECTION("tolerance and collisions need a train: clear errors, not crashes") {
@@ -471,3 +494,74 @@ TEST_CASE("ohs manufacturing commands on the generated movement") {
     }
 }
 #endif
+
+TEST_CASE("ohs lesson commands end to end: every lesson can be done with the CLI alone") {
+    static const fs::path dir = [] {
+        const fs::path d = fs::temp_directory_path() / "ohs_cli_lessons_test";
+        fs::remove_all(d);
+        fs::create_directories(d);
+        return d;
+    }();
+
+    SECTION("list and show, with and without JSON") {
+        const auto list = run("--json lesson list", dir);
+        REQUIRE(list.exit_code == 0);
+        const auto j = nlohmann::json::parse(list.output);
+        REQUIRE(j.size() == 7);
+        CHECK(j[0]["id"] == "train");
+        CHECK(j[6]["id"] == "skeletonise");
+        const auto text = run("lesson list", dir);
+        CHECK(text.output.find("hairspring") != std::string::npos);
+
+        const auto show = run("lesson show train", dir);
+        REQUIRE(show.exit_code == 0);
+        CHECK(show.output.find("Lesson: Read the gear train  (demo movement)") != std::string::npos);
+        CHECK(show.output.find("840.0") != std::string::npos);
+        CHECK(show.output.find("Exercise") != std::string::npos);
+        const auto js = nlohmann::json::parse(run("--json lesson show hairspring", dir).output);
+        CHECK(js["kind"] == "study");
+        CHECK(js["steps"].size() == 3);
+        CHECK(run("lesson show astrology", dir).exit_code == 2);
+        CHECK(run("lesson", dir).exit_code == 2);
+    }
+
+    SECTION("gate: the reference solution of every lesson passes its check") {
+        struct Lesson {
+            const char* id;
+            const char* flag;
+        };
+        for (const Lesson l : {Lesson{"train", "--answer"}, Lesson{"timegrapher", "--answer"}, Lesson{"hairspring", "--study"}, Lesson{"mainspring", "--study"},
+                               Lesson{"escapement", "--study"}, Lesson{"jewelling", "--answer"}, Lesson{"skeletonise", "--cutout"}}) {
+            INFO(l.id);
+            const auto sol = run(std::string("--json lesson check ") + l.id + " --solution", dir);
+            REQUIRE(sol.exit_code == 0);
+            const std::string solution = nlohmann::json::parse(sol.output)["solution"];
+            std::string argument = solution;
+            if (std::string(l.flag) == "--study") {
+                const fs::path study = dir / (std::string(l.id) + ".toml");
+                std::ofstream(study) << solution;
+                argument = study.string();
+            }
+            const auto r = run(std::string("--json lesson check ") + l.id + " " + l.flag + " " + argument, dir);
+            CHECK(r.exit_code == 0);
+            const auto jr = nlohmann::json::parse(r.output);
+            CHECK(jr["passed"] == true);
+            CHECK_FALSE(jr["feedback"].empty());
+        }
+    }
+
+    SECTION("wrong work exits 1 with advice; missing input exits 2") {
+        const auto wrong = run("lesson check train --answer 12", dir);
+        CHECK(wrong.exit_code == 1);
+        CHECK(wrong.output.find("not yet") != std::string::npos);
+        CHECK(wrong.output.find("Not passed yet") != std::string::npos);
+        CHECK(run("lesson check train", dir).exit_code == 2);
+        CHECK(run("lesson check hairspring", dir).exit_code == 2);
+        std::ofstream(dir / "bad.toml") << "[study]\nname='x'\n[[change]]\nparameter='barrel_torque_nmm'\nscale=1.1\n";
+        const auto off_topic = run("--json lesson check hairspring --study " + (dir / "bad.toml").string(), dir);
+        CHECK(off_topic.exit_code == 1);
+        CHECK(off_topic.output.find("is not part of this exercise") != std::string::npos);
+        CHECK(run("lesson check skeletonise --cutout 20x9", dir).exit_code == 1);
+        CHECK(run("lesson check skeletonise --cutout big", dir).exit_code == 2);
+    }
+}
