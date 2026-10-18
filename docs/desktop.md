@@ -24,14 +24,18 @@ ohs-gui movement.hsproj
   or one escapement step per beat. An exploded view and a cut-away plane help you see inside.
 - **Simulate, Analyse, Manufacture, Report.** One button per analysis: torque chain, timekeeping,
   virtual timegrapher, cross-check of the models, tooth bending and shock of the selected part,
-  design for manufacture, collisions, tolerance stack-up, and the HTML and PDF report. Results show
-  in the Results dock, the commands and their messages in the Log dock.
+  design for manufacture, collisions, tolerance stack-up, and the HTML and PDF report. Each runs as
+  a job on a worker thread, so the window stays responsive; jobs run one at a time and the Jobs dock
+  lists them (double-click a queued job to cancel it). Results show in the Results dock, with a plot
+  of rate against amplitude after Timekeeping, and the commands and their messages in the Log dock.
+- **Edit, Undo and Redo** step through role changes made with *Set role of the selected part*.
 - **File, Save session as script** writes every command you ran as a shell script that repeats it.
 
 ## Not in the window
 
 The viewport draws with Qt's own painter, so it needs no GPU and runs anywhere, but it does not
-have the OpenCASCADE OpenGL viewer, PBR materials, motion trails or force arrows, and there are no
-plots, MP4 export, undo and redo or job queue yet: an analysis runs in the window's thread and the
-window waits for it. Use `ohs animate` for glTF, and `ohs report` for plots in the report. See
-[Limitations](limitations.md).
+have the OpenCASCADE OpenGL viewer, PBR materials, motion trails or force arrows, and there is no
+MP4 export. Jobs run on a thread of the window's process, not in separate worker processes, so a
+running job cannot be cancelled and a crashing solver would take the window with it; the job list
+does not survive a restart. The only plot is rate against amplitude, and only role changes can be
+undone. Use `ohs animate` for glTF, and `ohs report` for the report. See [Limitations](limitations.md).

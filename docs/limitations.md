@@ -9,8 +9,9 @@ know where to be careful.
   viewport, exploded and cut-away views, an animation timeline, the Explain panel and a button for
   every analysis. It is not the plan's full UI: the viewport is drawn with Qt's painter, not the
   OpenCASCADE OpenGL viewer or VTK, so there are no PBR materials, motion trails, force arrows,
-  field plots or mode-shape viewport; there are no plots, MP4 export or undo and redo; and an
-  analysis runs in the window's thread instead of a worker process with a job queue. It is built
+  field plots or mode-shape viewport and no MP4 export; there is one plot (rate against amplitude);
+  undo covers role changes only; and jobs run on a thread of the window's process, in a queue that
+  does not survive a restart, instead of in worker processes. It is built
   only with `-DOHS_BUILD_GUI=ON`, and has been exercised on Linux only (offscreen scripted test).
 - **No Chrono, MFEM or Netgen.** The detailed timekeeping model, the finite-element stack and the
   mesher are OHS's own (ADR 2 and 3). The detailed model is an independent cross-check of the

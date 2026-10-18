@@ -1,18 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <deque>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include <QFutureWatcher>
 #include <QMainWindow>
 #include <QString>
 #include <QStringList>
 
+#include "cli/cli_run.hpp"
+#include "gui/plot.hpp"
 #include "gui/scene.hpp"
 #include "gui/viewport.hpp"
 
 class QCheckBox;
+class QComboBox;
+class QListWidget;
+class QUndoStack;
 class QDoubleSpinBox;
 class QLabel;
 class QPlainTextEdit;
@@ -41,8 +48,21 @@ public:
     bool open_demo(const QString& dir);
     /// Runs `ohs <args>` in-process; logs the command and its output. Returns the exit code.
     int run_command(const QStringList& args, QString* out = nullptr);
-    /// Changes a part's role through `ohs rig set` and reloads.
+    /// Changes a part's role through `ohs rig set` and reloads. Not undoable; see change_role.
     bool set_role(const QString& part, const QString& role);
+    /// The undoable role change the rig page uses: pushes onto the undo stack.
+    bool change_role(const QString& part, const QString& role);
+    QUndoStack* undo_stack() const { return undo_; }
+
+    /// Queues `ohs <args>` to run on a worker thread so the window stays responsive. Jobs run one at
+    /// a time in order; a job that has not started yet can be cancelled.
+    void submit(const QString& label, const QStringList& args);
+    bool cancel_job(int index);
+    /// Blocks (keeping the window alive) until every queued job has finished.
+    void wait_for_jobs();
+    int unfinished_jobs() const;
+    QListWidget* job_list() const { return jobs_; }
+    PlotWidget* plot() const { return plot_; }
 
     void select_part(const QString& name);
     void set_time(double seconds);
@@ -74,6 +94,8 @@ private slots:
     void on_tree_changed();
     void on_tree_selected();
     void on_run_analysis();
+    void on_job_finished();
+    void on_apply_role();
 
 private:
     void build_ui();
@@ -83,6 +105,14 @@ private:
     void refresh_panels();
     QStringList with_project(QStringList args) const;
     void append_log(const QString& text);
+    void start_next_job();
+    void show_result(const QStringList& args, const QString& out, int code);
+
+    struct Job {
+        QString label;
+        QStringList args;
+        enum class State { Queued, Running, Done, Failed, Cancelled } state{State::Queued};
+    };
 
     Viewport* viewport_{};
     QTabWidget* workspaces_{};
@@ -100,6 +130,13 @@ private:
     QPushButton* play_{};
     QLabel* status_{};
     QTimer* timer_{};
+    QUndoStack* undo_{};
+    QListWidget* jobs_{};
+    PlotWidget* plot_{};
+    QComboBox* role_box_{};
+    std::vector<Job> job_log_;                       ///< every job, in submission order (the list shows these)
+    QFutureWatcher<cli::Captured> watcher_;
+    int running_job_{-1};
 
     std::shared_ptr<Scene> scene_;
     QString project_;

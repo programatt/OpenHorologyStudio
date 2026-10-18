@@ -14,6 +14,8 @@
 #include <QTableWidget>
 #include <QTabWidget>
 #include <QTreeWidget>
+#include <QListWidget>
+#include <QUndoStack>
 #include <QTreeWidgetItemIterator>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -157,11 +159,13 @@ TEST_CASE("gui: analyses run through the same commands as the CLI and the sessio
     auto* timekeeping = button(w, "Timekeeping");
     REQUIRE(timekeeping);
     timekeeping->click();
+    w.wait_for_jobs();
     CHECK(w.results()->toPlainText().contains("rate", Qt::CaseInsensitive));
 
     auto* dfm = button(w, "Design for manufacture");
     REQUIRE(dfm);
     dfm->click();
+    w.wait_for_jobs();
     CHECK_FALSE(w.results()->toPlainText().isEmpty());
 
     // Tooth bending needs a selected part.
@@ -173,6 +177,7 @@ TEST_CASE("gui: analyses run through the same commands as the CLI and the sessio
     auto* report = button(w, "Write the report (HTML and PDF)");
     REQUIRE(report);
     report->click();
+    w.wait_for_jobs();
     CHECK(QFile::exists(QDir(dir).filePath("report.html")));
     CHECK(QFile::exists(QDir(dir).filePath("report.pdf")));
 
@@ -211,4 +216,73 @@ TEST_CASE("gui: changing a role re-rigs the movement, and bad files are reported
     CHECK_FALSE(w.open_project("/nonexistent/none.hsproj"));
     CHECK(w.log_console()->toPlainText().contains("Cannot open"));
     CHECK(w.viewport()->scene() != nullptr);  // the previous project is still shown
+}
+
+TEST_CASE("gui: analyses run as queued jobs and the timekeeping plot is filled", "[gui]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_demo(fresh_dir("jobs")));
+
+    auto* tk = button(w, "Timekeeping");
+    auto* tor = button(w, "Torque chain");
+    REQUIRE(tk);
+    REQUIRE(tor);
+    tk->click();
+    tor->click();
+    // Timekeeping queues two jobs (the report and its plot data), then the torque chain.
+    CHECK(w.job_list()->count() == 3);
+    CHECK(w.unfinished_jobs() > 0);
+    // The window stays usable while they run: a queued job can be cancelled before it starts.
+    CHECK(w.cancel_job(2));
+    w.wait_for_jobs();
+    CHECK(w.unfinished_jobs() == 0);
+    CHECK(w.job_list()->item(0)->text().startsWith("done"));
+    CHECK(w.job_list()->item(1)->text().startsWith("done"));
+    CHECK(w.job_list()->item(2)->text().startsWith("cancelled"));
+
+    // Rate against amplitude from the full, half and low wind.
+    REQUIRE(w.plot()->points().size() == 3);
+    CHECK(w.plot()->points().front().first < w.plot()->points().back().first);
+    CHECK(coloured_pixels(w.plot()->render(QSize(400, 220))) > 1000);
+
+    // Cancelled jobs never ran: the torque chain is not in the history.
+    bool torque_ran = false;
+    for (const QString& h : w.history()) torque_ran |= h.startsWith("ohs torque");
+    CHECK_FALSE(torque_ran);
+}
+
+TEST_CASE("gui: role changes can be undone and redone", "[gui]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_demo(fresh_dir("undo")));
+    const auto role_of = [&](const QString& part) {
+        const auto& m = w.viewport()->scene()->movement();
+        return m.components[m.find_component(part.toStdString())].role;
+    };
+    const QString part = "barrel";
+    const auto original = role_of(part);
+    REQUIRE(original != ohs::model::Role::Plate);
+    const int mobiles = static_cast<int>(w.viewport()->scene()->movement().mobiles.size());
+
+    REQUIRE(w.change_role(part, "plate"));
+    CHECK(role_of(part) == ohs::model::Role::Plate);
+    CHECK(w.undo_stack()->count() == 1);
+    CHECK(w.undo_stack()->undoText().contains("barrel"));
+
+    w.undo_stack()->undo();
+    CHECK(role_of(part) == original);
+    CHECK(static_cast<int>(w.viewport()->scene()->movement().mobiles.size()) == mobiles);
+    CHECK(w.viewport()->scene()->can_animate());
+
+    w.undo_stack()->redo();
+    CHECK(role_of(part) == ohs::model::Role::Plate);
+    CHECK_FALSE(w.viewport()->scene()->can_animate());
+    w.undo_stack()->undo();
+    CHECK(w.viewport()->scene()->can_animate());
+
+    // The same role again is not a change.
+    REQUIRE(w.change_role(part, QString::fromUtf8(ohs::model::to_string(original).data())));
+    CHECK(w.undo_stack()->count() == 1);
 }

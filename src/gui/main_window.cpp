@@ -6,6 +6,13 @@
 #include <filesystem>
 
 #include <QApplication>
+#include <QComboBox>
+#include <QCoreApplication>
+#include <QListWidget>
+#include <QThread>
+#include <QUndoCommand>
+#include <QUndoStack>
+#include <QtConcurrent/QtConcurrentRun>
 #include <QRegularExpression>
 #include <QTreeWidgetItemIterator>
 #include <QCheckBox>
@@ -31,6 +38,8 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
+#include <nlohmann/json.hpp>
+
 #include "cli/cli_run.hpp"
 #include "core/error.hpp"
 #include "geometry/procedural.hpp"
@@ -46,6 +55,21 @@ QString shell_quote(const QString& s) {
     q.replace("'", "'\\''");
     return "'" + q + "'";
 }
+
+/// Changing a part's role, undoable: redo applies the new role, undo puts the old one back.
+class RoleCommand : public QUndoCommand {
+public:
+    RoleCommand(MainWindow* w, QString part, QString from, QString to)
+        : QUndoCommand(QObject::tr("Role of %1: %2 to %3").arg(part, from, to)),
+          w_(w), part_(std::move(part)), from_(std::move(from)), to_(std::move(to)) {}
+    void redo() override { ok = w_->set_role(part_, to_); }
+    void undo() override { w_->set_role(part_, from_); }
+    bool ok{false};
+
+private:
+    MainWindow* w_;
+    QString part_, from_, to_;
+};
 
 }  // namespace
 
@@ -110,6 +134,21 @@ void MainWindow::build_ui() {
     log_dock->setWidget(log_);
     addDockWidget(Qt::BottomDockWidgetArea, log_dock);
 
+    jobs_ = new QListWidget(this);
+    auto* jobs_dock = new QDockWidget(tr("Jobs"), this);
+    jobs_dock->setObjectName("jobs_dock");
+    jobs_dock->setWidget(jobs_);
+    addDockWidget(Qt::BottomDockWidgetArea, jobs_dock);
+    connect(&watcher_, &QFutureWatcher<cli::Captured>::finished, this, &MainWindow::on_job_finished);
+    connect(jobs_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem*) { cancel_job(jobs_->currentRow()); });
+
+    undo_ = new QUndoStack(this);
+    auto* edit = menuBar()->addMenu(tr("&Edit"));
+    edit->addAction(undo_->createUndoAction(this, tr("&Undo")));
+    edit->addAction(undo_->createRedoAction(this, tr("&Redo")));
+    edit->actions().at(0)->setShortcut(QKeySequence::Undo);
+    edit->actions().at(1)->setShortcut(QKeySequence::Redo);
+
     status_ = new QLabel(tr("No project open"), this);
     statusBar()->addWidget(status_);
 
@@ -157,6 +196,15 @@ QWidget* MainWindow::build_rig_page() {
     rig_table_->setSelectionBehavior(QAbstractItemView::SelectRows);
     layout->addWidget(new QLabel(tr("Rig confidence list (low confidence first-check these)")));
     layout->addWidget(rig_table_);
+    auto* role_row = new QHBoxLayout;
+    role_box_ = new QComboBox;
+    for (int r = static_cast<int>(model::Role::Unknown); r <= static_cast<int>(model::Role::Screw); ++r)
+        role_box_->addItem(QString::fromUtf8(model::to_string(static_cast<model::Role>(r)).data()));
+    auto* apply = new QPushButton(tr("Set role of the selected part (undoable)"));
+    role_row->addWidget(role_box_);
+    role_row->addWidget(apply, 1);
+    layout->addLayout(role_row);
+    connect(apply, &QPushButton::clicked, this, &MainWindow::on_apply_role);
     connect(rig_table_, &QTableWidget::itemSelectionChanged, this, [this] {
         const auto rows = rig_table_->selectionModel()->selectedRows();
         if (!rows.isEmpty() && !rebuilding_) select_part(rig_table_->item(rows.first().row(), 0)->text());
@@ -221,9 +269,15 @@ QWidget* MainWindow::build_analysis_page(const QString&, const std::vector<std::
         results_ = new QPlainTextEdit;
         results_->setReadOnly(true);
         results_->setPlaceholderText(tr("Results of the analyses appear here."));
+        plot_ = new PlotWidget;
+        auto* holder = new QWidget;
+        auto* hl = new QVBoxLayout(holder);
+        hl->setContentsMargins(0, 0, 0, 0);
+        hl->addWidget(plot_);
+        hl->addWidget(results_);
         auto* dock = new QDockWidget(tr("Results"), this);
         dock->setObjectName("results_dock");
-        dock->setWidget(results_);
+        dock->setWidget(holder);
         addDockWidget(Qt::BottomDockWidgetArea, dock);
     }
     layout->addStretch();
@@ -235,6 +289,7 @@ void MainWindow::append_log(const QString& text) {
 }
 
 int MainWindow::run_command(const QStringList& args, QString* out) {
+    wait_for_jobs();  // the command line runs one command at a time
     std::vector<std::string> a;
     for (const QString& s : args) a.push_back(s.toStdString());
     QStringList quoted;
@@ -440,9 +495,105 @@ void MainWindow::on_run_analysis() {
         } else if (a == "@report") args << QFileInfo(project_).dir().filePath("report");
         else args << a;
     }
-    QString out;
-    const int code = run_command(args, &out);
+    submit(static_cast<QPushButton*>(sender())->text(), args);
+    if (args.value(0) == "timekeeping") submit(tr("Timekeeping plot data"), {"--json", "timekeeping", project_});
+}
+
+bool MainWindow::change_role(const QString& part, const QString& role) {
+    if (!scene_) return false;
+    const int index = scene_->movement().find_component(part.toStdString());
+    if (index < 0) return false;
+    const QString from = QString::fromUtf8(model::to_string(scene_->movement().components[index].role).data());
+    if (from == role) return true;
+    auto* cmd = new RoleCommand(this, part, from, role);
+    undo_->push(cmd);  // runs redo()
+    return cmd->ok;
+}
+
+void MainWindow::on_apply_role() {
+    if (viewport_->selected().empty()) {
+        statusBar()->showMessage(tr("Select a part first"), 4000);
+        return;
+    }
+    change_role(QString::fromStdString(viewport_->selected()), role_box_->currentText());
+}
+
+int MainWindow::unfinished_jobs() const {
+    int n = 0;
+    for (const Job& j : job_log_)
+        if (j.state == Job::State::Queued || j.state == Job::State::Running) ++n;
+    return n;
+}
+
+void MainWindow::submit(const QString& label, const QStringList& args) {
+    job_log_.push_back({label, args, Job::State::Queued});
+    jobs_->addItem(tr("queued: %1").arg(label));
+    start_next_job();
+}
+
+bool MainWindow::cancel_job(int index) {
+    if (index < 0 || index >= static_cast<int>(job_log_.size()) || job_log_[index].state != Job::State::Queued) return false;
+    job_log_[index].state = Job::State::Cancelled;
+    jobs_->item(index)->setText(tr("cancelled: %1").arg(job_log_[index].label));
+    return true;
+}
+
+void MainWindow::start_next_job() {
+    if (running_job_ >= 0) return;
+    for (std::size_t i = 0; i < job_log_.size(); ++i) {
+        if (job_log_[i].state != Job::State::Queued) continue;
+        job_log_[i].state = Job::State::Running;
+        running_job_ = static_cast<int>(i);
+        jobs_->item(running_job_)->setText(tr("running: %1").arg(job_log_[i].label));
+        std::vector<std::string> a;
+        for (const QString& s : job_log_[i].args) a.push_back(s.toStdString());
+        watcher_.setFuture(QtConcurrent::run([a] { return cli::run_captured(a); }));
+        return;
+    }
+}
+
+void MainWindow::on_job_finished() {
+    if (running_job_ < 0) return;
+    Job& job = job_log_[running_job_];
+    const cli::Captured captured = watcher_.result();
+    QStringList quoted;
+    for (const QString& s : job.args) quoted << shell_quote(s);
+    history_ << "ohs " + quoted.join(' ');
+    append_log("$ ohs " + quoted.join(' '));
+    if (!captured.err.empty()) append_log(QString::fromStdString(captured.err).trimmed());
+    append_log(tr("exit code %1").arg(captured.exit_code));
+    job.state = captured.exit_code == 0 ? Job::State::Done : Job::State::Failed;
+    jobs_->item(running_job_)->setText(captured.exit_code == 0 ? tr("done: %1").arg(job.label)
+                                                               : tr("failed (%2): %1").arg(job.label).arg(captured.exit_code));
+    const QStringList args = job.args;
+    running_job_ = -1;
+    show_result(args, QString::fromStdString(captured.out), captured.exit_code);
+    start_next_job();
+}
+
+void MainWindow::show_result(const QStringList& args, const QString& out, int code) {
+    // The JSON timekeeping job only feeds the plot: rate against amplitude from the full, half and low wind.
+    if (args.size() >= 2 && args[0] == "--json" && args[1] == "timekeeping") {
+        if (code != 0) return;
+        try {
+            const auto j = nlohmann::json::parse(out.toStdString());
+            std::vector<std::pair<double, double>> pts;
+            for (const char* key : {"full", "half", "low"})
+                if (j.contains(key)) pts.emplace_back(j[key].at("amplitude_deg").get<double>(), j[key].at("rate_s_per_day").get<double>());
+            plot_->set_data(tr("Isochronism: rate against amplitude"), tr("amplitude (degrees)"), tr("rate (s/day)"), std::move(pts));
+        } catch (const std::exception& e) {
+            append_log(tr("Plot data unreadable: %1").arg(e.what()));
+        }
+        return;
+    }
     results_->setPlainText(out + (code == 0 ? QString() : tr("\n(exit code %1: see the log)").arg(code)));
+}
+
+void MainWindow::wait_for_jobs() {
+    while (unfinished_jobs() > 0) {
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+        QThread::msleep(5);
+    }
 }
 
 void MainWindow::on_open() {
