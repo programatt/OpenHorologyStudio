@@ -318,7 +318,16 @@ The reference test movements are **generated procedurally** by the test suite (a
 
 Claude builds Open Horology Studio alone, so the roadmap is ordered by milestones, not calendar months: each one is a vertical slice you can install and use on OM10, and each ends with a gate you check on your own machine. Progress is measured by gates passed, not time spent.
 
-&#91;embedded content: roadmap · 6 phases with exit gates\]
+| Milestone | Scope | Gate (you check it) |
+| --- | --- | --- |
+| **M0 Foundation: see your movement** | Build scripts, CI on 3 OSes, project file, CLI skeleton. OM10 STEP import, 3D viewer, exploded and section views. | You build from a fresh clone and open OM10 in the viewer. |
+| **M1 Movement model: watch it run** | Auto-rigging, gear fitting, kinematic animation. Explain panel: what each part does, gear ratio walkthrough. | OM10 animates; train gives 25,200 vph and 1 rpm seconds. |
+| **M2 Timekeeping: why it keeps time** | Torque chain, reduced escapement model, virtual timegrapher. What-if studies: baseline vs. modified, Chrono verification. | Simulation agrees with Chrono and your timegrapher trend. |
+| **M3 Structural analysis: will it hold** | Netgen meshing, MFEM static, modal, nonlinear; VTK results. Guided load-case setup, CalculiX cross-check, verification suite. | Benchmarks match hand calcs and converge as expected. |
+| **M4 Manufacturing: can you make it** | Tolerance Monte Carlo, DFM rules for your own tools, collisions. Gear generator to STEP/DXF, part drawings, HTML/PDF reports. | You make one part from a tool-generated drawing. |
+| **M5 Release 1.0: learn by doing** | Guided OM10 lessons, docs, installers, performance tuning. Python API freeze, plugin ABI 1.0, CAD add-ins. | You finish an OM10 mod study using only the guided lessons. |
+
+Six milestones to 1.0, each usable on its own and closed by a gate you check.
 
 **How a solo AI developer keeps this honest**
 
