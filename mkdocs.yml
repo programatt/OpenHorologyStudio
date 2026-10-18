@@ -25,6 +25,7 @@ nav:
       - Timekeeping: timekeeping.md
       - Structural analysis: structural.md
       - Manufacturing: manufacturing.md
+      - Desktop application: desktop.md
   - Learn:
       - Guided lessons: lessons.md
       - OM10 tutorial: om10.md

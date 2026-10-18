@@ -88,6 +88,20 @@ target_link_libraries(ohs PRIVATE ohs_cli)
 add_executable(ohs_perf ${PROJECT_SOURCE_DIR}/tests/perf/perf_main.cpp)
 target_link_libraries(ohs_perf PRIVATE ohs_lessons ohs_reports ohs_manufacturing ohs_fea ohs_gear ohs_dynamics)
 
+# ---- Qt desktop application (optional) --------------------------------------------------------------
+if(OHS_BUILD_GUI)
+  find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Concurrent)
+  set(CMAKE_AUTOMOC ON)
+  # The scene is Qt-free (tessellated parts, pose, exploded view, section) and tested without a display.
+  ohs_library(ohs_gui_scene gui/scene.cpp)
+  target_link_libraries(ohs_gui_scene PUBLIC ohs_geometry ohs_kinematics ohs_model)
+  ohs_library(ohs_gui gui/viewport.cpp gui/main_window.cpp)
+  target_link_libraries(ohs_gui PUBLIC ohs_gui_scene ohs_cli Qt6::Widgets)
+  add_executable(ohs-gui gui/gui_main.cpp)
+  target_link_libraries(ohs-gui PRIVATE ohs_gui)
+  install(TARGETS ohs-gui RUNTIME DESTINATION bin)
+endif()
+
 # ---- Python extension (optional) --------------------------------------------------------------------
 if(OHS_BUILD_PYTHON)
   find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development.Module)

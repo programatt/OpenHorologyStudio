@@ -19,6 +19,10 @@
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "OHS_ASAN": "ON", "OHS_WARNINGS_AS_ERRORS": "ON" }
     },
     {
+      "name": "gui", "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "OHS_WARNINGS_AS_ERRORS": "ON", "OHS_BUILD_GUI": "ON" }
+    },
+    {
       "name": "macos-release", "inherits": "base",
       "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "OHS_WARNINGS_AS_ERRORS": "ON", "CMAKE_PREFIX_PATH": "/opt/homebrew;/usr/local" }
@@ -38,6 +42,7 @@
     { "name": "release", "configurePreset": "release" },
     { "name": "debug", "configurePreset": "debug" },
     { "name": "asan", "configurePreset": "asan" },
+    { "name": "gui", "configurePreset": "gui" },
     { "name": "macos-release", "configurePreset": "macos-release" },
     { "name": "windows-release", "configurePreset": "windows-release", "configuration": "Release" },
     { "name": "windows-debug", "configurePreset": "windows-debug", "configuration": "Debug" }
@@ -46,6 +51,7 @@
     { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } },
     { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true } },
     { "name": "asan", "configurePreset": "asan", "output": { "outputOnFailure": true } },
+    { "name": "gui", "configurePreset": "gui", "output": { "outputOnFailure": true } },
     { "name": "macos-release", "configurePreset": "macos-release", "output": { "outputOnFailure": true } },
     { "name": "windows-release", "configurePreset": "windows-release", "configuration": "Release", "output": { "outputOnFailure": true } },
     { "name": "windows-debug", "configurePreset": "windows-debug", "configuration": "Debug", "output": { "outputOnFailure": true } }

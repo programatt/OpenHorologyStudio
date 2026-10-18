@@ -30,6 +30,17 @@ sudo apt install cmake ninja-build g++ git python3 \
 `build.sh` prints the install hint for whatever is missing. The `ohs` binary ends up in
 `build/release/src/ohs`.
 
+### Desktop application
+
+```
+sudo apt install qt6-base-dev          # or point CMAKE_PREFIX_PATH at any Qt 6.5+ (aqtinstall works)
+cmake --preset gui && cmake --build --preset gui && ctest --preset gui
+build/gui/src/ohs-gui
+```
+
+The `gui` preset turns on `OHS_BUILD_GUI`. The scripted window test runs on Qt's offscreen platform,
+so it needs no display. See [Desktop application](desktop.md).
+
 ### Python
 
 The Python package is built with nanobind when it is found:

@@ -5,9 +5,13 @@ know where to be careful.
 
 ## Not built yet
 
-- **No graphical user interface.** The plan's Qt/OCCT/VTK desktop UI (viewer, exploded and section
-  views, live animation timeline, Explain panel, plots, job queue) is not part of 1.0. Animation
-  exports to glTF, structural results to VTU for ParaView, reports to HTML and PDF.
+- **A basic graphical user interface.** `ohs-gui` ([Desktop application](desktop.md)) has a 3D
+  viewport, exploded and cut-away views, an animation timeline, the Explain panel and a button for
+  every analysis. It is not the plan's full UI: the viewport is drawn with Qt's painter, not the
+  OpenCASCADE OpenGL viewer or VTK, so there are no PBR materials, motion trails, force arrows,
+  field plots or mode-shape viewport; there are no plots, MP4 export or undo and redo; and an
+  analysis runs in the window's thread instead of a worker process with a job queue. It is built
+  only with `-DOHS_BUILD_GUI=ON`, and has been exercised on Linux only (offscreen scripted test).
 - **No Chrono, MFEM or Netgen.** The detailed timekeeping model, the finite-element stack and the
   mesher are OHS's own (ADR 2 and 3). The detailed model is an independent cross-check of the
   reduced one, not a full multibody contact simulation of every mobile. An adapter for the real

@@ -12,6 +12,7 @@ option(OHS_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 option(OHS_ASAN "Build with AddressSanitizer and UBSan" OFF)
 option(OHS_BUILD_TESTS "Build the test suite" ON)
 option(OHS_BUILD_PYTHON "Build the Python extension module (needs nanobind)" OFF)
+option(OHS_BUILD_GUI "Build the Qt 6 desktop application ohs-gui (needs Qt 6 Widgets)" OFF)
 
 find_package(OpenCASCADE REQUIRED)
 find_package(tomlplusplus REQUIRED)

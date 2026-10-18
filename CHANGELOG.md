@@ -25,6 +25,6 @@ First release.
   CLI reference, CPack packages, benchmarks.
 
 ### Not in this release
-See `docs/limitations.md`: no graphical user interface, no Chrono/MFEM/Netgen (OHS's own detailed
+See `docs/limitations.md`: only a basic Qt desktop application (`ohs-gui`, optional), no Chrono/MFEM/Netgen (OHS's own detailed
 model, finite elements and mesher stand in for them), no 3D volume meshing, involute gears only,
 Swiss lever escapement only, Windows and macOS builds configured but not exercised.
