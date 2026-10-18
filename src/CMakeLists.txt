@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 set(OHS_OCCT_LIBS
   TKernel TKMath TKG2d TKG3d TKGeomBase TKBRep TKGeomAlgo TKTopAlgo TKPrim TKBO TKBool
-  TKShHealing TKMesh TKXSBase TKLCAF TKCDF TKCAF TKXCAF TKBinXCAF TKBin TKBinL TKXDESTEP)
+  TKShHealing TKMesh TKXSBase TKIGES TKLCAF TKCDF TKCAF TKXCAF TKBinXCAF TKBin TKBinL TKXDESTEP)
 
 function(ohs_library name)
   add_library(${name} STATIC ${ARGN})
@@ -55,7 +55,7 @@ ohs_library(ohs_report report/drawing.cpp report/document.cpp)
 ohs_library(ohs_explain explain/explain.cpp)
 target_link_libraries(ohs_explain PUBLIC ohs_kinematics)
 
-ohs_library(ohs_geometry geometry/profile.cpp geometry/step_io.cpp geometry/features.cpp
+ohs_library(ohs_geometry geometry/profile.cpp geometry/step_io.cpp geometry/cad_io.cpp geometry/features.cpp
             geometry/procedural.cpp geometry/section.cpp)
 target_include_directories(ohs_geometry SYSTEM PUBLIC ${OpenCASCADE_INCLUDE_DIR})
 target_link_directories(ohs_geometry PUBLIC ${OpenCASCADE_LIBRARY_DIR})

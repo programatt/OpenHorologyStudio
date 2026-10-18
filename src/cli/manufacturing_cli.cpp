@@ -12,7 +12,7 @@
 #include "core/error.hpp"
 #include "dynamics/calibre.hpp"
 #include "geometry/section.hpp"
-#include "geometry/step_io.hpp"
+#include "geometry/cad_io.hpp"
 #include "kinematics/kinematics.hpp"
 #include "manufacturing/collision.hpp"
 #include "manufacturing/dfm.hpp"
@@ -87,7 +87,7 @@ std::vector<manufacturing::ProcessRules> extra_rules(const MfgOptions& o) {
 std::vector<geometry::ImportedPart> load_parts(const MfgOptions& o, const model::Movement& m) {
     fs::path step = o.step_override;
     if (step.empty()) step = fs::path(o.project).parent_path() / m.source_geometry;
-    return geometry::import_step(step);
+    return geometry::import_cad(step);
 }
 
 int cmd_gear(const MfgOptions& o, bool as_json) {

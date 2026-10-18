@@ -38,6 +38,7 @@ add_executable(ohs_tests
   unit/profile_test.cpp
   unit/rigging_test.cpp
   unit/geometry_test.cpp
+  unit/cad_io_test.cpp
   integration/pipeline_test.cpp
   integration/animation_test.cpp
   integration/cli_test.cpp)

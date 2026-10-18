@@ -6,6 +6,13 @@
 ohs import movement.step -o movement.hsproj --beat-rate 28800
 ```
 
+STEP is the format to use for an assembly. `ohs import` also reads IGES (`.igs`, `.iges`: every solid
+becomes a part named `part`, `part#2`, ... because IGES has no assembly names) and DXF (`.dxf`): the
+closed contours of a flat drawing (lines, arcs, circles, polylines with bulges, in the file's
+`$INSUNITS`) are chained, contours inside another become holes, and each outer contour is extruded
+into a part called `profile`. The thickness is the DXF's own (group 39) or 1 mm. A DXF made by
+`ohs gear --dxf ... --profile-only` comes back as the same wheel, tooth count and module included.
+
 `--up x|y|z|auto` names the CAD axis that is normal to the dial. The default, `auto`, takes the axis
 along which the parts are thinnest (wheels, plates and bridges are flat), and the project file
 remembers it, so later commands (`animate`, `dfm`, `report`, `draw`, `fea`) need no `--up`; give it

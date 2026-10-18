@@ -15,7 +15,7 @@ Options:
   -v,--verbose                Debug logging
 
 Subcommands:
-  import                      Import a STEP assembly and auto-rig it
+  import                      Import a STEP, IGES or DXF file and auto-rig it
   rig                         Inspect a rig
   animate                     Export the running train as an animated binary glTF (.glb) or OpenUSD text file (.usda)
   explain                     Explain a part or walk through the gear train with this movement's numbers
@@ -45,11 +45,11 @@ Subcommands:
 ### `ohs import`
 
 ```text
-Import a STEP assembly and auto-rig it
+Import a STEP, IGES or DXF file and auto-rig it
 Usage: ohs import [OPTIONS] step
 
 Positionals:
-  step TEXT:FILE REQUIRED     STEP file
+  step TEXT:FILE REQUIRED     CAD file: .step, .stp, .iges, .igs or .dxf (a DXF profile is extruded by its own thickness, else 1 mm)
 
 Options:
   -h,--help                   Print this help message and exit

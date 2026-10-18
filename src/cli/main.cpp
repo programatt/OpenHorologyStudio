@@ -27,7 +27,7 @@
 #include "core/error.hpp"
 #include "explain/explain.hpp"
 #include "geometry/procedural.hpp"
-#include "geometry/step_io.hpp"
+#include "geometry/cad_io.hpp"
 #include "kinematics/kinematics.hpp"
 #include "model/rig_io.hpp"
 #include "rigging/rigging.hpp"
@@ -263,7 +263,7 @@ int cmd_animate(const Options& o) {
 
     fs::path step = o.step_override;
     if (step.empty()) step = fs::path(o.project).parent_path() / m.source_geometry;
-    const auto parts = ohs::geometry::import_step(step);
+    const auto parts = ohs::geometry::import_cad(step);
 
     ohs::animation::AnimationOptions opt;
     opt.duration_seconds = o.duration;
@@ -364,8 +364,8 @@ int ohs::cli::run(int argc, char** argv) {
     int (*handler)(const Options&) = nullptr;
     auto pick = [&handler](int (*fn)(const Options&)) { return [&handler, fn] { handler = fn; }; };
 
-    auto* import = app.add_subcommand("import", "Import a STEP assembly and auto-rig it");
-    import->add_option("step", o.step_file, "STEP file")->required()->check(CLI::ExistingFile);
+    auto* import = app.add_subcommand("import", "Import a STEP, IGES or DXF file and auto-rig it");
+    import->add_option("step", o.step_file, "CAD file: .step, .stp, .iges, .igs or .dxf (a DXF profile is extruded by its own thickness, else 1 mm)")->required()->check(CLI::ExistingFile);
     import->add_option("-o,--output", o.project_out, "Project (rig) file to write")->required();
     import->add_flag("--auto-rig,!--no-auto-rig", o.auto_rig, "Infer roles, mobiles and meshes (default on)");
     import->add_option("--preset", o.preset_file, "Role preset TOML (name regex -> role)")->check(CLI::ExistingFile);

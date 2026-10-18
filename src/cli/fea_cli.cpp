@@ -16,7 +16,7 @@
 #include "fea/calculix.hpp"
 #include "fea/results.hpp"
 #include "geometry/features.hpp"
-#include "geometry/step_io.hpp"
+#include "geometry/cad_io.hpp"
 #include "kinematics/kinematics.hpp"
 #include "model/rig_io.hpp"
 
@@ -170,7 +170,7 @@ int cmd_fea(const FeaOptions& o, bool as_json) {
     } else if (o.case_name == "shock") {
         fs::path step = o.step_override;
         if (step.empty()) step = fs::path(o.project).parent_path() / rig.movement.source_geometry;
-        const auto parts = geometry::import_step(step);
+        const auto parts = geometry::import_cad(step);
         TopoDS_Shape shape;
         bool found = false;
         for (const auto& p : parts) {

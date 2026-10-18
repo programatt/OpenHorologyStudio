@@ -602,7 +602,7 @@ void MainWindow::on_open() {
 }
 
 void MainWindow::on_import() {
-    const QString step = QFileDialog::getOpenFileName(this, tr("Import STEP"), {}, tr("STEP (*.step *.stp)"));
+    const QString step = QFileDialog::getOpenFileName(this, tr("Import CAD file"), {}, tr("CAD files (*.step *.stp *.iges *.igs *.dxf);;STEP (*.step *.stp);;IGES (*.iges *.igs);;DXF (*.dxf)"));
     if (step.isEmpty()) return;
     import_step(step, QFileInfo(step).dir().filePath(QFileInfo(step).completeBaseName() + ".hsproj"), 0);
 }

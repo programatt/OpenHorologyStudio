@@ -9,12 +9,12 @@
 #include <spdlog/spdlog.h>
 
 #include "core/error.hpp"
-#include "geometry/step_io.hpp"
+#include "geometry/cad_io.hpp"
 
 namespace ohs::app {
 
 model::Movement import_movement(const std::filesystem::path& step_file, const ImportOptions& options) {
-    const auto parts = geometry::import_step(step_file);
+    const auto parts = geometry::import_cad(step_file);
     spdlog::info("read {} parts from {}", parts.size(), step_file.string());
 
     geometry::FeatureOptions feature_options = options.features;

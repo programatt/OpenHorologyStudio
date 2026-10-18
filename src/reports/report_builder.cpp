@@ -15,7 +15,7 @@
 #include "explain/explain.hpp"
 #include "geometry/features.hpp"
 #include "geometry/section.hpp"
-#include "geometry/step_io.hpp"
+#include "geometry/cad_io.hpp"
 #include "kinematics/kinematics.hpp"
 #include "manufacturing/collision.hpp"
 #include "rigging/rigging.hpp"
@@ -196,7 +196,7 @@ report::Document build_report(const model::Movement& m, const ReportOptions& o) 
     std::string geometry_note;
     if (!o.step_file.empty()) {
         try {
-            step_parts = geometry::import_step(o.step_file);
+            step_parts = geometry::import_cad(o.step_file);
         } catch (const Error& e) {
             geometry_note = e.what();
         }

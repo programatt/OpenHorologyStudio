@@ -15,6 +15,7 @@
 #include <TopoDS_Face.hxx>
 
 #include "core/error.hpp"
+#include "geometry/cad_io.hpp"
 #include "geometry/features.hpp"
 #include "model/rig_io.hpp"
 
@@ -64,7 +65,7 @@ Scene Scene::load(const std::filesystem::path& project, const std::filesystem::p
 
     std::filesystem::path step = step_override;
     if (step.empty()) step = project.parent_path() / s.movement_.source_geometry;
-    const auto imported = geometry::import_step(step);
+    const auto imported = geometry::import_cad(step);
     std::map<std::string, const geometry::ImportedPart*> by_name;
     for (const auto& p : imported) by_name[p.name] = &p;
 

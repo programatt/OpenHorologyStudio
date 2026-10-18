@@ -23,8 +23,12 @@ know where to be careful.
   that vary through the thickness are not seen by the mesher or by the DFM rules.
 - **No cycloidal gear profiles.** Gears are fitted and generated as involutes.
 - **Escapements:** the Swiss lever only. The architecture is ready for others.
-- **No HDF5 results**, no USD export, no IGES/DXF import, no STEP PMI tolerances: results are JSON,
-  CSV and VTU; tolerances come from a TOML table.
+- **No STEP PMI tolerances:** they come from a TOML table. HDF5 (`ohs fea --hdf5`) holds the
+  structural fields only; the timekeeping results are JSON and CSV.
+- **IGES and DXF import are plain.** IGES files carry no assembly names, so parts are called `part`,
+  `part#2` and so on (rename them with a preset). A DXF is a flat drawing: closed contours are
+  extruded into parts, with the thickness from the DXF (group 39) or 1 mm, and 3D DXF entities,
+  splines, ellipses and blocks are ignored.
 - **No mainspring coil contact or hairspring coil model.** The mainspring is a torque curve and the
   hairspring a stiffness from `E b h^3 / 12 L`.
 - **Windows and macOS** builds and installers are configured (CMake presets, CPack, CI workflow)

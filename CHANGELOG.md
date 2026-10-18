@@ -9,6 +9,8 @@ Semantic Versioning, with the Python API and the plugin ABI versioned as describ
 Found by running the plan's gates on the real OM10 file.
 
 ### Added
+- `ohs import` and every command that re-reads the CAD file accept IGES (`.igs`, `.iges`) and DXF
+  (`.dxf`) as well as STEP; `geometry::import_cad` dispatches by extension.
 - `ohs animate -o file.usda` exports the animation as OpenUSD text; the glTF and USD writers share
   their keyframe and tessellation code.
 - `ohs fea --hdf5` writes the mesh and result fields to an HDF5 file (optional `libhdf5`).
