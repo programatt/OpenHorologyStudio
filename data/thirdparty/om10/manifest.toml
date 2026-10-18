@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Known OM10 files. Hashes are filled in by a maintainer who has downloaded the file; until then
+# any file is accepted with a warning. Add entries as:
+#   [[file]]
+#   name = "om10-00001_20220701_va_01_3.stp"
+#   sha256 = "<hex digest>"

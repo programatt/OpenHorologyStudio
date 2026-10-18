@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+# Role preset for the OM10: part-name patterns and roles only, no geometry or dimensions.
+# The real OM10 part names are not known yet (the file is not in this repository), so no rules
+# ship here. After fetching the STEP file, run `ohs rig check` to see how it was classified and
+# add rules for anything misclassified:
+#
+#   [[rule]]
+#   match = "^some part name$"   # case-insensitive regex
+#   role = "wheel"               # see `ohs` role names: plate, bridge, barrel, arbor, wheel, ...

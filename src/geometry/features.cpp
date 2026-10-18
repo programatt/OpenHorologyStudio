@@ -1,0 +1,149 @@
+// SPDX-License-Identifier: Apache-2.0
+#include "geometry/features.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <numbers>
+#include <vector>
+
+#include <BRepAdaptor_Curve.hxx>
+#include <BRepAlgoAPI_Section.hxx>
+#include <BRepBndLib.hxx>
+#include <BRepGProp.hxx>
+#include <Bnd_Box.hxx>
+#include <GCPnts_AbscissaPoint.hxx>
+#include <GCPnts_UniformAbscissa.hxx>
+#include <GProp_GProps.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopLoc_Location.hxx>
+#include <TopoDS.hxx>
+#include <gp_Pln.hxx>
+#include <gp_Ax1.hxx>
+#include <gp_Trsf.hxx>
+
+#include "geometry/profile.hpp"
+
+namespace ohs::geometry {
+
+namespace {
+
+TopoDS_Shape orient_dial_axis_to_z(const TopoDS_Shape& shape, Axis axis) {
+    gp_Trsf t;
+    switch (axis) {
+        case Axis::Z: return shape;
+        case Axis::Y: t.SetRotation(gp_Ax1(gp::Origin(), gp::DX()), std::numbers::pi / 2); break;
+        case Axis::X: t.SetRotation(gp_Ax1(gp::Origin(), gp::DY()), -std::numbers::pi / 2); break;
+    }
+    return shape.Moved(TopLoc_Location(t));
+}
+
+std::uint64_t fnv1a(std::uint64_t h, long long v) {
+    for (int i = 0; i < 8; ++i) {
+        h ^= static_cast<std::uint64_t>((v >> (8 * i)) & 0xff);
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
+// Quantised to 1 um so the fingerprint survives a CAD round trip.
+std::uint64_t fingerprint(double volume, const double (&box)[6]) {
+    std::uint64_t h = 14695981039346656037ULL;
+    h = fnv1a(h, std::llround(volume * 1e3));
+    for (double v : box) h = fnv1a(h, std::llround(v * 1e3));
+    return h;
+}
+
+struct Outline {
+    std::vector<double> outer;  ///< max radius per angular bin, gaps filled
+    double min_radius{};        ///< smallest radius of any sampled point (bore if present)
+    bool ok{false};
+};
+
+Outline sample_outline(const TopoDS_Shape& shape, double z, double cx, double cy, const FeatureOptions& o) {
+    Outline out;
+    BRepAlgoAPI_Section section(shape, gp_Pln(gp_Pnt(0, 0, z), gp_Dir(0, 0, 1)));
+    if (!section.IsDone()) return out;
+
+    const int n = o.angular_bins;
+    std::vector<double> bins(n, -1.0);
+    double min_r = 1e300;
+    auto add = [&](const gp_Pnt& p) {
+        const double dx = p.X() - cx;
+        const double dy = p.Y() - cy;
+        const double r = std::hypot(dx, dy);
+        const double a = std::atan2(dy, dx) + std::numbers::pi;
+        const int bin = std::min(n - 1, static_cast<int>(a / (2 * std::numbers::pi) * n));
+        bins[bin] = std::max(bins[bin], r);
+        min_r = std::min(min_r, r);
+    };
+
+    for (TopExp_Explorer ex(section.Shape(), TopAbs_EDGE); ex.More(); ex.Next()) {
+        BRepAdaptor_Curve curve(TopoDS::Edge(ex.Current()));
+        add(curve.Value(curve.FirstParameter()));
+        add(curve.Value(curve.LastParameter()));
+        // Small closed edges (an arbor's circle) need a finer step to cover every angular bin.
+        const double length = GCPnts_AbscissaPoint::Length(curve);
+        GCPnts_UniformAbscissa samples(curve, std::min(o.sample_step, length / (2.0 * n)));
+        if (!samples.IsDone()) continue;
+        for (int i = 1; i <= samples.NbPoints(); ++i) add(curve.Value(samples.Parameter(i)));
+    }
+
+    // Fill empty bins from the nearest filled neighbours (circular, linear in index).
+    const int filled = static_cast<int>(std::count_if(bins.begin(), bins.end(), [](double r) { return r >= 0; }));
+    if (filled < n / 2) return out;
+    std::vector<double> full = bins;
+    for (int i = 0; i < n; ++i) {
+        if (bins[i] >= 0) continue;
+        int lo = 1;
+        while (bins[(i - lo + n) % n] < 0) ++lo;
+        int hi = 1;
+        while (bins[(i + hi) % n] < 0) ++hi;
+        const double a = bins[(i - lo + n) % n];
+        const double b = bins[(i + hi) % n];
+        full[i] = a + (b - a) * lo / (lo + hi);
+    }
+    out.outer = std::move(full);
+    out.min_radius = min_r;
+    out.ok = true;
+    return out;
+}
+
+}  // namespace
+
+model::PartFeatures extract_features(const ImportedPart& part, const FeatureOptions& options) {
+    model::PartFeatures f;
+    f.name = part.name;
+    const TopoDS_Shape shape = orient_dial_axis_to_z(part.shape, options.dial_axis);
+
+    GProp_GProps props;
+    BRepGProp::VolumeProperties(shape, props);
+    f.volume = std::abs(props.Mass());
+    if (f.volume < 1e-12) return f;
+
+    const gp_Pnt c = props.CentreOfMass();
+    f.center = {c.X(), c.Y()};
+
+    Bnd_Box box;
+    BRepBndLib::AddOptimal(shape, box, false, false);
+    double b[6];
+    box.Get(b[0], b[1], b[2], b[3], b[4], b[5]);
+    f.z_min = b[2];
+    f.z_max = b[5];
+    f.extent_x = b[3] - b[0];
+    f.extent_y = b[4] - b[1];
+    f.fingerprint = fingerprint(f.volume, b);
+
+    const Outline outline = sample_outline(shape, 0.5 * (f.z_min + f.z_max), c.X(), c.Y(), options);
+    if (!outline.ok) return f;
+
+    f.outer_radius = *std::max_element(outline.outer.begin(), outline.outer.end());
+    const double root = *std::min_element(outline.outer.begin(), outline.outer.end());
+    if (outline.min_radius < 0.9 * root) f.bore_radius = outline.min_radius;
+
+    const ToothResult teeth = detect_teeth(outline.outer, options.min_teeth);
+    f.teeth = teeth.teeth;
+    f.tooth_confidence = teeth.confidence;
+    return f;
+}
+
+}  // namespace ohs::geometry

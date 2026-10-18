@@ -1,0 +1,66 @@
+// SPDX-License-Identifier: Apache-2.0
+#include "model/model.hpp"
+
+#include <array>
+#include <utility>
+
+namespace ohs::model {
+
+namespace {
+constexpr std::array<std::pair<Role, std::string_view>, 15> kRoleNames{{
+    {Role::Unknown, "unknown"},
+    {Role::Plate, "plate"},
+    {Role::Bridge, "bridge"},
+    {Role::Barrel, "barrel"},
+    {Role::Mainspring, "mainspring"},
+    {Role::Arbor, "arbor"},
+    {Role::Wheel, "wheel"},
+    {Role::Pinion, "pinion"},
+    {Role::EscapeWheel, "escape_wheel"},
+    {Role::PalletFork, "pallet_fork"},
+    {Role::Balance, "balance"},
+    {Role::Hairspring, "hairspring"},
+    {Role::Roller, "roller"},
+    {Role::Jewel, "jewel"},
+    {Role::Screw, "screw"},
+}};
+}  // namespace
+
+std::string_view to_string(Role role) {
+    for (const auto& [r, name] : kRoleNames) {
+        if (r == role) return name;
+    }
+    return "unknown";
+}
+
+std::optional<Role> role_from_string(std::string_view text) {
+    for (const auto& [r, name] : kRoleNames) {
+        if (name == text) return r;
+    }
+    return std::nullopt;
+}
+
+bool is_toothed_role(Role role) {
+    return role == Role::Wheel || role == Role::Pinion || role == Role::EscapeWheel ||
+           role == Role::Barrel;
+}
+
+bool is_rotating_role(Role role) {
+    return is_toothed_role(role) || role == Role::Arbor || role == Role::Balance ||
+           role == Role::Roller;
+}
+
+int Movement::mobile_of(int component) const {
+    for (std::size_t m = 0; m < mobiles.size(); ++m) {
+        for (int c : mobiles[m].components) {
+            if (c == component) return static_cast<int>(m);
+        }
+    }
+    return -1;
+}
+
+double module_from_tip(double outer_radius, int teeth) {
+    return teeth > 0 ? 2.0 * outer_radius / (teeth + 2) : 0.0;
+}
+
+}  // namespace ohs::model

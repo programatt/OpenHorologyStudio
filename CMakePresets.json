@@ -1,0 +1,32 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 28, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base", "hidden": true, "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}"
+    },
+    {
+      "name": "release", "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "OHS_WARNINGS_AS_ERRORS": "ON" }
+    },
+    {
+      "name": "debug", "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "OHS_WARNINGS_AS_ERRORS": "ON" }
+    },
+    {
+      "name": "asan", "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "OHS_ASAN": "ON", "OHS_WARNINGS_AS_ERRORS": "ON" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "release", "configurePreset": "release" },
+    { "name": "debug", "configurePreset": "debug" },
+    { "name": "asan", "configurePreset": "asan" }
+  ],
+  "testPresets": [
+    { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } },
+    { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true } },
+    { "name": "asan", "configurePreset": "asan", "output": { "outputOnFailure": true } }
+  ]
+}

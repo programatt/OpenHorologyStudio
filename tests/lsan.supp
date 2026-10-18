@@ -1,0 +1,2 @@
+# OCCT allocates process-lifetime static registries (interface parameters, drivers) it never frees.
+leak:libTK

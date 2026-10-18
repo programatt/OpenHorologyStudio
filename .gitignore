@@ -1,0 +1,43 @@
+build/
+.vcpkg/
+*.hsproj
+# Third-party CAD (e.g. openmovement OM10, CC BY-SA 3.0) must never be committed.
+*.stp
+*.step
+*.STP
+*.STEP
+*.igs
+*.iges
+!tests/generated/**
+
+# C++ / CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+compile_commands.json
+install_manifest.txt
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.out
+*.gch
+*.pch
+*.d
+*.log
+
+# Tooling and editors
+.cache/
+.clangd/
+.vscode/
+.idea/
+*.swp
+.DS_Store
