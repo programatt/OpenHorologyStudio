@@ -320,12 +320,12 @@ Claude builds Open Horology Studio alone, so the roadmap is ordered by milestone
 
 | Milestone | Status | Scope | Gate (you check it) |
 | --- | --- | --- | --- |
-| [x] **M0 Foundation: see your movement** | Build scripts, CI on 3 OSes, project file, CLI skeleton. OM10 STEP import, 3D viewer, exploded and section views. | You build from a fresh clone and open OM10 in the viewer. |
-| **M1 Movement model: watch it run** | Completed (see notes) | Auto-rigging, gear fitting, kinematic animation. Explain panel: what each part does, gear ratio walkthrough. | OM10 animates; train gives 25,200 vph and 1 rpm seconds. |
-| **M2 Timekeeping: why it keeps time** | Not started | Torque chain, reduced escapement model, virtual timegrapher. What-if studies: baseline vs. modified, Chrono verification. | Simulation agrees with Chrono and your timegrapher trend. |
-| **M3 Structural analysis: will it hold** | Not started | Netgen meshing, MFEM static, modal, nonlinear; VTK results. Guided load-case setup, CalculiX cross-check, verification suite. | Benchmarks match hand calcs and converge as expected. |
-| **M4 Manufacturing: can you make it** | Not started | Tolerance Monte Carlo, DFM rules for your own tools, collisions. Gear generator to STEP/DXF, part drawings, HTML/PDF reports. | You make one part from a tool-generated drawing. |
-| **M5 Release 1.0: learn by doing** | Not started | Guided OM10 lessons, docs, installers, performance tuning. Python API freeze, plugin ABI 1.0, CAD add-ins. | You finish an OM10 mod study using only the guided lessons. |
+| [x] **M0 Foundation: see your movement** | Completed (see notes) | Build scripts, CI on 3 OSes, project file, CLI skeleton. OM10 STEP import, 3D viewer, exploded and section views. | You build from a fresh clone and open OM10 in the viewer. |
+| [x] **M1 Movement model: watch it run** | Completed (see notes) | Auto-rigging, gear fitting, kinematic animation. Explain panel: what each part does, gear ratio walkthrough. | OM10 animates; train gives 25,200 vph and 1 rpm seconds. |
+| [ ] **M2 Timekeeping: why it keeps time** | Not started | Torque chain, reduced escapement model, virtual timegrapher. What-if studies: baseline vs. modified, Chrono verification. | Simulation agrees with Chrono and your timegrapher trend. |
+| [ ] **M3 Structural analysis: will it hold** | Not started | Netgen meshing, MFEM static, modal, nonlinear; VTK results. Guided load-case setup, CalculiX cross-check, verification suite. | Benchmarks match hand calcs and converge as expected. |
+| [ ] **M4 Manufacturing: can you make it** | Not started | Tolerance Monte Carlo, DFM rules for your own tools, collisions. Gear generator to STEP/DXF, part drawings, HTML/PDF reports. | You make one part from a tool-generated drawing. |
+| [ ] **M5 Release 1.0: learn by doing** | Not started | Guided OM10 lessons, docs, installers, performance tuning. Python API freeze, plugin ABI 1.0, CAD add-ins. | You finish an OM10 mod study using only the guided lessons. |
 
 Six milestones to 1.0, each usable on its own and closed by a gate you check.
 
