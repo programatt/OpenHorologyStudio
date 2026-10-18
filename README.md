@@ -21,8 +21,8 @@ user guide.
 | Learn by doing | `ohs lesson list`, `ohs lesson show`, `ohs lesson check` |
 | Trust the solvers | `ohs verify physics --full`, `ohs verify levels` |
 
-Not in 1.0: the full graphical interface (`ohs-gui` is a first, basic one: [`docs/desktop.md`](docs/desktop.md)), the real Chrono/MFEM/Netgen libraries (OHS's own models
-stand in for them), 3D volume meshing, cycloidal gear profiles and escapements other than the Swiss
+Not in 1.0: the full graphical interface (`ohs-gui` is a first, basic one: [`docs/desktop.md`](docs/desktop.md)), MFEM/Netgen/VTK (OHS's own models stand in for them; Chrono is
+an optional adapter for the escapement, `-DOHS_WITH_CHRONO=ON`), 3D volume meshing, cycloidal gear profiles and escapements other than the Swiss
 lever. [`docs/limitations.md`](docs/limitations.md) is the full list.
 
 ## Build

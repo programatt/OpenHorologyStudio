@@ -236,7 +236,9 @@ TEST_CASE("CalculiX input deck and result parser") {
     fea::Model model;
     model.material = brass();
     model.mesh = mesh::extrude(mesh::structured_rect(0, 0, 2, 1, 2, 1), 0, 1, 1, 2);
-    for (int n : mesh::nodes_where(model.mesh, [](const V3& p) { return p.x < 1e-9; })) model.fixed.push_back({n, 0});
+    for (int n : mesh::nodes_where(model.mesh, [](const V3& p) { return p.x < 1e-9; })) {
+        for (int comp = 0; comp < 3; ++comp) model.fixed.push_back({n, comp});  // fully clamped, or the solvers split the rigid-body modes differently
+    }
     fea::Vec load = fea::Vec::Zero(model.dofs());
     fea::add_point_load(load, 5, {0, 0, -3.5});
     const std::string deck = fea::write_calculix_input(model, load);
