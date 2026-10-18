@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -12,6 +13,7 @@
 #include <spdlog/spdlog.h>
 
 #include "animation/gltf_animation.hpp"
+#include "cli/dynamics_cli.hpp"
 #include "app/import.hpp"
 #include "core/error.hpp"
 #include "explain/explain.hpp"
@@ -387,6 +389,9 @@ int main(int argc, char** argv) {
         handler = cmd_om10_fetch;
     });
 
+    std::function<int()> custom;
+    ohs::cli::add_dynamics_commands(app, o.json_output, custom);
+
     try {
         app.parse(argc, argv);
     } catch (const CLI::ParseError& e) {
@@ -394,7 +399,8 @@ int main(int argc, char** argv) {
     }
     spdlog::set_level(o.verbose ? spdlog::level::debug : spdlog::level::warn);
     try {
-        return handler ? handler(o) : kExitError;
+        if (handler) return handler(o);
+        return custom ? custom() : kExitError;
     } catch (const ohs::Error& e) {
         std::cerr << "error: " << e.what() << '\n';
         return kExitError;
