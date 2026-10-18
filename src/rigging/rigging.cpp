@@ -156,6 +156,10 @@ void fit_gears(Movement& m, const RigOptions& o) {
 }  // namespace
 
 void infer_structure(Movement& m, const RigOptions& options) {
+    std::vector<model::MeshJoint> manual;
+    for (const model::MeshJoint& j : m.meshes) {
+        if (j.manual) manual.push_back(j);
+    }
     m.mobiles.clear();
     m.meshes.clear();
     const int n = static_cast<int>(m.components.size());
@@ -220,6 +224,39 @@ void infer_structure(Movement& m, const RigOptions& options) {
             }
         }
     }
+    // Declared meshes survive re-inference (component indices do not change) when both parts are
+    // still on rotating mobiles; one the geometry also found is just marked as declared.
+    for (const model::MeshJoint& j : manual) {
+        if (m.mobile_of(j.a) < 0 || m.mobile_of(j.b) < 0 || m.mobile_of(j.a) == m.mobile_of(j.b)) continue;
+        bool found = false;
+        for (model::MeshJoint& existing : m.meshes) {
+            if ((existing.a == j.a && existing.b == j.b) || (existing.a == j.b && existing.b == j.a)) {
+                existing.manual = true;
+                found = true;
+            }
+        }
+        if (!found) m.meshes.push_back(j);
+    }
+    fit_gears(m, options);
+}
+
+void add_manual_mesh(Movement& m, const std::string& a, const std::string& b, const RigOptions& options) {
+    const int ia = m.find_component(a);
+    const int ib = m.find_component(b);
+    if (ia < 0) throw Error("no component named '" + a + "'");
+    if (ib < 0) throw Error("no component named '" + b + "'");
+    if (ia == ib) throw Error("a part cannot mesh with itself");
+    if (m.mobile_of(ia) < 0 || m.mobile_of(ib) < 0) {
+        throw Error("both parts must be on rotating mobiles (set a role such as wheel, pinion or barrel first)");
+    }
+    if (m.mobile_of(ia) == m.mobile_of(ib)) throw Error("both parts are on the same mobile, so they cannot mesh");
+    const int za = m.components[ia].features.teeth, zb = m.components[ib].features.teeth;
+    if (za <= 0 || zb <= 0) throw Error("both parts need a tooth count; '" + (za <= 0 ? a : b) + "' has none detected");
+    for (const model::MeshJoint& j : m.meshes) {
+        if ((j.a == ia && j.b == ib) || (j.a == ib && j.b == ia)) return;  // already meshed
+    }
+    const double centre = distance(m.components[ia].features.center, m.components[ib].features.center);
+    m.meshes.push_back({ia, ib, centre, 2.0 * centre / (za + zb), 1.0, true});
     fit_gears(m, options);
 }
 

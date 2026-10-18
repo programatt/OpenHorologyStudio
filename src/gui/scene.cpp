@@ -50,9 +50,11 @@ std::vector<Triangle> tessellate(const TopoDS_Shape& shape, double deflection, d
 }  // namespace
 
 Scene Scene::load(const std::filesystem::path& project, const std::filesystem::path& step_override,
-                  geometry::Axis dial_axis, double beat_rate_vph) {
+                  double beat_rate_vph) {
     Scene s;
     s.movement_ = model::load_rig(project);
+    const auto dial_axis = s.movement_.dial_axis == "x" ? geometry::Axis::X
+                           : s.movement_.dial_axis == "y" ? geometry::Axis::Y : geometry::Axis::Z;
     const double vph = beat_rate_vph > 0 ? beat_rate_vph : s.movement_.beat_rate_vph;
     try {
         s.train_ = kinematics::analyze_train(s.movement_, vph);

@@ -37,6 +37,12 @@ figures. A result is only as good as the numbers you give it: calibrate against 
 ## Known modelling limits
 
 - Collisions are swept in 2D from the assembled pose, over one tooth pitch or one revolution.
+  Everything outside the gear train is treated as stationary, so the pallet fork, which really
+  swings, overlaps the escape wheel at rest: read those pairs as the escapement, not as a clash.
+- The dial axis is found from part shapes (the axis along which parts are thinnest). A movement
+  whose parts are mostly pins and shafts can fool it: pass `--up`.
+- A smooth barrel drum has no teeth to find, so its mesh with the centre pinion cannot be inferred:
+  declare it (`ohs rig mesh`, or a `[[mesh]]` rule in a preset).
 - The reduced timekeeping model treats the lever and roller as an ideal kinematic coupling with
   an efficiency, a drop and an unlocking friction; it does not model banking, safety action or
   shock.

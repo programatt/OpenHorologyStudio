@@ -113,6 +113,7 @@ std::string to_toml(const Movement& m) {
     movement.insert("name", m.name);
     movement.insert("source_geometry", m.source_geometry);
     movement.insert("beat_rate_vph", m.beat_rate_vph);
+    movement.insert("dial_axis", m.dial_axis);
     root.insert("movement", std::move(movement));
 
     toml::array components;
@@ -140,6 +141,7 @@ std::string to_toml(const Movement& m) {
         t.insert("centre_distance", j.centre_distance);
         t.insert("module", j.module);
         t.insert("confidence", j.confidence);
+        if (j.manual) t.insert("manual", true);
         joints.push_back(std::move(t));
     }
     root.insert("joint", std::move(joints));
@@ -169,6 +171,7 @@ Movement from_toml(std::string_view text) {
         m.name = (*mv)["name"].value_or(std::string{});
         m.source_geometry = (*mv)["source_geometry"].value_or(std::string{});
         m.beat_rate_vph = (*mv)["beat_rate_vph"].value_or(0.0);
+        m.dial_axis = (*mv)["dial_axis"].value_or(std::string{"z"});
     }
 
     auto index_of = [&m](const std::string& name) {
@@ -208,6 +211,7 @@ Movement from_toml(std::string_view text) {
             j.centre_distance = number(*t, "centre_distance");
             j.module = number(*t, "module");
             j.confidence = number(*t, "confidence");
+            j.manual = (*t)["manual"].value_or(false);
             m.meshes.push_back(j);
         }
     }

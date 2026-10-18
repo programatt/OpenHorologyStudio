@@ -33,9 +33,6 @@ TrainAnalysis analyze_train(const Movement& m, double beat_rate_vph, int root) {
             }
         }
     }
-    if (root < 0 || root >= nm) throw Error("no root mobile: the rig has no barrel and none was given");
-    out.root = root;
-
     // Adjacency over gear meshes: omega_b = -omega_a * teeth_a / teeth_b.
     struct Edge { int to; double factor; };
     std::vector<std::vector<Edge>> adj(nm);
@@ -48,6 +45,41 @@ TrainAnalysis analyze_train(const Movement& m, double beat_rate_vph, int root) {
         adj[ma].push_back({mb, -za / zb});
         adj[mb].push_back({ma, -zb / za});
     }
+
+    // No barrel (a smooth barrel drum has no teeth to find, so it is often missing from CAD rigs):
+    // start the train at the far end of the gear chain that leads to the escape wheel.
+    if (root < 0) {
+        int escape = -1;
+        for (int i = 0; i < nm && escape < 0; ++i) {
+            for (int c : m.mobiles[i].components) {
+                if (m.components[c].role == Role::EscapeWheel) escape = i;
+            }
+        }
+        if (escape >= 0) {
+            std::vector<int> hops(nm, -1);
+            std::queue<int> q;
+            hops[escape] = 0;
+            q.push(escape);
+            int far = escape;
+            while (!q.empty()) {
+                const int cur = q.front();
+                q.pop();
+                if (hops[cur] > hops[far]) far = cur;
+                for (const Edge& e : adj[cur]) {
+                    if (hops[e.to] < 0) {
+                        hops[e.to] = hops[cur] + 1;
+                        q.push(e.to);
+                    }
+                }
+            }
+            if (far != escape) {
+                root = far;
+                out.warnings.push_back("no barrel in the rig: the train starts at " + m.mobiles[root].name + ", the far end of the gear chain from the escape wheel (set a barrel or pass a root to change this)");
+            }
+        }
+    }
+    if (root < 0 || root >= nm) throw Error("no root mobile: the rig has no barrel and none was given");
+    out.root = root;
 
     out.mobiles[root].reached = true;
     out.mobiles[root].ratio = 1.0;

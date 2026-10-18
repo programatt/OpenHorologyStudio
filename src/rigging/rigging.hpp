@@ -52,6 +52,12 @@ void infer_structure(model::Movement& movement, const RigOptions& options);
 /// Throws ohs::Error if there is no component called `name`.
 void set_role(model::Movement& movement, const std::string& name, model::Role role, const RigOptions& options);
 
+/// Declares that two toothed parts mesh although the geometry does not show it (a smooth barrel
+/// drum, a simplified model). The module follows from the centre distance and the tooth counts.
+/// The mesh is kept whenever the structure is re-inferred. Throws ohs::Error if either part is
+/// missing, is not on a rotating mobile, has no teeth, or both are on the same mobile.
+void add_manual_mesh(model::Movement& movement, const std::string& a, const std::string& b, const RigOptions& options);
+
 enum class Severity { Info, Warning, Error };
 
 struct Issue {

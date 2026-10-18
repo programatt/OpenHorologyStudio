@@ -163,9 +163,9 @@ void MainWindow::build_ui() {
     file->addSeparator();
     file->addAction(tr("&Quit"), QKeySequence::Quit, this, &QWidget::close);
     auto* view = menuBar()->addMenu(tr("&View"));
-    view->addAction(tr("Top (dial side)"), this, [this] { viewport_->set_view(0, -90); });
+    view->addAction(tr("Top (dial side)"), this, [this] { viewport_->set_view(0, 0); });
     view->addAction(tr("Isometric"), this, [this] { viewport_->set_view(35, -55); });
-    view->addAction(tr("Side"), this, [this] { viewport_->set_view(0, -5); });
+    view->addAction(tr("Side"), this, [this] { viewport_->set_view(0, -90); });
     view->addAction(tr("Fit"), this, [this] { viewport_->fit(); });
 
     timer_ = new QTimer(this);

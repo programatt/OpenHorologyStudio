@@ -146,6 +146,43 @@ TEST_CASE("a part under shock: mass, linearity in g, clamped holes, modes") {
     CHECK_THROWS_AS(cases::run_part_case(in), Error);
 }
 
+TEST_CASE("a window or slot is not a support: only round pivot holes are clamped") {
+    cases::PartCaseInput in;
+    in.element_size = 0.4;
+    in.material = brass();
+    in.shock_g = 1000;
+
+    in.shape = plate_with_holes();
+    const cases::PartCaseResult solid = cases::run_part_case(in);
+    CHECK(solid.clamped_holes == 2);
+    CHECK(solid.free_openings == 0);
+
+    // A tiny window mid-span changes almost nothing: the old behaviour clamped its edge and cut the stress by a large factor.
+    TopoDS_Shape with_window = plate_with_holes();
+    with_window = BRepAlgoAPI_Cut(with_window, BRepPrimAPI_MakeBox(gp_Pnt(4.7, 1.85, -0.1), 0.6, 0.3, 0.8).Shape()).Shape();
+    in.shape = with_window;
+    const cases::PartCaseResult small = cases::run_part_case(in);
+    CHECK(small.clamped_holes == 2);
+    CHECK(small.free_openings == 1);
+    CHECK(small.model.fixed.size() == solid.model.fixed.size());
+    CHECK(small.max_von_mises_mpa == Approx(solid.max_von_mises_mpa).epsilon(0.25));
+    CHECK(small.max_displacement_mm == Approx(solid.max_displacement_mm).epsilon(0.1));
+
+    // A round hole wider than the limit (2 mm here) is an opening, not a pivot seat; the 1 mm pivot holes stay clamped.
+    TopoDS_Shape big_hole = plate_with_holes();
+    big_hole = BRepAlgoAPI_Cut(big_hole, BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(5, 2, -0.1), gp_Dir(0, 0, 1)), 1.2, 0.8).Shape()).Shape();
+    in.shape = big_hole;
+    in.max_clamp_diameter = 2.0;
+    const cases::PartCaseResult wide = cases::run_part_case(in);
+    CHECK(wide.clamped_holes == 2);
+    CHECK(wide.free_openings == 1);
+
+    // Nothing but a window: nothing to hold the part by.
+    in.max_clamp_diameter = 4.0;
+    in.shape = BRepAlgoAPI_Cut(BRepPrimAPI_MakeBox(10, 4, 0.6).Shape(), BRepPrimAPI_MakeBox(gp_Pnt(3, 1, -0.1), 4, 2, 0.8).Shape()).Shape();
+    CHECK_THROWS_AS(cases::run_part_case(in), Error);
+}
+
 TEST_CASE("tooth bending case reports the Lewis stress next to the FE peak") {
     cases::ToothCaseInput in;
     in.spec.teeth = 20;

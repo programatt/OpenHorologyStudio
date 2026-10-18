@@ -260,6 +260,8 @@ CollisionReport sweep_collisions(const model::Movement& m, const kinematics::Tra
                 cp.at_degrees = c.faster * phi * 180.0 / kPi;
             }
         }
+        // Beyond the search range the distance is not measured: report the range, not infinity.
+        cp.min_clearance = std::min(cp.min_clearance, cfg.search_range);
     });
     for (const CollisionPair& cp : report.pairs) {
         ++report.pairs_checked;

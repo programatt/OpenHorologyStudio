@@ -69,7 +69,7 @@ std::vector<Viewport::Projected> Viewport::project(const QSize& size) const {
     const double yaw = yaw_ * std::numbers::pi / 180.0, pitch = pitch_ * std::numbers::pi / 180.0;
     const double cy = std::cos(yaw), sy = std::sin(yaw), cp = std::cos(pitch), sp = std::sin(pitch);
 
-    // Rotate about Z by yaw, then tilt about X by pitch (-90 degrees looks down the dial axis).
+    // Rotate about Z by yaw, then tilt about X by pitch (0 looks down the dial axis, -90 is edge-on).
     auto view = [&](const Point3& p, double& sx, double& sy_, double& depth) {
         const double x = p[0] - c[0], y = p[1] - c[1], z = p[2] - c[2];
         const double x1 = cy * x - sy * y, y1 = sy * x + cy * y;

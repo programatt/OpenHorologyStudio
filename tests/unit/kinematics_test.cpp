@@ -41,13 +41,21 @@ TEST_CASE("without a beat rate only ratios are produced") {
     for (const auto& mm : t.mobiles) CHECK(mm.revs_per_hour == 0.0);
 }
 
-TEST_CASE("a missing barrel is an error unless a root is given") {
+TEST_CASE("a missing barrel is an error unless there is an escape wheel to work back from, or a root is given") {
     auto parts = test::synthetic_train();
     parts[0].name = "gear_0";
     parts[0].tooth_confidence = 1;
     rigging::RigOptions o;
     o.presets = {{"^gear_0$", model::Role::Wheel}};
-    const auto m = rigging::auto_rig("train", parts, o);
+    auto m = rigging::auto_rig("train", parts, o);
+    // The escape wheel is there: the train starts at the far end of the chain from it, with a warning.
+    const auto t = kinematics::analyze_train(m, 25200);
+    CHECK(t.root >= 0);
+    CHECK(!t.warnings.empty());
+
+    // No barrel and no escape wheel: nothing says where to start, unless a root is given.
+    o.presets.push_back({"^escape_wheel$", model::Role::Wheel});
+    m = rigging::auto_rig("train", parts, o);
     CHECK_THROWS_AS(kinematics::analyze_train(m, 25200), Error);
     CHECK_NOTHROW(kinematics::analyze_train(m, 25200, 0));
 }

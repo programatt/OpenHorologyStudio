@@ -32,6 +32,7 @@ add_executable(ohs_tests
   unit/report_builder_test.cpp
   unit/structural_cases_test.cpp
   unit/lessons_test.cpp
+  unit/real_file_findings_test.cpp
   unit/plugin_test.cpp
   unit/model_test.cpp
   unit/profile_test.cpp

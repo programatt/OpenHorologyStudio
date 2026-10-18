@@ -94,12 +94,14 @@ struct MeshJoint {
     double centre_distance{};
     double module{};
     double confidence{};
+    bool manual{false};  ///< declared by the user (`ohs rig mesh`, a preset), kept when the rig is re-inferred
 };
 
 struct Movement {
     std::string name;
     std::string source_geometry;  ///< path of the CAD file, relative to the project when possible
     double beat_rate_vph{};       ///< 0 when unknown
+    std::string dial_axis{"z"};   ///< CAD axis normal to the dial ("x", "y" or "z"), found or given at import
     std::vector<Component> components;
     std::vector<Mobile> mobiles;
     std::vector<MeshJoint> meshes;

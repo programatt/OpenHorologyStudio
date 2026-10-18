@@ -70,7 +70,7 @@ struct Options {
     bool verbose = false;
 
     // import
-    std::string step_file, project_out, preset_file, up = "z";
+    std::string step_file, project_out, preset_file, up;
     bool auto_rig = true;
     double beat_rate = 0.0;
     int min_teeth = 6;
@@ -82,7 +82,7 @@ struct Options {
     std::string root_mobile;
 
     // rig set
-    std::string part_name, role_name;
+    std::string part_name, part_b, role_name;
 
     // animate
     std::string step_override, glb_out;
@@ -100,6 +100,11 @@ struct Options {
     std::vector<std::string> om10_args;
 };
 
+ohs::geometry::Axis parse_axis(const std::string& up);
+ohs::geometry::Axis parse_axis(const std::string& up, const ohs::model::Movement& m) {
+    return parse_axis(up.empty() ? m.dial_axis : up);
+}
+
 ohs::geometry::Axis parse_axis(const std::string& up) {
     if (up == "x") return ohs::geometry::Axis::X;
     if (up == "y") return ohs::geometry::Axis::Y;
@@ -109,10 +114,14 @@ ohs::geometry::Axis parse_axis(const std::string& up) {
 
 int cmd_import(const Options& o) {
     ohs::app::ImportOptions opt;
-    opt.features.dial_axis = parse_axis(o.up);
+    if (o.up.empty() || o.up == "auto") opt.auto_axis = true;
+    else opt.features.dial_axis = parse_axis(o.up);
     opt.features.min_teeth = o.min_teeth;
     opt.rig.beat_rate_vph = o.beat_rate;
-    if (!o.preset_file.empty()) opt.rig.presets = ohs::app::load_role_presets(o.preset_file);
+    if (!o.preset_file.empty()) {
+        opt.rig.presets = ohs::app::load_role_presets(o.preset_file);
+        opt.mesh_presets = ohs::app::load_mesh_presets(o.preset_file);
+    }
 
     ohs::model::Movement m = ohs::app::import_movement(o.step_file, opt);
     ohs::model::save_rig(m, o.project_out);
@@ -238,6 +247,15 @@ int cmd_rig_set(const Options& o) {
     return kExitOk;
 }
 
+int cmd_rig_mesh(const Options& o) {
+    ohs::model::Movement m = ohs::model::load_rig(o.project);
+    ohs::rigging::RigOptions rig;
+    ohs::rigging::add_manual_mesh(m, o.part_name, o.part_b, rig);
+    ohs::model::save_rig(m, o.project);
+    std::cout << o.part_name << " now meshes with " << o.part_b << "; " << m.meshes.size() << " meshes\n";
+    return kExitOk;
+}
+
 int cmd_animate(const Options& o) {
     const ohs::model::Movement m = ohs::model::load_rig(o.project);
     const double vph = o.beat_rate > 0 ? o.beat_rate : m.beat_rate_vph;
@@ -253,7 +271,7 @@ int cmd_animate(const Options& o) {
     opt.time_scale = o.time_scale;
     opt.stepped = o.stepped;
     const auto stats =
-        ohs::animation::write_animated_glb(m, parts, train, parse_axis(o.up), opt, o.glb_out);
+        ohs::animation::write_animated_glb(m, parts, train, parse_axis(o.up, m), opt, o.glb_out);
     if (o.json_output) {
         json j = {{"output", o.glb_out}, {"keyframes", stats.keyframes}, {"triangles", stats.triangles},
                   {"animated_nodes", stats.animated_nodes}, {"max_degrees_per_keyframe", stats.max_degrees_per_keyframe}};
@@ -350,7 +368,7 @@ int ohs::cli::run(int argc, char** argv) {
     import->add_option("-o,--output", o.project_out, "Project (rig) file to write")->required();
     import->add_flag("--auto-rig,!--no-auto-rig", o.auto_rig, "Infer roles, mobiles and meshes (default on)");
     import->add_option("--preset", o.preset_file, "Role preset TOML (name regex -> role)")->check(CLI::ExistingFile);
-    import->add_option("--up", o.up, "CAD axis normal to the dial: x, y or z")->capture_default_str();
+    import->add_option("--up", o.up, "CAD axis normal to the dial: x, y, z or auto (default: auto, the axis the parts are thinnest along)");
     import->add_option("--beat-rate", o.beat_rate, "Beat rate in vph recorded in the project");
     import->add_option("--min-teeth", o.min_teeth, "Fewest teeth to call a part toothed")->capture_default_str();
     import->callback(pick(cmd_import));
@@ -369,11 +387,17 @@ int ohs::cli::run(int argc, char** argv) {
     set->add_option("--min-teeth", o.min_teeth, "Fewest teeth to call a part toothed")->capture_default_str();
     set->callback(pick(cmd_rig_set));
 
+    auto* mesh = rig->add_subcommand("mesh", "Declare that two toothed parts mesh although the geometry does not show it");
+    mesh->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);
+    mesh->add_option("part", o.part_name, "First part")->required();
+    mesh->add_option("part_b", o.part_b, "Second part")->required();
+    mesh->callback(pick(cmd_rig_mesh));
+
     auto* anim = app.add_subcommand("animate", "Export the running train as an animated binary glTF");
     anim->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);
     anim->add_option("-o,--output", o.glb_out, "GLB file to write")->required();
     anim->add_option("--step", o.step_override, "STEP file (default: the project's source next to it)");
-    anim->add_option("--up", o.up, "CAD axis normal to the dial used at import")->capture_default_str();
+    anim->add_option("--up", o.up, "CAD axis normal to the dial (default: the one found at import)");
     anim->add_option("--beat-rate", o.beat_rate, "Beat rate in vph (default: from project)");
     anim->add_option("--duration", o.duration, "Animation length in seconds")->capture_default_str();
     anim->add_option("--fps", o.fps, "Minimum keyframes per second")->capture_default_str();

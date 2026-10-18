@@ -35,7 +35,7 @@ constexpr int kExitOk = 0;
 constexpr int kExitCheckFailed = 1;
 
 struct MfgOptions {
-    std::string project, part, step_override, up = "z", out, rules_file, process = "mill,wheel-cutting", tolerance_file, calibre_file, material = "brass_leaded";
+    std::string project, part, step_override, up, out, rules_file, process = "mill,wheel-cutting", tolerance_file, calibre_file, material = "brass_leaded";
     std::string out_step, out_dxf, out_svg, out_pdf, name = "gear", formats = "html,pdf";
     std::vector<std::string> plugins;
     gear::GearSpec gear;
@@ -44,6 +44,11 @@ struct MfgOptions {
     unsigned long seed = 42;
     bool profile_only = false, list = false, no_fea = false, no_timekeeping = false, no_geometry_sections = false;
 };
+
+geometry::Axis axis_of(const std::string& up);
+geometry::Axis axis_of(const std::string& up, const model::Movement& m) {
+    return axis_of(up.empty() ? m.dial_axis : up);
+}
 
 geometry::Axis axis_of(const std::string& up) {
     if (up == "x") return geometry::Axis::X;
@@ -138,7 +143,7 @@ int cmd_draw(const MfgOptions& o, bool as_json) {
     in.material = o.material;
     in.teeth = c.features.teeth;
     in.module = c.gear ? c.gear->module : 0.0;
-    in.region = geometry::section_region(geometry::orient_dial_axis_to_z(found->shape, axis_of(o.up)), 0.5 * (c.features.z_min + c.features.z_max), 0.002, 0.0015);
+    in.region = geometry::section_region(geometry::orient_dial_axis_to_z(found->shape, axis_of(o.up, m)), 0.5 * (c.features.z_min + c.features.z_max), 0.002, 0.0015);
     const manufacturing::PartDrawing pd = manufacturing::make_part_drawing(in);
     if (o.out.empty()) throw Error("give -o with an .svg, .dxf or .pdf name");
     const std::string ext = extension(o.out);
@@ -236,7 +241,7 @@ int cmd_dfm(const MfgOptions& o, bool as_json) {
         g.module = c.gear ? c.gear->module : 0.0;
         if (c.gear && c.gear->pressure_angle_deg > 5) g.pressure_angle_deg = c.gear->pressure_angle_deg;
         try {
-            g.region = geometry::section_region(geometry::orient_dial_axis_to_z(found->shape, axis_of(o.up)), 0.5 * (c.features.z_min + c.features.z_max), 0.002, 0.002);
+            g.region = geometry::section_region(geometry::orient_dial_axis_to_z(found->shape, axis_of(o.up, m)), 0.5 * (c.features.z_min + c.features.z_max), 0.002, 0.002);
         } catch (const Error&) {
             continue;
         }
@@ -275,7 +280,7 @@ int cmd_collisions(const MfgOptions& o, bool as_json) {
     const model::Movement m = model::load_rig(o.project);
     const double vph = o.beat_rate > 0 ? o.beat_rate : m.beat_rate_vph;
     const auto train = kinematics::analyze_train(m, vph);
-    const auto parts = manufacturing::collision_parts(m, load_parts(o, m), axis_of(o.up));
+    const auto parts = manufacturing::collision_parts(m, load_parts(o, m), axis_of(o.up, m));
     const auto r = manufacturing::sweep_collisions(m, train, parts);
     if (as_json) {
         json j = {{"pairs_checked", r.pairs_checked}, {"overlaps", r.overlaps}, {"close_calls", r.close_calls}, {"pairs", json::array()}};
@@ -298,7 +303,7 @@ int cmd_report(const MfgOptions& o, bool as_json) {
     reports::ReportOptions ro;
     ro.step_file = o.step_override.empty() ? (fs::path(o.project).parent_path() / m.source_geometry).string() : o.step_override;
     if (!fs::exists(ro.step_file)) ro.step_file.clear();
-    ro.up = axis_of(o.up);
+    ro.up = axis_of(o.up, m);
     ro.processes = split(o.process);
     ro.extra_rules = extra_rules(o);
     ro.plugins = o.plugins;
@@ -343,7 +348,7 @@ void add_manufacturing_commands(CLI::App& app, const bool& json_flag, std::funct
         auto* p = cmd->add_option("project", o->project, "Project file");
         if (required) p->required()->check(CLI::ExistingFile);
         cmd->add_option("--step", o->step_override, "STEP file (default: next to the project)");
-        cmd->add_option("--up", o->up, "CAD axis normal to the dial")->capture_default_str();
+        cmd->add_option("--up", o->up, "CAD axis normal to the dial (default: the one found at import)");
     };
 
     auto* g = app.add_subcommand("gear", "Generate an involute wheel as STEP, DXF, SVG or PDF drawing");
@@ -382,7 +387,7 @@ void add_manufacturing_commands(CLI::App& app, const bool& json_flag, std::funct
     auto* f = app.add_subcommand("dfm", "Design-for-manufacturing rules for your processes");
     f->add_option("project", o->project, "Project file")->check(CLI::ExistingFile);
     f->add_option("--step", o->step_override, "STEP file (default: next to the project)");
-    f->add_option("--up", o->up, "CAD axis normal to the dial")->capture_default_str();
+    f->add_option("--up", o->up, "CAD axis normal to the dial (default: the one found at import)");
     f->add_option("--process", o->process, "Comma-separated processes (ohs dfm --list)")->capture_default_str();
     f->add_option("--rules", o->rules_file, "Your own rule sets (TOML, same format as data/dfm/rules.toml)")->check(CLI::ExistingFile);
     f->add_flag("--list", o->list, "List the processes and exit");

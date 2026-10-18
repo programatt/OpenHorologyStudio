@@ -162,4 +162,33 @@ model::PartFeatures extract_features(const ImportedPart& part, const FeatureOpti
     return f;
 }
 
+const char* axis_name(Axis axis) {
+    return axis == Axis::X ? "x" : axis == Axis::Y ? "y" : "z";
+}
+
+Axis detect_dial_axis(const std::vector<ImportedPart>& parts) {
+    std::vector<double> extent[3];
+    for (const auto& part : parts) {
+        Bnd_Box box;
+        BRepBndLib::AddOptimal(part.shape, box, false, false);
+        if (box.IsVoid()) continue;
+        double lo[3], hi[3];
+        box.Get(lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
+        for (int a = 0; a < 3; ++a) extent[a].push_back(hi[a] - lo[a]);
+    }
+    if (extent[0].empty()) return Axis::Z;
+    double median[3];
+    for (int a = 0; a < 3; ++a) {
+        auto mid = extent[a].begin() + static_cast<std::ptrdiff_t>(extent[a].size() / 2);
+        std::nth_element(extent[a].begin(), mid, extent[a].end());
+        median[a] = *mid;
+    }
+    // Z wins ties and near ties, so a normally oriented CAD file is never reinterpreted.
+    int best = 2;
+    for (int a : {0, 1}) {
+        if (median[a] < 0.9 * median[best]) best = a;
+    }
+    return best == 0 ? Axis::X : best == 1 ? Axis::Y : Axis::Z;
+}
+
 }  // namespace ohs::geometry

@@ -1,9 +1,33 @@
 # SPDX-License-Identifier: Apache-2.0
-# Role preset for the OM10: part-name patterns and roles only, no geometry or dimensions.
-# The real OM10 part names are not known yet (the file is not in this repository), so no rules
-# ship here. After fetching the STEP file, run `ohs rig check` to see how it was classified and
-# add rules for anything misclassified:
+# Role and mesh preset for the OM10: part-name patterns only, no geometry or dimensions.
+# The OM10 STEP file names its parts by part number (OM10-00150:1), not by function, so most roles
+# come from the geometry, and the dial axis is found automatically (it is Y in the OM10 file).
+# What the geometry cannot tell is listed here. Each rule was checked against the model:
+# the train from the centre wheel gives 25,200 vph with the fourth wheel at 1 rpm
+# (see docs/om10.md). Add rules for anything else `ohs rig check` shows misclassified:
 #
 #   [[rule]]
 #   match = "^some part name$"   # case-insensitive regex
 #   role = "wheel"               # see `ohs` role names: plate, bridge, barrel, arbor, wheel, ...
+#
+#   [[mesh]]                     # two toothed parts that mesh although the geometry does not show it
+#   a = "^part one$"
+#   b = "^part two$"
+
+# The escape wheel: 20 teeth, coaxial with the 8-tooth pinion OM10-00146:1 that the fourth wheel drives.
+[[rule]]
+match = "^OM00-00101:1$"
+role = "escape_wheel"
+
+# The barrel's toothed ring (63 teeth). Inferred, not named in the file: it is coaxial with the
+# barrel drum parts (OM10-00119:1, 00120:1, 00121:1), and it is the only ring of the right size
+# near the centre pinion.
+[[rule]]
+match = "^OM10-00197:2$"
+role = "barrel"
+
+# The barrel drives the centre pinion (16 teeth, OM10-00149:1). The model's barrel teeth are not
+# an exact involute match for the pinion, so the mesh is not found from the geometry: declare it.
+[[mesh]]
+a = "^OM10-00197:2$"
+b = "^OM10-00149:1$"

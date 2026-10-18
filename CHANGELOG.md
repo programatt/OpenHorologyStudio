@@ -4,6 +4,27 @@ All notable changes to Open Horology Studio. The format follows Keep a Changelog
 Semantic Versioning, with the Python API and the plugin ABI versioned as described in
 `docs/python.md` and `docs/plugins.md`.
 
+## Unreleased
+
+Found by running the plan's gates on the real OM10 file.
+
+### Added
+- `ohs-gui` is a basic Qt 6 desktop application (optional, `-DOHS_BUILD_GUI=ON`), with
+  a 3D viewport, rig list, Explain panel, animation timeline, analyses as queued jobs, one plot,
+  undo of role changes and a `--snapshot` option that renders the viewport to a PNG.
+- The dial axis is found from the geometry (`ohs import --up auto`, the default) and stored in the
+  project file; `--up` on other commands now defaults to the stored axis.
+- `ohs rig mesh` and `[[mesh]]` preset rules declare meshes the geometry does not show.
+- Without a barrel, the train starts at the far end of the gear chain from the escape wheel.
+- OM10 preset: escape wheel, barrel and the barrel mesh.
+
+### Fixed
+- Only round pivot and screw holes are clamped in the shock case; windows and slots were clamped
+  too, which made skeletonised parts look much stronger than they are.
+- The collision report printed 10^30 mm for pairs that never come within the search range.
+- A wrong `--view` mapping in the viewport (top and side were swapped).
+- The OM10 tutorial: escape wheel tooth count, mobile numbers, and part names.
+
 ## 1.0.0
 
 First release.

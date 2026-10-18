@@ -90,7 +90,7 @@ TEST_CASE("gui: clicking a part selects it and fills the Explain panel", "[gui]"
     ohs::gui::MainWindow w;
     w.show();
     REQUIRE(w.open_demo(fresh_dir("pick")));
-    w.viewport()->set_view(0, -90);  // straight down the dial axis
+    w.viewport()->set_view(0, 0);  // straight down the dial axis
     w.viewport()->resize(640, 480);
 
     // Some pixel hits a part, and picking it selects that part.
@@ -202,15 +202,17 @@ TEST_CASE("gui: changing a role re-rigs the movement, and bad files are reported
     const int mobiles = static_cast<int>(w.viewport()->scene()->movement().mobiles.size());
     CHECK(mobiles > 0);
 
-    // Demote a screw-like part to a plate and back; the window stays open with a valid scene.
-    const std::string part = w.viewport()->scene()->parts().front().name;
-    const bool changed = w.set_role(QString::fromStdString(part), "plate");
-    INFO(w.log_console()->toPlainText().toStdString());
-    CHECK(changed);
-    // The barrel is gone, so there is no train to turn: the parts still show, the animation is off.
+    // Demote the escape wheel to a plate: the train has nothing to beat against, so the animation is off,
+    // but the parts still show and the window stays open with a valid scene.
+    REQUIRE(w.set_role("escape_wheel", "plate"));
+    CHECK_FALSE(w.viewport()->scene()->can_animate());
+    CHECK_FALSE(w.timeline()->isEnabled());
+    CHECK(w.viewport()->scene() != nullptr);
+
+    // Demote the barrel as well: now nothing says where the train starts, and the log says so.
+    REQUIRE(w.set_role("barrel", "plate"));
     CHECK_FALSE(w.viewport()->scene()->can_animate());
     CHECK(w.log_console()->toPlainText().contains("Train not analysed"));
-    CHECK_FALSE(w.timeline()->isEnabled());
     CHECK(w.viewport()->scene() != nullptr);
 
     CHECK_FALSE(w.open_project("/nonexistent/none.hsproj"));
@@ -261,7 +263,7 @@ TEST_CASE("gui: role changes can be undone and redone", "[gui]") {
         const auto& m = w.viewport()->scene()->movement();
         return m.components[m.find_component(part.toStdString())].role;
     };
-    const QString part = "barrel";
+    const QString part = "escape_wheel";
     const auto original = role_of(part);
     REQUIRE(original != ohs::model::Role::Plate);
     const int mobiles = static_cast<int>(w.viewport()->scene()->movement().mobiles.size());
@@ -269,7 +271,7 @@ TEST_CASE("gui: role changes can be undone and redone", "[gui]") {
     REQUIRE(w.change_role(part, "plate"));
     CHECK(role_of(part) == ohs::model::Role::Plate);
     CHECK(w.undo_stack()->count() == 1);
-    CHECK(w.undo_stack()->undoText().contains("barrel"));
+    CHECK(w.undo_stack()->undoText().contains("escape_wheel"));
 
     w.undo_stack()->undo();
     CHECK(role_of(part) == original);

@@ -51,11 +51,18 @@ struct PartCaseInput {
     bool in_plane_shock{false};    ///< apply it along -X instead
     int modes{0};                  ///< >0 also computes this many natural frequencies
     std::size_t max_dofs{250000};  ///< refuse meshes larger than this (a direct solver needs memory for the fill)
+    /// Only inner outlines that look like a pivot or screw hole are clamped: round (circularity
+    /// 4 pi A / P^2 at least this) and no wider than max_clamp_diameter. Windows, slots and spoke
+    /// openings stay free, as they are in the real part.
+    double max_clamp_diameter{4.0};
+    double min_clamp_circularity{0.85};
 };
 
 struct PartCaseResult {
     std::size_t nodes{};
     std::size_t dofs{};
+    int clamped_holes{};  ///< round holes clamped
+    int free_openings{};  ///< other inner outlines (windows, slots), left free
     double mass_g{};
     double max_displacement_mm{};
     double max_von_mises_mpa{};

@@ -54,7 +54,7 @@ private:
 
     std::shared_ptr<Scene> scene_;
     std::string selected_;
-    double yaw_{35}, pitch_{-55};  ///< degrees; pitch -90 looks straight down the dial axis
+    double yaw_{35}, pitch_{-55};  ///< degrees; pitch 0 looks straight down the dial axis, -90 is edge-on
     double zoom_{1.0};
     double pan_x_{0}, pan_y_{0};
     QPoint last_;

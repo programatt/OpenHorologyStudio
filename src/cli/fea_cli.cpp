@@ -31,12 +31,17 @@ constexpr int kExitOk = 0;
 constexpr int kExitCheckFailed = 1;
 
 struct FeaOptions {
-    std::string project, part, case_name = "tooth-bending", material, materials_file, step_override, up = "z", vtu;
+    std::string project, part, case_name = "tooth-bending", material, materials_file, step_override, up, vtu;
     std::string hairspring = "nife_hairspring", balance = "brass_leaded";
     double load_n = 0, wind = 1.0, size = 0.2, size_factor = 0.14, shock_g = 5000, beat_rate = 0;
     int modes = 0;
     bool in_plane = false, full = false, crosscheck = false;
 };
+
+geometry::Axis axis_of(const std::string& up);
+geometry::Axis axis_of(const std::string& up, const model::Movement& m) {
+    return axis_of(up.empty() ? m.dial_axis : up);
+}
 
 geometry::Axis axis_of(const std::string& up) {
     if (up == "x") return geometry::Axis::X;
@@ -169,7 +174,7 @@ int cmd_fea(const FeaOptions& o, bool as_json) {
         bool found = false;
         for (const auto& p : parts) {
             if (p.name == o.part) {
-                shape = geometry::orient_dial_axis_to_z(p.shape, axis_of(o.up));
+                shape = geometry::orient_dial_axis_to_z(p.shape, axis_of(o.up, rig.movement));
                 found = true;
             }
         }
@@ -190,6 +195,8 @@ int cmd_fea(const FeaOptions& o, bool as_json) {
         j["safety_factor"] = r.safety_factor;
         j["frequencies_hz"] = r.frequencies_hz;
         j["dofs"] = r.dofs;
+        j["clamped_holes"] = r.clamped_holes;
+        j["free_openings"] = r.free_openings;
         if (!o.vtu.empty()) fea::write_vtu(o.vtu, r.model.mesh, fea::static_fields(r.solution));
         if (o.crosscheck) {
             fea::Vec load = fea::Vec::Zero(r.model.dofs());
@@ -198,7 +205,7 @@ int cmd_fea(const FeaOptions& o, bool as_json) {
             j["crosscheck"] = {{"available", cc.available}, {"max_displacement_diff", cc.max_displacement_diff}, {"note", cc.note}};
         }
         if (!as_json) {
-            std::cout << "shock of " << o.shock_g << " g on " << o.part << " (" << in.material.name << ", " << r.mass_g << " g, " << r.dofs << " dofs)\n"
+            std::cout << "shock of " << o.shock_g << " g on " << o.part << " (" << in.material.name << ", " << r.mass_g << " g, " << r.dofs << " dofs; " << r.clamped_holes << " round hole(s) clamped, " << r.free_openings << " opening(s) free)\n"
                       << std::setprecision(4) << "max displacement " << r.max_displacement_mm << " mm, peak von Mises " << r.max_von_mises_mpa << " MPa";
             if (r.safety_factor > 0) std::cout << ", safety factor " << r.safety_factor;
             std::cout << '\n';
@@ -264,7 +271,7 @@ void add_fea_commands(CLI::App& app, const bool& json_flag, std::function<int()>
     fea->add_flag("--in-plane", o->in_plane, "Shock along the dial instead of end shake");
     fea->add_option("--modes", o->modes, "Also compute this many natural frequencies");
     fea->add_option("--step", o->step_override, "STEP file (default: next to the project)");
-    fea->add_option("--up", o->up, "CAD axis normal to the dial")->capture_default_str();
+    fea->add_option("--up", o->up, "CAD axis normal to the dial (default: the one found at import)");
     fea->add_option("--vtu", o->vtu, "Write the result for ParaView");
     fea->add_flag("--crosscheck", o->crosscheck, "Compare with CalculiX if it is installed");
     fea->add_option("--beat-rate", o->beat_rate, "Beat rate in vph (default: from project)");

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numbers>
 
 #include <BRepBndLib.hxx>
 #include <Bnd_Box.hxx>
@@ -89,10 +90,29 @@ PartCaseResult run_part_case(const PartCaseInput& in) {
         throw Error("the mesh has " + std::to_string(r.dofs) + " dofs, over the limit of " + std::to_string(in.max_dofs) + ": use a larger --size");
     }
 
-    // Clamp every hole: nodes of the 2D mesh that lie on an inner ring.
+    // Clamp the pivot and screw holes: nodes of the 2D mesh that lie on a small round inner ring.
+    // A window or slot is not a support; clamping it would stiffen the part it was cut to lighten.
+    std::vector<std::size_t> clamp_rings;
+    for (std::size_t k = 1; k < region.rings.size(); ++k) {
+        const auto& ring = region.rings[k];
+        double area = 0, perimeter = 0, lo_x = 1e30, hi_x = -1e30, lo_y = 1e30, hi_y = -1e30;
+        for (std::size_t i = 0; i < ring.size(); ++i) {
+            const auto& a = ring[i];
+            const auto& c = ring[(i + 1) % ring.size()];
+            area += 0.5 * (a.x * c.y - c.x * a.y);
+            perimeter += std::hypot(c.x - a.x, c.y - a.y);
+            lo_x = std::min(lo_x, a.x); hi_x = std::max(hi_x, a.x);
+            lo_y = std::min(lo_y, a.y); hi_y = std::max(hi_y, a.y);
+        }
+        const double circularity = perimeter > 0 ? 4 * std::numbers::pi * std::abs(area) / (perimeter * perimeter) : 0.0;
+        const double width = std::max(hi_x - lo_x, hi_y - lo_y);
+        if (circularity >= in.min_clamp_circularity && width <= in.max_clamp_diameter) clamp_rings.push_back(k);
+    }
+    r.clamped_holes = static_cast<int>(clamp_rings.size());
+    r.free_openings = static_cast<int>(region.rings.size()) - 1 - r.clamped_holes;
     const double tol = 1e-4 * in.element_size;
     auto on_hole = [&](const mesh::P2 p) {
-        for (std::size_t k = 1; k < region.rings.size(); ++k) {
+        for (std::size_t k : clamp_rings) {
             const auto& ring = region.rings[k];
             for (std::size_t i = 0; i < ring.size(); ++i) {
                 const auto& a = ring[i];
@@ -111,7 +131,7 @@ PartCaseResult run_part_case(const PartCaseInput& in) {
             for (int c = 0; c < 3; ++c) r.model.fixed.push_back({static_cast<int>(n), c});
         }
     }
-    if (r.model.fixed.empty()) throw Error("the part has no holes to clamp; give it pivots or screw holes");
+    if (r.model.fixed.empty()) throw Error("the part has no round pivot or screw hole (up to " + std::to_string(in.max_clamp_diameter) + " mm across) to clamp; other openings are left free");
 
     fea::Vec load = fea::Vec::Zero(r.model.dofs());
     const double a = in.shock_g * 9810.0;

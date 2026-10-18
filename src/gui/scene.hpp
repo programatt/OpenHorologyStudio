@@ -41,9 +41,9 @@ struct SectionPlane {
 /// tested without a display.
 class Scene {
 public:
-    /// Loads a project file and its STEP geometry. Throws ohs::Error.
+    /// Loads a project file and its STEP geometry, oriented by the project's dial axis. Throws ohs::Error.
     static Scene load(const std::filesystem::path& project, const std::filesystem::path& step_override = {},
-                      geometry::Axis dial_axis = geometry::Axis::Z, double beat_rate_vph = 0.0);
+                      double beat_rate_vph = 0.0);
 
     const model::Movement& movement() const { return movement_; }
     const kinematics::TrainAnalysis& train() const { return train_; }

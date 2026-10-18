@@ -57,7 +57,7 @@ Options:
   --auto-rig,--no-auto-rig{false}
                               Infer roles, mobiles and meshes (default on)
   --preset TEXT:FILE          Role preset TOML (name regex -> role)
-  --up TEXT [z]               CAD axis normal to the dial: x, y or z
+  --up TEXT                   CAD axis normal to the dial: x, y, z or auto (default: auto, the axis the parts are thinnest along)
   --beat-rate FLOAT           Beat rate in vph recorded in the project
   --min-teeth INT [6]         Fewest teeth to call a part toothed
 ```
@@ -74,6 +74,7 @@ Options:
 Subcommands:
   check                       Validate a project's rig
   set                         Override a part's role and re-infer mobiles and meshes
+  mesh                        Declare that two toothed parts mesh although the geometry does not show it
 ```
 
 #### `ohs rig check`
@@ -106,6 +107,21 @@ Options:
   --min-teeth INT [6]         Fewest teeth to call a part toothed
 ```
 
+#### `ohs rig mesh`
+
+```text
+Declare that two toothed parts mesh although the geometry does not show it
+Usage: ohs rig mesh [OPTIONS] project part part_b
+
+Positionals:
+  project TEXT:FILE REQUIRED  Project file
+  part TEXT REQUIRED          First part
+  part_b TEXT REQUIRED        Second part
+
+Options:
+  -h,--help                   Print this help message and exit
+```
+
 ### `ohs animate`
 
 ```text
@@ -119,7 +135,7 @@ Options:
   -h,--help                   Print this help message and exit
   -o,--output TEXT REQUIRED   GLB file to write
   --step TEXT                 STEP file (default: the project's source next to it)
-  --up TEXT [z]               CAD axis normal to the dial used at import
+  --up TEXT                   CAD axis normal to the dial (default: the one found at import)
   --beat-rate FLOAT           Beat rate in vph (default: from project)
   --duration FLOAT [10]       Animation length in seconds
   --fps FLOAT [30]            Minimum keyframes per second
@@ -478,7 +494,7 @@ Options:
   --in-plane                  Shock along the dial instead of end shake
   --modes INT                 Also compute this many natural frequencies
   --step TEXT                 STEP file (default: next to the project)
-  --up TEXT [z]               CAD axis normal to the dial
+  --up TEXT                   CAD axis normal to the dial (default: the one found at import)
   --vtu TEXT                  Write the result for ParaView
   --crosscheck                Compare with CalculiX if it is installed
   --beat-rate FLOAT           Beat rate in vph (default: from project)
@@ -523,7 +539,7 @@ Positionals:
 Options:
   -h,--help                   Print this help message and exit
   --step TEXT                 STEP file (default: next to the project)
-  --up TEXT [z]               CAD axis normal to the dial
+  --up TEXT                   CAD axis normal to the dial (default: the one found at import)
   --part TEXT REQUIRED        Part name
   -o,--output TEXT            File ending in .svg, .dxf or .pdf
   --material TEXT [brass_leaded] 
@@ -542,7 +558,7 @@ Positionals:
 Options:
   -h,--help                   Print this help message and exit
   --step TEXT                 STEP file (default: next to the project)
-  --up TEXT [z]               CAD axis normal to the dial
+  --up TEXT                   CAD axis normal to the dial (default: the one found at import)
   --samples INT [10000]       Number of virtual builds
   --seed UINT [42]            Random seed
   --tolerances TEXT:FILE      Tolerance table TOML ([tolerance])
@@ -561,7 +577,7 @@ Positionals:
 Options:
   -h,--help                   Print this help message and exit
   --step TEXT                 STEP file (default: next to the project)
-  --up TEXT [z]               CAD axis normal to the dial
+  --up TEXT                   CAD axis normal to the dial (default: the one found at import)
   --process TEXT [mill,wheel-cutting] 
                               Comma-separated processes (ohs dfm --list)
   --rules TEXT:FILE           Your own rule sets (TOML, same format as data/dfm/rules.toml)
@@ -581,7 +597,7 @@ Positionals:
 Options:
   -h,--help                   Print this help message and exit
   --step TEXT                 STEP file (default: next to the project)
-  --up TEXT [z]               CAD axis normal to the dial
+  --up TEXT                   CAD axis normal to the dial (default: the one found at import)
   --beat-rate FLOAT           Beat rate in vph (default: from project)
 ```
 
@@ -597,7 +613,7 @@ Positionals:
 Options:
   -h,--help                   Print this help message and exit
   --step TEXT                 STEP file (default: next to the project)
-  --up TEXT [z]               CAD axis normal to the dial
+  --up TEXT                   CAD axis normal to the dial (default: the one found at import)
   -o,--output TEXT            Output path without extension (default: next to the project)
   --format TEXT [html,pdf]    html, pdf or html,pdf
   --process TEXT [mill,wheel-cutting] 

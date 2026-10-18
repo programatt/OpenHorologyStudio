@@ -6,9 +6,25 @@
 ohs import movement.step -o movement.hsproj --beat-rate 28800
 ```
 
-`--up x|y|z` names the CAD axis that is normal to the dial; `--preset roles.toml` applies name
-based role rules (the [CAD add-ins](cad-addins.md) write these for you); `--min-teeth` sets the
-fewest teeth that make a part a wheel.
+`--up x|y|z|auto` names the CAD axis that is normal to the dial. The default, `auto`, takes the axis
+along which the parts are thinnest (wheels, plates and bridges are flat), and the project file
+remembers it, so later commands (`animate`, `dfm`, `report`, `draw`, `fea`) need no `--up`; give it
+only to override. `--preset roles.toml` applies name based role rules (the
+[CAD add-ins](cad-addins.md) write these for you); `--min-teeth` sets the fewest teeth that make a
+part a wheel.
+
+A preset can also declare meshes the geometry does not show, such as a smooth barrel drum driving
+the centre pinion:
+
+```toml
+[[rule]]
+match = "^barrel gear$"
+role = "barrel"
+
+[[mesh]]
+a = "^barrel gear$"
+b = "^centre pinion$"
+```
 
 What `import` does, in order:
 
@@ -35,6 +51,18 @@ ohs rig set movement.hsproj "third wheel" --role pinion
 
 `rig check --strict` fails on warnings; use it in scripts. Setting a role re-infers mobiles and
 meshes, and your choice is recorded with confidence 1 and source `user`.
+
+When two toothed parts mesh but the geometry does not show it, declare the mesh:
+
+```
+ohs rig mesh movement.hsproj "barrel gear" "centre pinion"
+```
+
+Both parts need a role that rotates and a tooth count. A declared mesh is kept when the rig is
+re-inferred, and is marked `manual` in the project file.
+
+Without a barrel in the rig, the train starts at the far end of the gear chain from the escape
+wheel and `kinematics` says so; pass `--root` to choose another start.
 
 ## Read the train
 
