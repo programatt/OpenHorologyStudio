@@ -17,7 +17,7 @@ Options:
 Subcommands:
   import                      Import a STEP assembly and auto-rig it
   rig                         Inspect a rig
-  animate                     Export the running train as an animated binary glTF
+  animate                     Export the running train as an animated binary glTF (.glb) or OpenUSD text file (.usda)
   explain                     Explain a part or walk through the gear train with this movement's numbers
   kinematics                  Rigid-body ratios and speeds of the going train
   dev                         Developer tools
@@ -125,7 +125,7 @@ Options:
 ### `ohs animate`
 
 ```text
-Export the running train as an animated binary glTF
+Export the running train as an animated binary glTF (.glb) or OpenUSD text file (.usda)
 Usage: ohs animate [OPTIONS] project
 
 Positionals:
@@ -133,7 +133,7 @@ Positionals:
 
 Options:
   -h,--help                   Print this help message and exit
-  -o,--output TEXT REQUIRED   GLB file to write
+  -o,--output TEXT REQUIRED   File to write: .glb (glTF 2.0) or .usda (OpenUSD)
   --step TEXT                 STEP file (default: the project's source next to it)
   --up TEXT                   CAD axis normal to the dial (default: the one found at import)
   --beat-rate FLOAT           Beat rate in vph (default: from project)

@@ -193,3 +193,52 @@ TEST_CASE("animated GLB: structure, rotations and rates are right") {
                     Error);
     std::filesystem::remove_all(dir);
 }
+
+TEST_CASE("animated USD: same motion as the glTF, in a text file any USD tool reads") {
+    const auto dir = std::filesystem::temp_directory_path() / "ohs_usd_test";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    const auto step = dir / "train.step";
+    geometry::export_step(geometry::make_test_movement(), step);
+    app::ImportOptions opt;
+    opt.rig.beat_rate_vph = 25200;
+    const model::Movement m = app::import_movement(step, opt);
+    const auto parts = geometry::import_step(step);
+    const auto train = kinematics::analyze_train(m, m.beat_rate_vph);
+
+    animation::AnimationOptions ao;
+    ao.duration_seconds = 5.0;
+    ao.time_scale = 600.0;
+    const auto stats = animation::write_animated_usd(m, parts, train, geometry::Axis::Z, ao, dir / "train.usda");
+    CHECK(stats.animated_nodes == 14);
+    CHECK(stats.triangles > 5000);
+
+    std::ifstream in(dir / "train.usda");
+    const std::string text((std::istreambuf_iterator<char>(in)), {});
+    REQUIRE(text.rfind("#usda 1.0", 0) == 0);
+    CHECK(text.find("metersPerUnit = 0.001") != std::string::npos);
+    CHECK(text.find("upAxis = \"Z\"") != std::string::npos);
+
+    auto count = [&](const std::string& needle) {
+        std::size_t n = 0;
+        for (std::size_t pos = 0; (pos = text.find(needle, pos)) != std::string::npos; pos += needle.size()) ++n;
+        return n;
+    };
+    CHECK(count("xformOp:rotateZ.timeSamples") == 14);
+    CHECK(count("def Mesh") == m.components.size());
+
+    // Last time sample of a part's rotation, in degrees.
+    auto final_angle_deg = [&](const std::string& doc_name) {
+        const std::size_t part = text.find("doc = \"" + doc_name + "\"");
+        REQUIRE(part != std::string::npos);
+        const std::size_t end = text.find("        }\n", text.find("timeSamples", part));
+        const std::size_t colon = text.rfind(": ", end);
+        return std::stod(text.substr(colon + 2));
+    };
+    CHECK(final_angle_deg("barrel") == Approx(37.5).epsilon(1e-4));
+    CHECK(final_angle_deg("fourth_wheel") == Approx(-50 * 360.0).epsilon(1e-4));
+    CHECK(final_angle_deg("escape_wheel") == Approx(700 * 360.0).epsilon(1e-4));
+
+    CHECK_THROWS_AS(animation::write_animated_usd(m, parts, kinematics::analyze_train(m, 0.0), geometry::Axis::Z, ao, dir / "x.usda"), Error);
+    std::filesystem::remove_all(dir);
+}

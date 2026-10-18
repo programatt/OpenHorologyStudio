@@ -19,6 +19,7 @@
 #include <TopoDS_Face.hxx>
 #include <nlohmann/json.hpp>
 
+#include "animation/scene.hpp"
 #include "core/error.hpp"
 
 namespace ohs::animation {
@@ -29,45 +30,7 @@ static_assert(std::endian::native == std::endian::little, "glTF buffers are litt
 
 using nlohmann::json;
 
-struct Vec3 {
-    float x, y, z;
-};
-
-struct MeshData {
-    std::vector<Vec3> positions;
-    std::vector<Vec3> normals;
-};
-
-// Flat-shaded triangles (three vertices each) keep the sharp tooth edges sharp.
-MeshData tessellate(const TopoDS_Shape& shape, double deflection, double pivot_x, double pivot_y) {
-    BRepMesh_IncrementalMesh mesher(shape, deflection, false, 0.5, true);
-    MeshData out;
-    for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next()) {
-        const TopoDS_Face face = TopoDS::Face(ex.Current());
-        TopLoc_Location loc;
-        const Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, loc);
-        if (tri.IsNull()) continue;
-        const gp_Trsf trsf = loc.Transformation();
-        const bool reversed = face.Orientation() == TopAbs_REVERSED;
-        for (int i = 1; i <= tri->NbTriangles(); ++i) {
-            int n1, n2, n3;
-            tri->Triangle(i).Get(n1, n2, n3);
-            if (reversed) std::swap(n2, n3);
-            const gp_Pnt p1 = tri->Node(n1).Transformed(trsf);
-            const gp_Pnt p2 = tri->Node(n2).Transformed(trsf);
-            const gp_Pnt p3 = tri->Node(n3).Transformed(trsf);
-            const gp_Vec normal = gp_Vec(p1, p2).Crossed(gp_Vec(p1, p3));
-            if (normal.Magnitude() < 1e-12) continue;
-            const gp_Vec n = normal.Normalized();
-            for (const gp_Pnt& p : {p1, p2, p3}) {
-                out.positions.push_back({static_cast<float>(p.X() - pivot_x), static_cast<float>(p.Y() - pivot_y),
-                                         static_cast<float>(p.Z())});
-                out.normals.push_back({static_cast<float>(n.X()), static_cast<float>(n.Y()), static_cast<float>(n.Z())});
-            }
-        }
-    }
-    return out;
-}
+using Vec3 = Vec3f;
 
 class BinaryBuffer {
 public:
@@ -135,42 +98,18 @@ void write_glb(const json& doc, const std::vector<std::uint8_t>& bin, const std:
 AnimationStats write_animated_glb(const model::Movement& m, const std::vector<geometry::ImportedPart>& parts,
                                   const kinematics::TrainAnalysis& train, geometry::Axis dial_axis,
                                   const AnimationOptions& o, const std::filesystem::path& path) {
-    if (train.root_period_hours <= 0.0) throw Error("animation needs a beat rate: pass --beat-rate or import with one");
-    if (o.duration_seconds <= 0 || o.fps <= 0 || o.time_scale <= 0) throw Error("duration, fps and time scale must be positive");
-    const kinematics::PoseOptions pose{o.stepped, 0.2};
-
-    // Keyframe spacing: at least fps, and fine enough that no mobile turns more than the cap
-    // between keyframes (and that each escapement impulse is sampled in several keyframes).
-    constexpr double two_pi = 2.0 * std::numbers::pi;
-    double max_rate = 0.0;  // rad per animation second
-    for (const auto& mm : train.mobiles) {
-        if (mm.reached) max_rate = std::max(max_rate, two_pi * std::abs(mm.ratio) / (train.root_period_hours * 3600.0) * o.time_scale);
-    }
-    double dt = 1.0 / o.fps;
-    if (max_rate > 0) dt = std::min(dt, o.max_keyframe_rotation / max_rate);
-    if (o.stepped) {
-        const double beat_seconds_anim = 3600.0 / (train.beats_per_root_rev / train.root_period_hours) / o.time_scale;
-        dt = std::min(dt, 0.2 * beat_seconds_anim / 8.0);
-    }
-    const std::size_t frames = static_cast<std::size_t>(std::floor(o.duration_seconds / dt)) + 1;
-    if (frames > o.max_keyframes) {
-        throw Error("animation needs " + std::to_string(frames) + " keyframes; lower --time-scale or --duration");
-    }
-
+    const Keyframes kf = make_keyframes(m, train, o);
+    const std::size_t frames = kf.times.size();
     std::vector<float> times(frames);
     std::vector<std::vector<float>> quats(m.mobiles.size(), std::vector<float>(frames * 4, 0.f));
-    double max_step = 0.0;
-    std::vector<double> prev;
     for (std::size_t k = 0; k < frames; ++k) {
-        times[k] = static_cast<float>(k * dt);
-        const auto angles = kinematics::mobile_angles(train, k * dt * o.time_scale, pose);
-        for (std::size_t i = 0; i < angles.size(); ++i) {
-            quats[i][4 * k + 2] = static_cast<float>(std::sin(angles[i] / 2));
-            quats[i][4 * k + 3] = static_cast<float>(std::cos(angles[i] / 2));
-            if (k > 0) max_step = std::max(max_step, std::abs(angles[i] - prev[i]));
+        times[k] = static_cast<float>(kf.times[k]);
+        for (std::size_t i = 0; i < kf.angles.size(); ++i) {
+            quats[i][4 * k + 2] = static_cast<float>(std::sin(kf.angles[i][k] / 2));
+            quats[i][4 * k + 3] = static_cast<float>(std::cos(kf.angles[i][k] / 2));
         }
-        prev = angles;
     }
+    const double max_step = kf.max_step;
 
     std::map<std::string, const geometry::ImportedPart*> by_name;
     for (const auto& p : parts) by_name[p.name] = &p;

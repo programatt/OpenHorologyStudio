@@ -75,3 +75,5 @@ ohs animate movement.hsproj -o train.glb --stepped --duration 10
 
 `animate` writes a binary glTF with one node per part and keyframes from the kinematic motion
 (`--stepped` advances one escapement step per beat), viewable in any glTF viewer or Blender.
+Give the output a `.usda` extension (`-o train.usda`) to get the same motion as an OpenUSD text file
+(millimetres, Z up, one `rotateZ` time sample per keyframe) for USD tools, Blender or Omniverse.

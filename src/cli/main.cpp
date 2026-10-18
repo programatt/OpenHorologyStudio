@@ -270,8 +270,9 @@ int cmd_animate(const Options& o) {
     opt.fps = o.fps;
     opt.time_scale = o.time_scale;
     opt.stepped = o.stepped;
-    const auto stats =
-        ohs::animation::write_animated_glb(m, parts, train, parse_axis(o.up, m), opt, o.glb_out);
+    const bool usd = fs::path(o.glb_out).extension() == ".usda";
+    const auto stats = usd ? ohs::animation::write_animated_usd(m, parts, train, parse_axis(o.up, m), opt, o.glb_out)
+                           : ohs::animation::write_animated_glb(m, parts, train, parse_axis(o.up, m), opt, o.glb_out);
     if (o.json_output) {
         json j = {{"output", o.glb_out}, {"keyframes", stats.keyframes}, {"triangles", stats.triangles},
                   {"animated_nodes", stats.animated_nodes}, {"max_degrees_per_keyframe", stats.max_degrees_per_keyframe}};
@@ -393,9 +394,9 @@ int ohs::cli::run(int argc, char** argv) {
     mesh->add_option("part_b", o.part_b, "Second part")->required();
     mesh->callback(pick(cmd_rig_mesh));
 
-    auto* anim = app.add_subcommand("animate", "Export the running train as an animated binary glTF");
+    auto* anim = app.add_subcommand("animate", "Export the running train as an animated binary glTF (.glb) or OpenUSD text file (.usda)");
     anim->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);
-    anim->add_option("-o,--output", o.glb_out, "GLB file to write")->required();
+    anim->add_option("-o,--output", o.glb_out, "File to write: .glb (glTF 2.0) or .usda (OpenUSD)")->required();
     anim->add_option("--step", o.step_override, "STEP file (default: the project's source next to it)");
     anim->add_option("--up", o.up, "CAD axis normal to the dial (default: the one found at import)");
     anim->add_option("--beat-rate", o.beat_rate, "Beat rate in vph (default: from project)");

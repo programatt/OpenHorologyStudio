@@ -349,7 +349,8 @@ Six milestones to 1.0, each usable on its own and closed by a gate you check.
 - [ ] MFEM, Netgen and VTK adapters (packages installed, not linked); a general 3D volume mesher
 - [ ] Chrono for the whole train, rigid bodies with collision geometry, shock transients
 - [x] HDF5 results for the structural fields (`ohs fea --hdf5`; JSON, CSV and VTU as before)
-- [ ] USD export; IGES/DXF import; STEP PMI tolerances
+- [x] USD export (`ohs animate -o x.usda`, checked with Pixar's reader)
+- [ ] IGES/DXF import; STEP PMI tolerances
 - [ ] Cycloidal gear profiles; escapements other than the Swiss lever; coil-contact mainspring and hairspring models
 - [ ] Windows and macOS builds, installers and CI run (configured only); Fusion 360 and SolidWorks add-in runs
 - [x] TSan (clean under `setarch -R`), coverage and static-analysis CI jobs (TSan run locally; coverage and clang-tidy jobs are configured, not run here)

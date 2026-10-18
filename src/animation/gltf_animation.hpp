@@ -36,4 +36,11 @@ AnimationStats write_animated_glb(const model::Movement& movement, const std::ve
                                   const kinematics::TrainAnalysis& train, geometry::Axis dial_axis,
                                   const AnimationOptions& options, const std::filesystem::path& path);
 
+/// Writes the same animation as an OpenUSD text file (.usda): millimetres (metersPerUnit 0.001), Z up,
+/// one Xform per part with a rotateZ time sample per keyframe (seconds, timeCodesPerSecond = 1) and a
+/// Mesh child holding the flat-shaded triangles. Statistics are those of write_animated_glb.
+AnimationStats write_animated_usd(const model::Movement& movement, const std::vector<geometry::ImportedPart>& parts,
+                                  const kinematics::TrainAnalysis& train, geometry::Axis dial_axis,
+                                  const AnimationOptions& options, const std::filesystem::path& path);
+
 }  // namespace ohs::animation

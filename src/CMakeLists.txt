@@ -79,7 +79,7 @@ target_link_libraries(ohs_reports PUBLIC ohs_manufacturing ohs_cases ohs_dynamic
 ohs_library(ohs_app app/import.cpp)
 target_link_libraries(ohs_app PUBLIC ohs_geometry ohs_rigging PRIVATE tomlplusplus::tomlplusplus spdlog::spdlog)
 
-ohs_library(ohs_animation animation/gltf_animation.cpp)
+ohs_library(ohs_animation animation/scene.cpp animation/gltf_animation.cpp animation/usd_animation.cpp)
 target_link_libraries(ohs_animation PUBLIC ohs_geometry ohs_kinematics PRIVATE nlohmann_json::nlohmann_json)
 
 ohs_library(ohs_lessons lessons/lessons.cpp)
