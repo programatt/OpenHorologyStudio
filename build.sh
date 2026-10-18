@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# One-command build and test: ./build.sh [--debug|--asan] [--jobs N] [--no-test]
+# One-command build and test: ./build.sh [--debug|--asan|--tsan|--coverage] [--jobs N] [--no-test]
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -11,6 +11,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --debug) preset=debug ;;
     --asan) preset=asan ;;
+    --tsan) preset=tsan ;;
+    --coverage) preset=coverage ;;
     --jobs) jobs="$2"; shift ;;
     --no-test) run_tests=0 ;;
     -h|--help) sed -n '3p' "$0"; exit 0 ;;
@@ -38,6 +40,11 @@ cmake --preset "$preset" || {
 }
 cmake --build --preset "$preset" ${jobs:+--parallel "$jobs"}
 if [[ $run_tests -eq 1 ]]; then
-  ctest --preset "$preset"
+  if [[ $preset == tsan ]]; then
+    # TSan aborts on kernels with high mmap ASLR entropy; disabling randomisation for the run avoids it.
+    TSAN_OPTIONS="halt_on_error=1 suppressions=$PWD/tests/tsan.supp ${TSAN_OPTIONS:-}" setarch "$(uname -m)" -R ctest --preset "$preset"
+  else
+    ctest --preset "$preset"
+  fi
 fi
 echo "ohs binary: build/$preset/src/ohs"

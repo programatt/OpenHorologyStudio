@@ -19,6 +19,18 @@
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "OHS_ASAN": "ON", "OHS_WARNINGS_AS_ERRORS": "ON" }
     },
     {
+      "name": "tsan", "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "OHS_TSAN": "ON", "OHS_WARNINGS_AS_ERRORS": "ON" }
+    },
+    {
+      "name": "coverage", "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "OHS_COVERAGE": "ON", "OHS_WARNINGS_AS_ERRORS": "ON" }
+    },
+    {
+      "name": "tidy", "inherits": "base",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "OHS_CLANG_TIDY": "ON", "OHS_BUILD_TESTS": "OFF" }
+    },
+    {
       "name": "gui", "inherits": "base",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "OHS_WARNINGS_AS_ERRORS": "ON", "OHS_BUILD_GUI": "ON" }
     },
@@ -42,6 +54,9 @@
     { "name": "release", "configurePreset": "release" },
     { "name": "debug", "configurePreset": "debug" },
     { "name": "asan", "configurePreset": "asan" },
+    { "name": "tsan", "configurePreset": "tsan" },
+    { "name": "coverage", "configurePreset": "coverage" },
+    { "name": "tidy", "configurePreset": "tidy" },
     { "name": "gui", "configurePreset": "gui" },
     { "name": "macos-release", "configurePreset": "macos-release" },
     { "name": "windows-release", "configurePreset": "windows-release", "configuration": "Release" },
@@ -51,6 +66,8 @@
     { "name": "release", "configurePreset": "release", "output": { "outputOnFailure": true } },
     { "name": "debug", "configurePreset": "debug", "output": { "outputOnFailure": true } },
     { "name": "asan", "configurePreset": "asan", "output": { "outputOnFailure": true } },
+    { "name": "tsan", "configurePreset": "tsan", "output": { "outputOnFailure": true } },
+    { "name": "coverage", "configurePreset": "coverage", "output": { "outputOnFailure": true } },
     { "name": "gui", "configurePreset": "gui", "output": { "outputOnFailure": true } },
     { "name": "macos-release", "configurePreset": "macos-release", "output": { "outputOnFailure": true } },
     { "name": "windows-release", "configurePreset": "windows-release", "configuration": "Release", "output": { "outputOnFailure": true } },

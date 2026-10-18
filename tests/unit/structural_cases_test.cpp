@@ -15,6 +15,11 @@
 #include "fea/calculix.hpp"
 #include "fea/fea.hpp"
 #include "fea/results.hpp"
+
+#ifdef OHS_WITH_HDF5
+#include <hdf5.h>
+#include <hdf5_hl.h>
+#endif
 #include "gear/gear.hpp"
 #include "geometry/section.hpp"
 #include "manufacturing/gear_export.hpp"
@@ -230,6 +235,38 @@ TEST_CASE("VTU output describes the mesh and its fields") {
     CHECK_THROWS_AS(fea::to_vtu(model.mesh, {bad}), Error);
     const auto lin = mesh::extrude(mesh::structured_rect(0, 0, 1, 1, 1, 1), 0, 1, 1, 1);
     CHECK_THAT(fea::to_vtu(lin, {}), Catch::Matchers::ContainsSubstring("10 10"));
+}
+
+TEST_CASE("HDF5 output round-trips the mesh and fields") {
+    fea::Model model;
+    model.mesh = mesh::extrude(mesh::structured_rect(0, 0, 1, 1, 1, 1), 0, 1, 1, 2);
+    fea::NodeField scalar{"temperature", std::vector<double>(model.mesh.nodes.size()), 1};
+    for (std::size_t i = 0; i < scalar.values.size(); ++i) scalar.values[i] = 0.5 * static_cast<double>(i);
+    const auto path = std::filesystem::temp_directory_path() / "ohs_results_test.h5";
+    if (!fea::hdf5_available()) {
+        CHECK_THROWS_AS(fea::write_hdf5(path, model.mesh, {scalar}), Error);
+        return;
+    }
+    fea::write_hdf5(path, model.mesh, {scalar});
+#ifdef OHS_WITH_HDF5
+    const hid_t file = H5Fopen(path.string().c_str(), H5F_ACC_RDONLY, H5P_DEFAULT);
+    REQUIRE(file >= 0);
+    std::vector<double> nodes(model.mesh.nodes.size() * 3), temp(scalar.values.size());
+    std::vector<int> conn(model.mesh.elems.size() * 10);
+    CHECK(H5LTread_dataset_double(file, "/mesh/nodes", nodes.data()) >= 0);
+    CHECK(H5LTread_dataset_int(file, "/mesh/elements", conn.data()) >= 0);
+    CHECK(H5LTread_dataset_double(file, "/fields/temperature", temp.data()) >= 0);
+    int order = 0;
+    CHECK(H5LTget_attribute_int(file, "/mesh", "order", &order) >= 0);
+    H5Fclose(file);
+    CHECK(order == 2);
+    CHECK(temp == scalar.values);
+    CHECK(nodes[3] == model.mesh.nodes[1].x);
+    CHECK(conn[9] == model.mesh.elems[0][9]);
+#endif
+    std::filesystem::remove(path);
+    fea::NodeField bad{"x", {1.0}, 1};
+    CHECK_THROWS_AS(fea::write_hdf5(path, model.mesh, {bad}), Error);
 }
 
 TEST_CASE("CalculiX input deck and result parser") {

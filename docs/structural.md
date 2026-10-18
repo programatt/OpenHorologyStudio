@@ -26,7 +26,8 @@ ohs fea movement.hsproj --part "train bridge" --case shock --g 5000 --size 0.2 -
 The part is cut at mid-height, meshed, and extruded; every hole (pivots, screws) is clamped; the
 shock is a body force (`--in-plane` for a lateral shock). Output: mass, largest deflection, peak
 von Mises stress, safety factor against the material's strength, and the lowest natural
-frequencies. `--vtu` writes a file for ParaView.
+frequencies. `--vtu` writes a file for ParaView; `--hdf5` writes the mesh and every field to an HDF5 file
+for Python (`h5py`) or MATLAB (needs a build with libhdf5; the Linux packages have it).
 
 Meshes are limited to 250,000 degrees of freedom: choose a larger `--size` when you hit it.
 

@@ -498,6 +498,7 @@ Options:
   --step TEXT                 STEP file (default: next to the project)
   --up TEXT                   CAD axis normal to the dial (default: the one found at import)
   --vtu TEXT                  Write the result for ParaView
+  --hdf5 TEXT                 Write mesh and fields to an HDF5 file (needs a build with libhdf5)
   --crosscheck                Compare with CalculiX if it is installed
   --beat-rate FLOAT           Beat rate in vph (default: from project)
 ```

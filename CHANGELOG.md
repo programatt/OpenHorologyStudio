@@ -9,6 +9,9 @@ Semantic Versioning, with the Python API and the plugin ABI versioned as describ
 Found by running the plan's gates on the real OM10 file.
 
 ### Added
+- `ohs fea --hdf5` writes the mesh and result fields to an HDF5 file (optional `libhdf5`).
+- `tsan`, `coverage` and `tidy` CMake presets (`./build.sh --tsan|--coverage`), with ThreadSanitizer,
+  gcovr coverage and clang-tidy/cppcheck jobs in CI.
 - Optional Project Chrono adapter for the level-3 simulation (`-DOHS_WITH_CHRONO=ON`,
   `--engine chrono` on `ohs simulate --level detailed` and `ohs verify levels`): the balance and
   escape wheel as Chrono shafts with its torsion spring and timestepper.

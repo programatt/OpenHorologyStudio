@@ -1,0 +1,5 @@
+# OCCT (libTK*) and oneTBB are not built with ThreadSanitizer, so their internal mutexes and thread
+# pools look racy to it. Races in our own code (src/, tests/) are still reported.
+race:libTK
+race:libtbb
+mutex:libTK

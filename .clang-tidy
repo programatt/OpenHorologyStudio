@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+# Static-analysis gate: bug-finding checks only, so the job fails on defects rather than style.
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  clang-analyzer-*,
+  -clang-analyzer-optin.performance.Padding,
+  performance-for-range-copy,
+  performance-unnecessary-copy-initialization,
+  performance-move-const-arg
+HeaderFilterRegex: '(src|include)/.*'
+WarningsAsErrors: ''

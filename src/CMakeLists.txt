@@ -41,6 +41,11 @@ file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/materials_data.cpp
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/data/materials/materials.toml)
 ohs_library(ohs_fea fea/material.cpp fea/element.cpp fea/fea.cpp fea/analysis.cpp fea/results.cpp fea/calculix.cpp ${CMAKE_CURRENT_BINARY_DIR}/materials_data.cpp)
 target_link_libraries(ohs_fea PUBLIC ohs_mesh Eigen3::Eigen PRIVATE tomlplusplus::tomlplusplus)
+if(HDF5_FOUND)
+  target_compile_definitions(ohs_fea PUBLIC OHS_WITH_HDF5)
+  target_include_directories(ohs_fea SYSTEM PUBLIC ${HDF5_INCLUDE_DIRS})
+  target_link_libraries(ohs_fea PUBLIC ${HDF5_HL_LIBRARIES} ${HDF5_LIBRARIES})
+endif()
 
 ohs_library(ohs_gear gear/gear.cpp)
 target_link_libraries(ohs_gear PUBLIC ohs_mesh)

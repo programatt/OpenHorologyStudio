@@ -58,7 +58,7 @@ if(OHS_ASAN)
 endif()
 add_dependencies(ohs_tests ohs ohs_plugin_example ohs_plugin_abi_v2 ohs_plugin_abi_newer_minor ohs_plugin_many ohs_plugin_error ohs_plugin_no_entry ohs_plugin_incomplete)
 catch_discover_tests(ohs_tests DISCOVERY_MODE PRE_TEST
-  PROPERTIES ENVIRONMENT "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
+  PROPERTIES ENVIRONMENT "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp" SKIP_RETURN_CODE 4)
 
 # ---- Python and documentation tests ---------------------------------------------------------------------
 find_package(Python 3.10 COMPONENTS Interpreter)

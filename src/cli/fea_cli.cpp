@@ -31,7 +31,7 @@ constexpr int kExitOk = 0;
 constexpr int kExitCheckFailed = 1;
 
 struct FeaOptions {
-    std::string project, part, case_name = "tooth-bending", material, materials_file, step_override, up, vtu;
+    std::string project, part, case_name = "tooth-bending", material, materials_file, step_override, up, vtu, hdf5;
     std::string hairspring = "nife_hairspring", balance = "brass_leaded";
     double load_n = 0, wind = 1.0, size = 0.2, size_factor = 0.14, shock_g = 5000, beat_rate = 0;
     int modes = 0;
@@ -156,6 +156,7 @@ int cmd_fea(const FeaOptions& o, bool as_json) {
         j["tip_deflection_mm"] = r.tip_deflection_mm;
         j["dofs"] = r.dofs;
         if (!o.vtu.empty()) fea::write_vtu(o.vtu, r.model.mesh, fea::static_fields(r.solution));
+        if (!o.hdf5.empty()) fea::write_hdf5(o.hdf5, r.model.mesh, fea::static_fields(r.solution));
         if (o.crosscheck) {
             j["crosscheck"] = {{"note", "the tooth case uses traction loads; use the shock case for the CalculiX cross-check"}};
         }
@@ -198,6 +199,7 @@ int cmd_fea(const FeaOptions& o, bool as_json) {
         j["clamped_holes"] = r.clamped_holes;
         j["free_openings"] = r.free_openings;
         if (!o.vtu.empty()) fea::write_vtu(o.vtu, r.model.mesh, fea::static_fields(r.solution));
+        if (!o.hdf5.empty()) fea::write_hdf5(o.hdf5, r.model.mesh, fea::static_fields(r.solution));
         if (o.crosscheck) {
             fea::Vec load = fea::Vec::Zero(r.model.dofs());
             fea::add_gravity(r.model, load, in.in_plane_shock ? mesh::V3{-o.shock_g * 9810.0, 0, 0} : mesh::V3{0, 0, -o.shock_g * 9810.0});
@@ -273,6 +275,7 @@ void add_fea_commands(CLI::App& app, const bool& json_flag, std::function<int()>
     fea->add_option("--step", o->step_override, "STEP file (default: next to the project)");
     fea->add_option("--up", o->up, "CAD axis normal to the dial (default: the one found at import)");
     fea->add_option("--vtu", o->vtu, "Write the result for ParaView");
+    fea->add_option("--hdf5", o->hdf5, "Write mesh and fields to an HDF5 file (needs a build with libhdf5)");
     fea->add_flag("--crosscheck", o->crosscheck, "Compare with CalculiX if it is installed");
     fea->add_option("--beat-rate", o->beat_rate, "Beat rate in vph (default: from project)");
     fea->callback(pick(cmd_fea));
