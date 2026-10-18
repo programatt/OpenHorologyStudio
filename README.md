@@ -72,4 +72,4 @@ modification study with the guided lessons.
 
 ## Licence
 
-Apache-2.0. See [`LICENSE`](LICENSE) and [`CHANGELOG.md`](CHANGELOG.md).
+Apache-2.0. See [`LICENSE.md`](LICENSE.md) and [`CHANGELOG.md`](CHANGELOG.md).

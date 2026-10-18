@@ -45,7 +45,7 @@ class PackageContents(unittest.TestCase):
         self.assertTrue(self.has("share/ohs/examples/plugins/min_hole.c"))
 
     def test_docs_licence_and_integrations(self):
-        for path in ("share/doc/ohs/index.md", "share/doc/ohs/lessons.md", "share/doc/ohs/reference/cli.md", "share/doc/ohs/LICENSE",
+        for path in ("share/doc/ohs/index.md", "share/doc/ohs/lessons.md", "share/doc/ohs/reference/cli.md", "share/doc/ohs/LICENSE.md",
                      "share/doc/ohs/CHANGELOG.md", "share/ohs/integrations/common/ohs_preset.py"):
             self.assertTrue(self.has(path), path)
 
