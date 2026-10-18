@@ -27,12 +27,27 @@ toml::table component_to_table(const Component& c) {
     t.insert("z", toml::array{f.z_min, f.z_max});
     t.insert("extent", toml::array{f.extent_x, f.extent_y});
     t.insert("outer_radius", f.outer_radius);
+    t.insert("root_radius", f.root_radius);
     t.insert("bore_radius", f.bore_radius);
+    t.insert("flank_base_radius", f.flank_base_radius);
+    t.insert("flank_rms", f.flank_rms);
     t.insert("volume", f.volume);
     // TOML integers are signed 64-bit, so store the fingerprint as hex text.
     std::ostringstream fp;
     fp << std::hex << f.fingerprint;
     t.insert("fingerprint", fp.str());
+    if (c.gear) {
+        const GearFit& g = *c.gear;
+        toml::table gt;
+        gt.insert("module", g.module);
+        gt.insert("module_source", g.module_source);
+        gt.insert("addendum", g.addendum);
+        gt.insert("dedendum", g.dedendum);
+        gt.insert("base_radius", g.base_radius);
+        gt.insert("pressure_angle_deg", g.pressure_angle_deg);
+        gt.insert("profile", g.profile);
+        t.insert("gear", std::move(gt));
+    }
     return t;
 }
 
@@ -67,10 +82,24 @@ Component component_from_table(const toml::table& t) {
     f.extent_x = ext.x;
     f.extent_y = ext.y;
     f.outer_radius = number(t, "outer_radius");
+    f.root_radius = number(t, "root_radius");
     f.bore_radius = number(t, "bore_radius");
+    f.flank_base_radius = number(t, "flank_base_radius");
+    f.flank_rms = number(t, "flank_rms", -1.0);
     f.volume = number(t, "volume");
     const std::string fp = t["fingerprint"].value_or(std::string{"0"});
     f.fingerprint = std::stoull(fp, nullptr, 16);
+    if (const toml::table* gt = t["gear"].as_table()) {
+        GearFit g;
+        g.module = number(*gt, "module");
+        g.module_source = (*gt)["module_source"].value_or(std::string{});
+        g.addendum = number(*gt, "addendum");
+        g.dedendum = number(*gt, "dedendum");
+        g.base_radius = number(*gt, "base_radius");
+        g.pressure_angle_deg = number(*gt, "pressure_angle_deg");
+        g.profile = (*gt)["profile"].value_or(std::string{});
+        c.gear = g;
+    }
     return c;
 }
 

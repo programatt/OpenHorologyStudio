@@ -18,6 +18,9 @@ target_link_libraries(ohs_rigging PUBLIC ohs_model)
 ohs_library(ohs_kinematics kinematics/kinematics.cpp)
 target_link_libraries(ohs_kinematics PUBLIC ohs_model)
 
+ohs_library(ohs_explain explain/explain.cpp)
+target_link_libraries(ohs_explain PUBLIC ohs_kinematics)
+
 ohs_library(ohs_geometry geometry/profile.cpp geometry/step_io.cpp geometry/features.cpp
             geometry/procedural.cpp)
 target_include_directories(ohs_geometry SYSTEM PUBLIC ${OpenCASCADE_INCLUDE_DIR})
@@ -27,8 +30,11 @@ target_link_libraries(ohs_geometry PUBLIC ohs_model ${OHS_OCCT_LIBS})
 ohs_library(ohs_app app/import.cpp)
 target_link_libraries(ohs_app PUBLIC ohs_geometry ohs_rigging PRIVATE tomlplusplus::tomlplusplus spdlog::spdlog)
 
+ohs_library(ohs_animation animation/gltf_animation.cpp)
+target_link_libraries(ohs_animation PUBLIC ohs_geometry ohs_kinematics PRIVATE nlohmann_json::nlohmann_json)
+
 add_executable(ohs cli/main.cpp)
-target_link_libraries(ohs PRIVATE ohs_app ohs_kinematics CLI11::CLI11 nlohmann_json::nlohmann_json spdlog::spdlog)
+target_link_libraries(ohs PRIVATE ohs_app ohs_kinematics ohs_explain ohs_animation CLI11::CLI11 nlohmann_json::nlohmann_json spdlog::spdlog)
 target_include_directories(ohs PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(ohs PRIVATE OHS_VERSION="${PROJECT_VERSION}" OHS_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 install(TARGETS ohs RUNTIME DESTINATION bin)

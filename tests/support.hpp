@@ -17,6 +17,9 @@ inline model::PartFeatures gear(std::string name, int teeth, double module, doub
     f.teeth = teeth;
     f.tooth_confidence = 1.0;
     f.outer_radius = (teeth + 2) * module / 2.0;
+    f.root_radius = (teeth - 2.5) * module / 2.0;
+    f.flank_base_radius = teeth * module / 2.0 * std::cos(20.0 * std::numbers::pi / 180.0);
+    f.flank_rms = 1e-4;
     f.bore_radius = 0.1;
     f.center = {x, y};
     f.z_min = z0;

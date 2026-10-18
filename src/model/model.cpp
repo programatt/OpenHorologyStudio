@@ -59,6 +59,13 @@ int Movement::mobile_of(int component) const {
     return -1;
 }
 
+int Movement::find_component(std::string_view name) const {
+    for (std::size_t i = 0; i < components.size(); ++i) {
+        if (components[i].features.name == name) return static_cast<int>(i);
+    }
+    return -1;
+}
+
 double module_from_tip(double outer_radius, int teeth) {
     return teeth > 0 ? 2.0 * outer_radius / (teeth + 2) : 0.0;
 }

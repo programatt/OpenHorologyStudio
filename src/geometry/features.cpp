@@ -11,8 +11,6 @@
 #include <BRepBndLib.hxx>
 #include <BRepGProp.hxx>
 #include <Bnd_Box.hxx>
-#include <GCPnts_AbscissaPoint.hxx>
-#include <GCPnts_UniformAbscissa.hxx>
 #include <GProp_GProps.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
@@ -25,8 +23,6 @@
 
 namespace ohs::geometry {
 
-namespace {
-
 TopoDS_Shape orient_dial_axis_to_z(const TopoDS_Shape& shape, Axis axis) {
     gp_Trsf t;
     switch (axis) {
@@ -36,6 +32,8 @@ TopoDS_Shape orient_dial_axis_to_z(const TopoDS_Shape& shape, Axis axis) {
     }
     return shape.Moved(TopLoc_Location(t));
 }
+
+namespace {
 
 std::uint64_t fnv1a(std::uint64_t h, long long v) {
     for (int i = 0; i < 8; ++i) {
@@ -54,6 +52,7 @@ std::uint64_t fingerprint(double volume, const double (&box)[6]) {
 }
 
 struct Outline {
+    std::vector<PolarPoint> points;
     std::vector<double> outer;  ///< max radius per angular bin, gaps filled
     double min_radius{};        ///< smallest radius of any sampled point (bore if present)
     bool ok{false};
@@ -75,17 +74,25 @@ Outline sample_outline(const TopoDS_Shape& shape, double z, double cx, double cy
         const int bin = std::min(n - 1, static_cast<int>(a / (2 * std::numbers::pi) * n));
         bins[bin] = std::max(bins[bin], r);
         min_r = std::min(min_r, r);
+        out.points.push_back({r, a});
     };
 
     for (TopExp_Explorer ex(section.Shape(), TopAbs_EDGE); ex.More(); ex.Next()) {
         BRepAdaptor_Curve curve(TopoDS::Edge(ex.Current()));
-        add(curve.Value(curve.FirstParameter()));
-        add(curve.Value(curve.LastParameter()));
-        // Small closed edges (an arbor's circle) need a finer step to cover every angular bin.
-        const double length = GCPnts_AbscissaPoint::Length(curve);
-        GCPnts_UniformAbscissa samples(curve, std::min(o.sample_step, length / (2.0 * n)));
-        if (!samples.IsDone()) continue;
-        for (int i = 1; i <= samples.NbPoints(); ++i) add(curve.Value(samples.Parameter(i)));
+        // Parameter-uniform samples; the count follows a coarse length estimate so that small
+        // closed edges (an arbor's circle) still cover every angular bin.
+        const double u0 = curve.FirstParameter();
+        const double u1 = curve.LastParameter();
+        double length = 0.0;
+        gp_Pnt previous = curve.Value(u0);
+        constexpr int kProbe = 16;
+        for (int i = 1; i <= kProbe; ++i) {
+            const gp_Pnt next = curve.Value(u0 + (u1 - u0) * i / kProbe);
+            length += previous.Distance(next);
+            previous = next;
+        }
+        const int count = std::clamp(static_cast<int>(std::ceil(length / std::min(o.sample_step, length / (2.0 * n)))), 2, 200000);
+        for (int i = 0; i <= count; ++i) add(curve.Value(u0 + (u1 - u0) * i / count));
     }
 
     // Fill empty bins from the nearest filled neighbours (circular, linear in index).
@@ -143,6 +150,15 @@ model::PartFeatures extract_features(const ImportedPart& part, const FeatureOpti
     const ToothResult teeth = detect_teeth(outline.outer, options.min_teeth);
     f.teeth = teeth.teeth;
     f.tooth_confidence = teeth.confidence;
+    if (f.teeth > 0) {
+        f.root_radius = root;
+        const double phase = tooth_phase(outline.outer, f.teeth);
+        const FlankFit fit = fit_involute_flank(outline.points, f.teeth, phase, root, f.outer_radius);
+        if (fit.ok) {
+            f.flank_base_radius = fit.base_radius;
+            f.flank_rms = fit.rms;
+        }
+    }
     return f;
 }
 

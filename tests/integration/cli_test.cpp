@@ -76,6 +76,30 @@ TEST_CASE("ohs CLI end to end") {
         REQUIRE_FALSE(fourth.empty());
         CHECK(run("kinematics " + proj + " --expect " + fourth + "=1", dir).exit_code == 0);
         CHECK(run("kinematics " + proj + " --expect " + fourth + "=2", dir).exit_code == 1);
+
+        // M1: gear fit in `rig check`, Explain, animation export, manual rig edits.
+        CHECK(check.output.find("\"involute\"") == std::string::npos);  // JSON summary stays terse
+        const auto text_check = run("rig check " + proj, dir);
+        CHECK(text_check.output.find("m=0.15 involute 20") != std::string::npos);
+
+        const auto walk = run("explain " + proj + " --train", dir);
+        CHECK(walk.exit_code == 0);
+        CHECK(walk.output.find("84:6 = x14") != std::string::npos);
+        const auto part = run("--json explain " + proj + " fourth_wheel", dir);
+        CHECK(part.exit_code == 0);
+        CHECK(nlohmann::json::parse(part.output)["part"]["role"] == "wheel");
+        CHECK(run("explain " + proj + " nope", dir).exit_code == 2);
+
+        const std::string glb = (dir / "m.glb").string();
+        const auto anim = run("--json animate " + proj + " --step " + step + " -o " + glb + " --duration 2", dir);
+        CHECK(anim.exit_code == 0);
+        CHECK(nlohmann::json::parse(anim.output)["animated_nodes"] == 14);
+        CHECK(fs::file_size(glb) > 100000);
+
+        CHECK(run("rig set " + proj + " fourth_wheel --role screw", dir).exit_code == 0);
+        CHECK(nlohmann::json::parse(run("--json rig check " + proj, dir).output)["components"].size() == 15);
+        CHECK(run("kinematics " + proj, dir).output.find("warning") != std::string::npos);
+        CHECK(run("rig set " + proj + " fourth_wheel --role sprocket", dir).exit_code == 2);
     }
 
     SECTION("error handling and exit codes") {

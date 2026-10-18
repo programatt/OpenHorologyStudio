@@ -16,8 +16,18 @@ struct RolePreset {
 
 struct RigOptions {
     double coaxial_tolerance = 0.05;  ///< mm, max centre offset for parts of one mobile
-    double centre_tolerance = 0.03;   ///< relative error allowed on mesh centre distance
-    double module_tolerance = 0.05;   ///< relative module mismatch allowed between meshing gears
+    // Mesh plausibility, in modules, with the module taken from the centre distance
+    // (m = 2C / (z1 + z2)): both gears must have a sensible addendum and dedendum, and the tip of
+    // each must clear the root of the other by roughly a quarter module.
+    double min_addendum = 0.75;
+    double max_addendum = 1.5;
+    double min_dedendum = 0.9;
+    double max_dedendum = 1.8;
+    double min_clearance = -0.1;
+    double max_clearance = 0.6;
+    double ideal_clearance = 0.25;
+    /// A flank fits an involute when its rms deviation is below this many modules.
+    double involute_rms_modules = 0.02;
     int min_teeth = 6;                ///< toothed parts need at least this many detected teeth
     double beat_rate_vph = 0.0;
     std::vector<RolePreset> presets;
@@ -34,6 +44,13 @@ Classification classify(const model::PartFeatures& part, const RigOptions& optio
 /// Classifies parts, groups mobiles by coaxiality and infers gear meshes.
 model::Movement auto_rig(std::string movement_name, std::vector<model::PartFeatures> parts,
                          const RigOptions& options);
+
+/// Recomputes mobiles, meshes and gear fits from the components' roles and features.
+void infer_structure(model::Movement& movement, const RigOptions& options);
+
+/// Overrides a component's role (source "user", confidence 1) and re-infers the structure.
+/// Throws ohs::Error if there is no component called `name`.
+void set_role(model::Movement& movement, const std::string& name, model::Role role, const RigOptions& options);
 
 enum class Severity { Info, Warning, Error };
 

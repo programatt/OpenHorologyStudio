@@ -19,6 +19,7 @@
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
+#include <gp_Ax1.hxx>
 #include <gp_Trsf.hxx>
 #include <gp_Vec.hxx>
 
@@ -108,9 +109,12 @@ void export_step(const std::vector<ExportPart>& parts, const std::filesystem::pa
         const TDF_Label part = tool->NewShape();
         tool->SetShape(part, p.shape);
         TDataStd_Name::Set(part, TCollection_ExtendedString(p.name.c_str(), true));
-        gp_Trsf t;
-        t.SetTranslation(gp_Vec(p.dx, p.dy, p.dz));
-        const TDF_Label instance = tool->AddComponent(assembly, part, TopLoc_Location(t));
+        gp_Trsf rotation;
+        rotation.SetRotation(gp_Ax1(gp::Origin(), gp::DZ()), p.rz);
+        gp_Trsf translation;
+        translation.SetTranslation(gp_Vec(p.dx, p.dy, p.dz));
+        const TDF_Label instance =
+            tool->AddComponent(assembly, part, TopLoc_Location(translation.Multiplied(rotation)));
         TDataStd_Name::Set(instance, TCollection_ExtendedString(p.name.c_str(), true));
     }
     tool->UpdateAssemblies();

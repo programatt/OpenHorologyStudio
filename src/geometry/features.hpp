@@ -15,6 +15,9 @@ struct FeatureOptions {
     int min_teeth = 6;
 };
 
+/// Rotates the shape so the CAD dial axis becomes Z (identity for Axis::Z).
+TopoDS_Shape orient_dial_axis_to_z(const TopoDS_Shape& shape, Axis axis);
+
 /// Extracts mass properties, bounding box, outline radii and tooth count of one part.
 /// Parts without volume (surfaces) come back with volume 0 and no teeth.
 model::PartFeatures extract_features(const ImportedPart& part, const FeatureOptions& options = {});

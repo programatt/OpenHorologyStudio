@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <numbers>
 #include <regex>
 
 #include "core/error.hpp"
@@ -85,16 +86,78 @@ Classification classify(const PartFeatures& part, const RigOptions& options) {
     return {Role::Unknown, 0.0, "geometry"};
 }
 
-Movement auto_rig(std::string movement_name, std::vector<PartFeatures> parts,
-                  const RigOptions& options) {
-    Movement m;
-    m.name = std::move(movement_name);
-    m.beat_rate_vph = options.beat_rate_vph;
+namespace {
 
-    for (PartFeatures& p : parts) {
-        const Classification c = classify(p, options);
-        m.components.push_back({std::move(p), c.role, c.confidence, c.source});
+// Pairs of toothed parts that mesh: the module follows from the centre distance, then each gear's
+// addendum and dedendum and the tip-to-root clearance must be plausible for that module.
+bool plausible_mesh(const PartFeatures& a, const PartFeatures& b, double centre, const RigOptions& o,
+                    double& module, double& confidence) {
+    module = 2.0 * centre / (a.teeth + b.teeth);
+    auto gear_ok = [&](const PartFeatures& f) {
+        const double addendum = f.outer_radius / module - f.teeth / 2.0;
+        if (addendum < o.min_addendum || addendum > o.max_addendum) return false;
+        if (f.root_radius <= 0.0) return true;  // rig written before root radii were recorded
+        const double dedendum = f.teeth / 2.0 - f.root_radius / module;
+        return dedendum >= o.min_dedendum && dedendum <= o.max_dedendum;
+    };
+    if (!gear_ok(a) || !gear_ok(b)) return false;
+
+    confidence = 1.0;
+    if (a.root_radius > 0.0 && b.root_radius > 0.0) {
+        const double c1 = (centre - (a.outer_radius + b.root_radius)) / module;
+        const double c2 = (centre - (b.outer_radius + a.root_radius)) / module;
+        for (double c : {c1, c2}) {
+            if (c < o.min_clearance || c > o.max_clearance) return false;
+        }
+        const double spread = std::max(o.ideal_clearance - o.min_clearance, o.max_clearance - o.ideal_clearance);
+        confidence = 1.0 - 0.5 * (std::abs(c1 - o.ideal_clearance) + std::abs(c2 - o.ideal_clearance)) / spread;
     }
+    confidence = std::clamp(confidence, 0.0, 1.0);
+    return true;
+}
+
+void fit_gears(Movement& m, const RigOptions& o) {
+    std::vector<double> module_sum(m.components.size(), 0.0);
+    std::vector<int> module_count(m.components.size(), 0);
+    for (const model::MeshJoint& j : m.meshes) {
+        for (int idx : {j.a, j.b}) {
+            module_sum[idx] += j.module;
+            ++module_count[idx];
+        }
+    }
+    for (std::size_t i = 0; i < m.components.size(); ++i) {
+        Component& c = m.components[i];
+        c.gear.reset();
+        const PartFeatures& f = c.features;
+        if (!model::is_toothed_role(c.role) || f.teeth < o.min_teeth) continue;
+
+        model::GearFit g;
+        if (module_count[i] > 0) {
+            g.module = module_sum[i] / module_count[i];
+            g.module_source = "mesh";
+        } else {
+            g.module = model::module_from_tip(f.outer_radius, f.teeth);
+            g.module_source = "tip";
+        }
+        g.addendum = f.outer_radius / g.module - f.teeth / 2.0;
+        g.dedendum = f.root_radius > 0 ? f.teeth / 2.0 - f.root_radius / g.module : 0.0;
+        const double pitch_radius = g.module * f.teeth / 2.0;
+        if (f.flank_rms >= 0.0 && f.flank_base_radius > 0.0 && f.flank_base_radius < pitch_radius) {
+            g.base_radius = f.flank_base_radius;
+            g.pressure_angle_deg = std::acos(g.base_radius / pitch_radius) * 180.0 / std::numbers::pi;
+            g.profile = f.flank_rms <= o.involute_rms_modules * g.module ? "involute" : "unknown";
+        } else {
+            g.profile = "unknown";
+        }
+        c.gear = g;
+    }
+}
+
+}  // namespace
+
+void infer_structure(Movement& m, const RigOptions& options) {
+    m.mobiles.clear();
+    m.meshes.clear();
     const int n = static_cast<int>(m.components.size());
 
     // Group rotating parts whose axes coincide into mobiles (greedy single linkage).
@@ -129,8 +192,7 @@ Movement auto_rig(std::string movement_name, std::vector<PartFeatures> parts,
             mob.name = "M" + std::to_string(m.mobiles.size() + 1);
             m.mobiles.push_back(std::move(mob));
         }
-        model::Mobile& mob = m.mobiles[renumber[group[i]]];
-        mob.components.push_back(i);
+        m.mobiles[renumber[group[i]]].components.push_back(i);
     }
     for (model::Mobile& mob : m.mobiles) {
         for (int idx : mob.components) {
@@ -139,8 +201,6 @@ Movement auto_rig(std::string movement_name, std::vector<PartFeatures> parts,
         }
     }
 
-    // Meshes: toothed parts of different mobiles with equal module whose centre distance
-    // equals the sum of pitch radii, and which overlap axially.
     for (int i = 0; i < n; ++i) {
         const Component& ci = m.components[i];
         if (!model::is_toothed_role(ci.role) || !is_toothed(ci.features, options)) continue;
@@ -148,25 +208,39 @@ Movement auto_rig(std::string movement_name, std::vector<PartFeatures> parts,
             const Component& cj = m.components[j];
             if (!model::is_toothed_role(cj.role) || !is_toothed(cj.features, options)) continue;
             if (m.mobile_of(i) == m.mobile_of(j)) continue;
-
             const double overlap = std::min(ci.features.z_max, cj.features.z_max) -
                                    std::max(ci.features.z_min, cj.features.z_min);
             if (overlap <= 0.0) continue;
 
-            const double mi = model::module_from_tip(ci.features.outer_radius, ci.features.teeth);
-            const double mj = model::module_from_tip(cj.features.outer_radius, cj.features.teeth);
-            const double module = 0.5 * (mi + mj);
-            const double module_err = std::abs(mi - mj) / module;
-            const double expected = module * (ci.features.teeth + cj.features.teeth) / 2.0;
-            const double actual = distance(ci.features.center, cj.features.center);
-            const double centre_err = std::abs(actual - expected) / expected;
-            if (module_err > options.module_tolerance || centre_err > options.centre_tolerance) continue;
-
-            const double conf = 1.0 - 0.5 * (module_err / options.module_tolerance +
-                                             centre_err / options.centre_tolerance);
-            m.meshes.push_back({i, j, actual, module, std::clamp(conf, 0.0, 1.0)});
+            const double centre = distance(ci.features.center, cj.features.center);
+            double module = 0.0;
+            double confidence = 0.0;
+            if (plausible_mesh(ci.features, cj.features, centre, options, module, confidence)) {
+                m.meshes.push_back({i, j, centre, module, confidence});
+            }
         }
     }
+    fit_gears(m, options);
+}
+
+void set_role(Movement& m, const std::string& name, Role role, const RigOptions& options) {
+    const int idx = m.find_component(name);
+    if (idx < 0) throw Error("no component named '" + name + "'");
+    m.components[idx].role = role;
+    m.components[idx].role_confidence = 1.0;
+    m.components[idx].role_source = "user";
+    infer_structure(m, options);
+}
+
+Movement auto_rig(std::string movement_name, std::vector<PartFeatures> parts, const RigOptions& options) {
+    Movement m;
+    m.name = std::move(movement_name);
+    m.beat_rate_vph = options.beat_rate_vph;
+    for (PartFeatures& p : parts) {
+        const Classification c = classify(p, options);
+        m.components.push_back({std::move(p), std::nullopt, c.role, c.confidence, c.source});
+    }
+    infer_structure(m, options);
     return m;
 }
 

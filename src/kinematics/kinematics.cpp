@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <queue>
 
 #include "core/error.hpp"
@@ -92,6 +93,30 @@ TrainAnalysis analyze_train(const Movement& m, double beat_rate_vph, int root) {
         out.warnings.push_back("the escape wheel is missing or not connected to the train");
     }
     return out;
+}
+
+std::vector<double> mobile_angles(const TrainAnalysis& train, double seconds, const PoseOptions& options) {
+    if (train.root_period_hours <= 0.0 || train.beats_per_root_rev <= 0.0) {
+        throw Error("poses need a beat rate and an escape wheel connected to the train");
+    }
+    constexpr double two_pi = 2.0 * std::numbers::pi;
+    double root_revs;
+    if (options.stepped) {
+        const double beats = seconds / 3600.0 * train.beats_per_root_rev / train.root_period_hours;
+        const double whole = std::floor(beats);
+        const double frac = beats - whole;
+        const double w = std::clamp(options.impulse_fraction, 1e-3, 1.0);
+        const double x = std::clamp((frac - (1.0 - w)) / w, 0.0, 1.0);
+        const double eased = x * x * (3.0 - 2.0 * x);  // smoothstep
+        root_revs = (whole + eased) / train.beats_per_root_rev;
+    } else {
+        root_revs = seconds / 3600.0 / train.root_period_hours;
+    }
+    std::vector<double> angles(train.mobiles.size(), 0.0);
+    for (std::size_t i = 0; i < angles.size(); ++i) {
+        if (train.mobiles[i].reached) angles[i] = two_pi * root_revs * train.mobiles[i].ratio;
+    }
+    return angles;
 }
 
 }  // namespace ohs::kinematics

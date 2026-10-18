@@ -50,7 +50,10 @@ struct PartFeatures {
     double extent_x{};
     double extent_y{};
     double outer_radius{};  ///< largest radius from the centre in the mid-height section
+    double root_radius{};   ///< smallest radius of the toothed outline (0 when not toothed)
     double bore_radius{};   ///< 0 when the part has no central bore
+    double flank_base_radius{};  ///< base circle of the best-fit involute flank (0 if no fit)
+    double flank_rms{-1};        ///< rms distance of the flank from that fit in mm (-1 if no fit)
     int teeth{};            ///< 0 when no toothing was detected
     double tooth_confidence{};
     std::uint64_t fingerprint{};
@@ -58,8 +61,20 @@ struct PartFeatures {
     double thickness() const { return z_max - z_min; }
 };
 
+/// Gear parameters fitted to a toothed part and its meshes.
+struct GearFit {
+    double module{};
+    std::string module_source;  ///< "mesh" (from centre distances) or "tip" (assumed one-module addendum)
+    double addendum{};          ///< addendum height in modules
+    double dedendum{};          ///< dedendum depth in modules
+    double base_radius{};       ///< 0 when the flank fit failed
+    double pressure_angle_deg{};
+    std::string profile;        ///< "involute" or "unknown"
+};
+
 struct Component {
     PartFeatures features;
+    std::optional<GearFit> gear;
     Role role{Role::Unknown};
     double role_confidence{};
     std::string role_source;  ///< "preset", "name", "geometry" or "user"
@@ -91,6 +106,8 @@ struct Movement {
 
     /// Index of the mobile holding component `component`, or -1.
     int mobile_of(int component) const;
+    /// Index of the component called `name`, or -1.
+    int find_component(std::string_view name) const;
 };
 
 /// Gear module estimated from the tip radius assuming a standard addendum of one module.

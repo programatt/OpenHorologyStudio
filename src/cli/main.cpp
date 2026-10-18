@@ -11,8 +11,10 @@
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 
+#include "animation/gltf_animation.hpp"
 #include "app/import.hpp"
 #include "core/error.hpp"
+#include "explain/explain.hpp"
 #include "geometry/procedural.hpp"
 #include "geometry/step_io.hpp"
 #include "kinematics/kinematics.hpp"
@@ -68,6 +70,18 @@ struct Options {
     std::vector<std::string> expect;
     std::string root_mobile;
 
+    // rig set
+    std::string part_name, role_name;
+
+    // animate
+    std::string step_override, glb_out;
+    double duration = 10.0, fps = 30.0, time_scale = 600.0;
+    bool stepped = false;
+
+    // explain
+    std::string explain_part;
+    bool explain_train = false;
+
     // dev gen-movement
     std::string gen_out;
 
@@ -75,13 +89,16 @@ struct Options {
     std::vector<std::string> om10_args;
 };
 
+ohs::geometry::Axis parse_axis(const std::string& up) {
+    if (up == "x") return ohs::geometry::Axis::X;
+    if (up == "y") return ohs::geometry::Axis::Y;
+    if (up == "z") return ohs::geometry::Axis::Z;
+    throw ohs::Error("--up must be x, y or z");
+}
+
 int cmd_import(const Options& o) {
     ohs::app::ImportOptions opt;
-    const std::map<std::string, ohs::geometry::Axis> axes{
-        {"x", ohs::geometry::Axis::X}, {"y", ohs::geometry::Axis::Y}, {"z", ohs::geometry::Axis::Z}};
-    const auto axis = axes.find(o.up);
-    if (axis == axes.end()) throw ohs::Error("--up must be x, y or z");
-    opt.features.dial_axis = axis->second;
+    opt.features.dial_axis = parse_axis(o.up);
     opt.features.min_teeth = o.min_teeth;
     opt.rig.beat_rate_vph = o.beat_rate;
     if (!o.preset_file.empty()) opt.rig.presets = ohs::app::load_role_presets(o.preset_file);
@@ -119,7 +136,12 @@ int cmd_rig_check(const Options& o) {
         for (const auto& c : m.components) {
             std::cout << std::left << std::setw(24) << c.features.name << std::setw(14) << to_string(c.role)
                       << " conf " << std::fixed << std::setprecision(2) << c.role_confidence << "  teeth "
-                      << c.features.teeth << "  (" << c.role_source << ")\n";
+                      << c.features.teeth << "  (" << c.role_source << ")";
+            if (c.gear) {
+                std::cout << "  m=" << c.gear->module << " " << c.gear->profile;
+                if (c.gear->profile == "involute") std::cout << " " << std::setprecision(3) << c.gear->pressure_angle_deg << "deg";
+            }
+            std::cout << '\n';
         }
         for (const auto& i : issues) std::cout << severity_name(i.severity) << ": " << i.message << '\n';
         std::cout << errors << " error(s), " << warnings << " warning(s)\n";
@@ -192,6 +214,80 @@ int cmd_kinematics(const Options& o) {
     return failed ? kExitCheckFailed : kExitOk;
 }
 
+int cmd_rig_set(const Options& o) {
+    ohs::model::Movement m = ohs::model::load_rig(o.project);
+    const auto role = ohs::model::role_from_string(o.role_name);
+    if (!role) throw ohs::Error("unknown role '" + o.role_name + "'");
+    ohs::rigging::RigOptions rig;
+    rig.min_teeth = o.min_teeth;
+    ohs::rigging::set_role(m, o.part_name, *role, rig);
+    ohs::model::save_rig(m, o.project);
+    std::cout << o.part_name << " is now " << o.role_name << "; " << m.mobiles.size() << " mobiles, " << m.meshes.size()
+              << " meshes\n";
+    return kExitOk;
+}
+
+int cmd_animate(const Options& o) {
+    const ohs::model::Movement m = ohs::model::load_rig(o.project);
+    const double vph = o.beat_rate > 0 ? o.beat_rate : m.beat_rate_vph;
+    const auto train = ohs::kinematics::analyze_train(m, vph);
+
+    fs::path step = o.step_override;
+    if (step.empty()) step = fs::path(o.project).parent_path() / m.source_geometry;
+    const auto parts = ohs::geometry::import_step(step);
+
+    ohs::animation::AnimationOptions opt;
+    opt.duration_seconds = o.duration;
+    opt.fps = o.fps;
+    opt.time_scale = o.time_scale;
+    opt.stepped = o.stepped;
+    const auto stats =
+        ohs::animation::write_animated_glb(m, parts, train, parse_axis(o.up), opt, o.glb_out);
+    if (o.json_output) {
+        json j = {{"output", o.glb_out}, {"keyframes", stats.keyframes}, {"triangles", stats.triangles},
+                  {"animated_nodes", stats.animated_nodes}, {"max_degrees_per_keyframe", stats.max_degrees_per_keyframe}};
+        std::cout << j.dump(2) << '\n';
+    } else {
+        std::cout << "wrote " << o.glb_out << ": " << stats.keyframes << " keyframes, " << stats.triangles
+                  << " triangles, " << stats.animated_nodes << " animated parts (max "
+                  << stats.max_degrees_per_keyframe << " deg between keyframes)\n";
+    }
+    return kExitOk;
+}
+
+int cmd_explain(const Options& o) {
+    const ohs::model::Movement m = ohs::model::load_rig(o.project);
+    const double vph = o.beat_rate > 0 ? o.beat_rate : m.beat_rate_vph;
+    const auto train = ohs::kinematics::analyze_train(m, vph);
+    if (!o.explain_train && o.explain_part.empty()) throw ohs::Error("give a part name or --train");
+
+    json j;
+    if (!o.explain_part.empty()) {
+        const auto e = ohs::explain::explain_part(m, train, o.explain_part);
+        if (o.json_output) {
+            j["part"] = {{"name", e.name}, {"role", e.role}, {"summary", e.summary}, {"facts", e.facts}};
+        } else {
+            std::cout << ohs::explain::to_text(e);
+        }
+    }
+    if (o.explain_train) {
+        const auto w = ohs::explain::walk_train(m, train);
+        if (o.json_output) {
+            j["train"] = {{"root", w.root}, {"conclusion", w.conclusion}, {"steps", json::array()}};
+            for (const auto& s : w.steps) {
+                j["train"]["steps"].push_back({{"driver", s.driver}, {"driven", s.driven}, {"driver_teeth", s.driver_teeth},
+                                               {"driven_teeth", s.driven_teeth}, {"mobile", s.driven_mobile},
+                                               {"step_ratio", s.step_ratio}, {"cumulative_ratio", s.cumulative_ratio},
+                                               {"rph", s.revs_per_hour}});
+            }
+        } else {
+            std::cout << ohs::explain::to_text(w);
+        }
+    }
+    if (o.json_output) std::cout << j.dump(2) << '\n';
+    return kExitOk;
+}
+
 int cmd_gen_movement(const Options& o) {
     ohs::geometry::export_step(ohs::geometry::make_test_movement(), o.gen_out);
     std::cout << "wrote " << o.gen_out << '\n';
@@ -240,6 +336,32 @@ int main(int argc, char** argv) {
     check->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);
     check->add_flag("--strict", o.strict, "Treat warnings as failures");
     check->callback(pick(cmd_rig_check));
+
+    auto* set = rig->add_subcommand("set", "Override a part's role and re-infer mobiles and meshes");
+    set->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);
+    set->add_option("part", o.part_name, "Part name")->required();
+    set->add_option("--role", o.role_name, "plate, bridge, barrel, arbor, wheel, pinion, escape_wheel, ...")->required();
+    set->add_option("--min-teeth", o.min_teeth, "Fewest teeth to call a part toothed")->capture_default_str();
+    set->callback(pick(cmd_rig_set));
+
+    auto* anim = app.add_subcommand("animate", "Export the running train as an animated binary glTF");
+    anim->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);
+    anim->add_option("-o,--output", o.glb_out, "GLB file to write")->required();
+    anim->add_option("--step", o.step_override, "STEP file (default: the project's source next to it)");
+    anim->add_option("--up", o.up, "CAD axis normal to the dial used at import")->capture_default_str();
+    anim->add_option("--beat-rate", o.beat_rate, "Beat rate in vph (default: from project)");
+    anim->add_option("--duration", o.duration, "Animation length in seconds")->capture_default_str();
+    anim->add_option("--fps", o.fps, "Minimum keyframes per second")->capture_default_str();
+    anim->add_option("--time-scale", o.time_scale, "Movement seconds per animation second")->capture_default_str();
+    anim->add_flag("--stepped", o.stepped, "Advance the train one escapement step per beat");
+    anim->callback(pick(cmd_animate));
+
+    auto* expl = app.add_subcommand("explain", "Explain a part or walk through the gear train with this movement's numbers");
+    expl->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);
+    expl->add_option("part", o.explain_part, "Part name");
+    expl->add_flag("--train", o.explain_train, "Walk through the going train step by step");
+    expl->add_option("--beat-rate", o.beat_rate, "Beat rate in vph (default: from project)");
+    expl->callback(pick(cmd_explain));
 
     auto* kin = app.add_subcommand("kinematics", "Rigid-body ratios and speeds of the going train");
     kin->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);

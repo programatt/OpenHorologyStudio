@@ -14,4 +14,25 @@ struct ToothResult {
 /// using the dominant Fourier harmonic of at least `min_teeth`.
 ToothResult detect_teeth(std::span<const double> radii, int min_teeth);
 
+/// Angle in [0, 2pi/teeth) at which the outline's teeth peak, from the phase of the tooth harmonic.
+/// Bin i is taken to span angles [i, i+1) * 2pi/n.
+double tooth_phase(std::span<const double> radii, int teeth);
+
+/// One outline sample in polar form about the part centre; theta in [0, 2pi).
+struct PolarPoint {
+    double r{};
+    double theta{};
+};
+
+struct FlankFit {
+    bool ok{false};
+    double base_radius{};  ///< base circle of the best-fit involute
+    double rms{};          ///< rms distance of the sampled flank from the fit, in the outline's units
+};
+
+/// Fits an involute flank u(r) = s0 - inv(acos(rb / r)) to the middle 60 % of the tooth depth,
+/// pooling all teeth and both flanks of a symmetric tooth. `phase` comes from tooth_phase().
+FlankFit fit_involute_flank(std::span<const PolarPoint> points, int teeth, double phase,
+                            double root_radius, double tip_radius);
+
 }  // namespace ohs::geometry

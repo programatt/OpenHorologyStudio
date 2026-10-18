@@ -31,4 +31,16 @@ struct TrainAnalysis {
 /// mobile that holds the barrel. A zero `beat_rate_vph` skips the absolute speeds.
 TrainAnalysis analyze_train(const model::Movement& movement, double beat_rate_vph, int root = -1);
 
+struct PoseOptions {
+    /// false: the train turns smoothly. true: it advances one escapement step per beat, moving
+    /// during the last `impulse_fraction` of each beat and resting the remainder.
+    bool stepped{false};
+    double impulse_fraction{0.2};
+};
+
+/// Rotation angle in radians of every mobile at `seconds` of real time (mobile order as in the
+/// movement; unreached mobiles stay at 0). Needs a known beat rate, i.e. root_period_hours > 0.
+/// A positive angle is counter-clockwise seen from +Z, and the root mobile turns positively.
+std::vector<double> mobile_angles(const TrainAnalysis& train, double seconds, const PoseOptions& options = {});
+
 }  // namespace ohs::kinematics

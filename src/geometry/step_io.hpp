@@ -20,13 +20,15 @@ struct ImportedPart {
 /// "#n" suffix. Throws ohs::Error when the file cannot be read.
 std::vector<ImportedPart> import_step(const std::filesystem::path& path);
 
-/// A part for export. `placement` is applied as an assembly component transform.
+/// A part for export. The component transform rotates by `rz` about the part's own Z axis, then
+/// translates by (dx, dy, dz).
 struct ExportPart {
     std::string name;
     TopoDS_Shape shape;
     double dx{};
     double dy{};
     double dz{};
+    double rz{};
 };
 
 /// Writes the parts as one STEP assembly with named components.

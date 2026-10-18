@@ -3,6 +3,8 @@
 
 #include <toml++/toml.hpp>
 
+#include <chrono>
+
 #include <spdlog/spdlog.h>
 
 #include "core/error.hpp"
@@ -17,8 +19,10 @@ model::Movement import_movement(const std::filesystem::path& step_file, const Im
     std::vector<model::PartFeatures> features;
     features.reserve(parts.size());
     for (const auto& part : parts) {
+        const auto start = std::chrono::steady_clock::now();
         features.push_back(geometry::extract_features(part, options.features));
-        spdlog::debug("{}: volume {:.3f} mm3, {} teeth", part.name, features.back().volume, features.back().teeth);
+        spdlog::debug("{}: volume {:.3f} mm3, {} teeth, {:.2f} s", part.name, features.back().volume,
+                      features.back().teeth, std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
     }
 
     rigging::RigOptions rig = options.rig;

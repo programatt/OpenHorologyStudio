@@ -318,16 +318,21 @@ The reference test movements are **generated procedurally** by the test suite (a
 
 Claude builds Open Horology Studio alone, so the roadmap is ordered by milestones, not calendar months: each one is a vertical slice you can install and use on OM10, and each ends with a gate you check on your own machine. Progress is measured by gates passed, not time spent.
 
-| Milestone | Scope | Gate (you check it) |
-| --- | --- | --- |
-| **M0 Foundation: see your movement** | Build scripts, CI on 3 OSes, project file, CLI skeleton. OM10 STEP import, 3D viewer, exploded and section views. | You build from a fresh clone and open OM10 in the viewer. |
-| **M1 Movement model: watch it run** | Auto-rigging, gear fitting, kinematic animation. Explain panel: what each part does, gear ratio walkthrough. | OM10 animates; train gives 25,200 vph and 1 rpm seconds. |
-| **M2 Timekeeping: why it keeps time** | Torque chain, reduced escapement model, virtual timegrapher. What-if studies: baseline vs. modified, Chrono verification. | Simulation agrees with Chrono and your timegrapher trend. |
-| **M3 Structural analysis: will it hold** | Netgen meshing, MFEM static, modal, nonlinear; VTK results. Guided load-case setup, CalculiX cross-check, verification suite. | Benchmarks match hand calcs and converge as expected. |
-| **M4 Manufacturing: can you make it** | Tolerance Monte Carlo, DFM rules for your own tools, collisions. Gear generator to STEP/DXF, part drawings, HTML/PDF reports. | You make one part from a tool-generated drawing. |
-| **M5 Release 1.0: learn by doing** | Guided OM10 lessons, docs, installers, performance tuning. Python API freeze, plugin ABI 1.0, CAD add-ins. | You finish an OM10 mod study using only the guided lessons. |
+| Milestone | Status | Scope | Gate (you check it) |
+| --- | --- | --- | --- |
+| [x] **M0 Foundation: see your movement** | Build scripts, CI on 3 OSes, project file, CLI skeleton. OM10 STEP import, 3D viewer, exploded and section views. | You build from a fresh clone and open OM10 in the viewer. |
+| **M1 Movement model: watch it run** | Completed (see notes) | Auto-rigging, gear fitting, kinematic animation. Explain panel: what each part does, gear ratio walkthrough. | OM10 animates; train gives 25,200 vph and 1 rpm seconds. |
+| **M2 Timekeeping: why it keeps time** | Not started | Torque chain, reduced escapement model, virtual timegrapher. What-if studies: baseline vs. modified, Chrono verification. | Simulation agrees with Chrono and your timegrapher trend. |
+| **M3 Structural analysis: will it hold** | Not started | Netgen meshing, MFEM static, modal, nonlinear; VTK results. Guided load-case setup, CalculiX cross-check, verification suite. | Benchmarks match hand calcs and converge as expected. |
+| **M4 Manufacturing: can you make it** | Not started | Tolerance Monte Carlo, DFM rules for your own tools, collisions. Gear generator to STEP/DXF, part drawings, HTML/PDF reports. | You make one part from a tool-generated drawing. |
+| **M5 Release 1.0: learn by doing** | Not started | Guided OM10 lessons, docs, installers, performance tuning. Python API freeze, plugin ABI 1.0, CAD add-ins. | You finish an OM10 mod study using only the guided lessons. |
 
 Six milestones to 1.0, each usable on its own and closed by a gate you check.
+
+**Status notes**
+
+- **M0 completed** as a headless build: one-command `build.sh` with CMake presets, TOML project file, `ohs` CLI skeleton, STEP import through Open CASCADE, and the full test suite (also clean under ASan/UBSan). Deferred and not yet built: the Qt/OCCT 3D viewer with exploded and section views, CI on three operating systems, `build.ps1`, and the vcpkg superbuild. The "open OM10 in the viewer" gate therefore still needs the viewer; the OM10 STEP file has not been imported either, since it is not in the repository.
+- **M1 completed** for the engine: auto-rigging with module-from-mesh gear fitting (addendum, dedendum, involute base circle and pressure angle), a manual `ohs rig set` correction, kinematic poses (smooth or one escapement step per beat), animated glTF export (`ohs animate`) and the Explain output (`ohs explain`, part facts and a gear-ratio walkthrough). Verified on the procedurally generated going train, which gives 25,200 vph and a 1 rpm fourth wheel. Deferred: the live animation timeline and Explain panel in the Qt UI, cycloidal flank fitting, and the gate itself on the real OM10 file.
 
 **How a solo AI developer keeps this honest**
 
