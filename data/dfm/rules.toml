@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: Apache-2.0
+# Design-for-manufacturing rule sets. Each process lists the rules it runs and the limits they
+# use (mm unless stated). The defaults describe a small hobby workshop: lathe, mill, wheel-cutting
+# engine, 3D printer and a timegrapher, no EDM. Edit a copy and pass it with --rules to match
+# your own tools. Wire EDM, silicon and jewelling are for parts you outsource or buy.
+
+[process.mill]
+description = "Milling plates, bridges and levers with end mills"
+rules = ["internal_radius", "depth_to_diameter", "min_wall"]
+skip_toothed = 1                              # toothed wheels are cut on the wheel-cutting engine, not milled
+cutters = [0.3, 0.5, 0.8, 1.0, 1.5, 2.0]     # end mill diameters you own
+max_depth_to_diameter = 4.0                   # pocket depth over cutter diameter, before it chatters or breaks
+min_wall = 0.25
+
+[process.lathe]
+description = "Turning arbors, staffs and pinions blanks"
+rules = ["min_wall"]
+min_wall = 0.20
+
+[process.wheel-cutting]
+description = "Cutting teeth with a wheel-cutting engine and form cutters"
+rules = ["module_cutter", "min_teeth", "undercut", "pinion_leaves"]
+cutter_modules = [0.10, 0.12, 0.15, 0.18, 0.20, 0.25, 0.30]
+module_tolerance = 0.02                       # relative: a cutter within 2 % of the module is accepted
+min_teeth = 8
+min_pinion_leaves = 6
+
+[process.print]
+description = "Resin or filament 3D printing of enlarged models and jigs"
+rules = ["internal_radius", "min_wall"]
+cutters = [0.4]                               # smallest printable feature stands in for the tool diameter
+min_wall = 0.8
+
+[process.wire-edm]
+description = "Wire EDM by an outside service (not in your workshop)"
+rules = ["internal_radius", "min_wall"]
+cutters = [0.2]                               # 0.1 mm wire plus spark gap
+min_wall = 0.10
+
+[process.silicon-drie]
+description = "Deep reactive ion etching of silicon parts by an outside service"
+rules = ["internal_radius", "depth_to_diameter", "min_wall"]
+cutters = [0.02]
+max_depth_to_diameter = 20.0
+min_wall = 0.03
+
+[process.jewelling]
+description = "Pressing standard jewels into plates and bridges"
+rules = ["jewel_fit"]
+jewel_diameters = [1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.3, 2.5, 2.7, 3.0]   # outer diameters you can buy
+match_window = 0.15                           # a hole this close to a jewel diameter is taken to be its seat
+interference_min = 0.004
+interference_max = 0.020

@@ -323,3 +323,151 @@ TEST_CASE("ohs structural commands end to end") {
         CHECK(run("fea " + proj + " --part third_wheel --material unobtainium", dir).exit_code == 2);
     }
 }
+
+TEST_CASE("ohs manufacturing commands end to end") {
+    // A single generated wheel keeps the CAD work small: gear -> STEP -> import -> project.
+    static const fs::path dir = [] {
+        const fs::path d = fs::temp_directory_path() / "ohs_cli_m4_test";
+        fs::remove_all(d);
+        fs::create_directories(d);
+        return d;
+    }();
+    const std::string step = (dir / "w.step").string();
+    const std::string proj = (dir / "w.hsproj").string();
+    if (!fs::exists(proj)) {
+        REQUIRE(run("--json gear --teeth 20 --module 0.3 --bore 0.8 --thickness 0.4 --name wheel20 --step-out " + step, dir).exit_code == 0);
+        REQUIRE(run("import " + step + " -o " + proj + " --beat-rate 25200", dir).exit_code == 0);
+    }
+
+    SECTION("gear generator writes STEP, DXF, SVG and PDF that agree with each other") {
+        const std::string base = (dir / "g").string();
+        const auto r = run("--json gear --teeth 24 --module 0.25 --bore 0.6 --thickness 0.3 --material brass --name wheel24 --dxf " + base + ".dxf --svg " + base + ".svg --pdf " + base + ".pdf",
+                           dir);
+        REQUIRE(r.exit_code == 0);
+        const auto j = nlohmann::json::parse(r.output);
+        CHECK(j["tip_diameter"].get<double>() == Approx(2 * (0.5 * 0.25 * 24 + 0.25)));
+        CHECK(j["pitch_diameter"].get<double>() == Approx(6.0));
+        CHECK(j["outputs"].size() == 3);
+        const std::string dxf = slurp(base + ".dxf");
+        CHECK(dxf.find("POLYLINE") != std::string::npos);
+        CHECK(dxf.find("tip D 6.500") != std::string::npos);
+        CHECK(slurp(base + ".svg").find("pitch D 6.000") != std::string::npos);
+        const std::string pdf = slurp(base + ".pdf");
+        CHECK(pdf.rfind("%PDF-1.4", 0) == 0);
+        CHECK(pdf.find("scale ") != std::string::npos);
+        // The cutting file has no annotation.
+        REQUIRE(run("gear --teeth 24 --module 0.25 --profile-only --dxf " + base + "-cut.dxf", dir).exit_code == 0);
+        CHECK(slurp(base + "-cut.dxf").find("TEXT") == std::string::npos);
+        CHECK(run("gear --teeth 24 --module 0.25", dir).exit_code == 2);                       // no output asked for
+        CHECK(run("gear --teeth 3 --module 0.25 --dxf " + base + "-x.dxf", dir).exit_code == 2);  // not a gear
+    }
+
+    SECTION("part drawings from the project") {
+        const std::string svg = (dir / "d.svg").string();
+        const auto r = run("--json draw " + proj + " --part wheel20 -o " + svg, dir);
+        REQUIRE(r.exit_code == 0);
+        const auto j = nlohmann::json::parse(r.output);
+        CHECK(j["width"].get<double>() == Approx(2 * (0.5 * 0.3 * 20 + 0.3)).epsilon(0.01));
+        REQUIRE(j["holes"].size() == 1);
+        CHECK(j["holes"][0]["diameter"].get<double>() == Approx(1.6).epsilon(0.02));
+        CHECK(slurp(svg).find("<svg") != std::string::npos);
+        REQUIRE(run("draw " + proj + " --part wheel20 -o " + (dir / "d.dxf").string(), dir).exit_code == 0);
+        REQUIRE(run("draw " + proj + " --part wheel20 -o " + (dir / "d.pdf").string(), dir).exit_code == 0);
+        CHECK(slurp(dir / "d.pdf").rfind("%PDF-1.4", 0) == 0);
+        CHECK(run("draw " + proj + " --part wheel20 -o " + (dir / "d.png").string(), dir).exit_code == 2);
+        CHECK(run("draw " + proj + " --part nope -o " + svg, dir).exit_code == 2);
+        CHECK(run("draw " + proj + " --part wheel20", dir).exit_code == 2);
+    }
+
+    SECTION("dfm: process list, findings, exit codes, user rules") {
+        const auto list = run("--json dfm --list", dir);
+        REQUIRE(list.exit_code == 0);
+        CHECK(nlohmann::json::parse(list.output).size() >= 7);
+
+        const auto ok = run("--json dfm " + proj + " --process wheel-cutting", dir);
+        REQUIRE(ok.exit_code == 0);
+        const auto j = nlohmann::json::parse(ok.output);
+        CHECK(j["errors"] == 0);
+        CHECK(j["findings"].size() >= 3);
+        // Milling does not apply to a toothed wheel.
+        const auto mill = nlohmann::json::parse(run("--json dfm " + proj + " --process mill", dir).output);
+        CHECK(mill["findings"][0]["rule"] == "applicability");
+
+        // Your own rules: only a 0.5 module cutter, so a 0.3 module wheel cannot be cut.
+        std::ofstream(dir / "rules.toml") << "[process.mine]\nrules = ['module_cutter']\ncutter_modules = [0.5]\nmodule_tolerance = 0.02\n";
+        const auto bad = run("dfm " + proj + " --process mine --rules " + (dir / "rules.toml").string(), dir);
+        CHECK(bad.exit_code == 1);
+        CHECK(bad.output.find("no cutter within") != std::string::npos);
+        CHECK(run("dfm " + proj + " --process laser", dir).exit_code == 2);
+        CHECK(run("dfm", dir).exit_code == 2);
+    }
+
+    SECTION("tolerance and collisions need a train: clear errors, not crashes") {
+        CHECK(run("tolerance " + proj, dir).exit_code == 2);   // no gear meshes
+        CHECK(run("collisions " + proj, dir).exit_code == 2);  // no barrel
+    }
+
+    SECTION("report: html and pdf, failing rig gives exit 1") {
+        const std::string prefix = (dir / "rep").string();
+        const auto r = run("--json report " + proj + " --no-fea --no-timekeeping --samples 500 -o " + prefix, dir);
+        CHECK(r.exit_code == 1);  // a lone wheel has no barrel, so the rig check fails
+        const auto j = nlohmann::json::parse(r.output);
+        CHECK(j["overall"] == "FAIL");
+        CHECK(j["outputs"].size() == 2);
+        const std::string html = slurp(prefix + ".html");
+        CHECK(html.find("Design for manufacturing") != std::string::npos);
+        CHECK(html.find("module 0.3000 has") == std::string::npos);
+        CHECK(slurp(prefix + ".pdf").rfind("%PDF-1.4", 0) == 0);
+        CHECK(run("report " + proj + " --format docx", dir).exit_code == 2);
+    }
+}
+
+#ifndef OHS_SANITIZED
+TEST_CASE("ohs manufacturing commands on the generated movement") {
+    static const fs::path dir = [] {
+        const fs::path d = fs::temp_directory_path() / "ohs_cli_m4b_test";
+        fs::remove_all(d);
+        fs::create_directories(d);
+        return d;
+    }();
+    const std::string step = (dir / "m.step").string();
+    const std::string proj = (dir / "m.hsproj").string();
+    if (!fs::exists(proj)) {
+        REQUIRE(run("dev gen-movement -o " + step, dir).exit_code == 0);
+        REQUIRE(run("import " + step + " -o " + proj + " --beat-rate 25200", dir).exit_code == 0);
+    }
+
+    SECTION("tolerance: seeded, reproducible, with an exit code against a threshold") {
+        const auto a = run("--json tolerance " + proj + " --samples 3000", dir);
+        REQUIRE(a.exit_code == 1);  // about 12 % of builds have an end-shake or binding problem with the default table
+        const auto j = nlohmann::json::parse(a.output);
+        CHECK(j["meshes"].size() == 4);
+        CHECK(j["mobiles"].size() == 5);
+        CHECK(j["failing_fraction"].get<double>() > 0.05);
+        CHECK(run("--json tolerance " + proj + " --samples 3000", dir).output == a.output);
+        CHECK(run("tolerance " + proj + " --samples 3000 --fail-above 0.5", dir).exit_code == 0);
+        std::ofstream(dir / "tight.toml") << "[tolerance]\nposition_tol = 0.002\ntooth_thickness_tol = 0.002\narbor_length_tol = 0.004\nbridge_gap_tol = 0.004\n"
+                                             "plate_flatness_tol = 0.004\npivot_diameter_tol = 0.001\nhole_diameter_tol = 0.001\n";
+        CHECK(run("tolerance " + proj + " --samples 3000 --tolerances " + (dir / "tight.toml").string(), dir).exit_code == 0);
+    }
+
+    SECTION("collisions: the generated train meshes without overlap") {
+        const auto r = run("--json collisions " + proj, dir);
+        REQUIRE(r.exit_code == 0);
+        const auto j = nlohmann::json::parse(r.output);
+        CHECK(j["overlaps"] == 0);
+        CHECK(j["pairs_checked"].get<int>() >= 4);
+    }
+
+    SECTION("report with every section") {
+        const std::string prefix = (dir / "rep").string();
+        const auto r = run("--json report " + proj + " --samples 2000 -o " + prefix, dir);
+        REQUIRE((r.exit_code == 0 || r.exit_code == 1));
+        const std::string html = slurp(prefix + ".html");
+        for (const char* needle : {"Tolerance stack-up", "Design for manufacturing", "Motion and collisions", "Structural checks", "Tooth bending at full wind", "Solver verification"}) {
+            CHECK(html.find(needle) != std::string::npos);
+        }
+        CHECK(slurp(prefix + ".pdf").rfind("%PDF-1.4", 0) == 0);
+    }
+}
+#endif

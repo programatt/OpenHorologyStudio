@@ -10,6 +10,9 @@ add_executable(ohs_tests
   unit/fea_test.cpp
   unit/fea_analysis_test.cpp
   unit/gear_test.cpp
+  unit/report_test.cpp
+  unit/manufacturing_test.cpp
+  unit/report_builder_test.cpp
   unit/structural_cases_test.cpp
   unit/model_test.cpp
   unit/profile_test.cpp
@@ -19,7 +22,7 @@ add_executable(ohs_tests
   integration/animation_test.cpp
   integration/cli_test.cpp)
 target_include_directories(ohs_tests PRIVATE ${PROJECT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(ohs_tests PRIVATE ohs_app ohs_kinematics ohs_dynamics ohs_mesh ohs_fea ohs_gear ohs_cases ohs_explain ohs_animation Catch2::Catch2WithMain nlohmann_json::nlohmann_json)
+target_link_libraries(ohs_tests PRIVATE ohs_app ohs_kinematics ohs_dynamics ohs_mesh ohs_fea ohs_gear ohs_cases ohs_report ohs_manufacturing ohs_reports ohs_explain ohs_animation Catch2::Catch2WithMain nlohmann_json::nlohmann_json)
 target_compile_definitions(ohs_tests PRIVATE OHS_CLI_PATH="$<TARGET_FILE:ohs>")
 if(OHS_ASAN)
   target_compile_definitions(ohs_tests PRIVATE OHS_SANITIZED=1)

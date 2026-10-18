@@ -36,6 +36,8 @@ target_link_libraries(ohs_fea PUBLIC ohs_mesh Eigen3::Eigen PRIVATE tomlplusplus
 ohs_library(ohs_gear gear/gear.cpp)
 target_link_libraries(ohs_gear PUBLIC ohs_mesh)
 
+ohs_library(ohs_report report/drawing.cpp report/document.cpp)
+
 ohs_library(ohs_explain explain/explain.cpp)
 target_link_libraries(ohs_explain PUBLIC ohs_kinematics)
 
@@ -45,8 +47,20 @@ target_include_directories(ohs_geometry SYSTEM PUBLIC ${OpenCASCADE_INCLUDE_DIR}
 target_link_directories(ohs_geometry PUBLIC ${OpenCASCADE_LIBRARY_DIR})
 target_link_libraries(ohs_geometry PUBLIC ohs_model ohs_mesh ${OHS_OCCT_LIBS})
 
+# The DFM rule sets are embedded from data/dfm/rules.toml at configure time.
+file(READ ${PROJECT_SOURCE_DIR}/data/dfm/rules.toml OHS_DFM_TOML)
+file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/dfm_data.cpp
+     CONTENT "namespace ohs::manufacturing {\nextern const char* const kDfmRulesToml;\nconst char* const kDfmRulesToml = R\"TOML(${OHS_DFM_TOML})TOML\";\n}\n")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/data/dfm/rules.toml)
+ohs_library(ohs_manufacturing manufacturing/gear_export.cpp manufacturing/tolerance.cpp manufacturing/dfm.cpp manufacturing/collision.cpp manufacturing/part_drawing.cpp
+            ${CMAKE_CURRENT_BINARY_DIR}/dfm_data.cpp)
+target_link_libraries(ohs_manufacturing PUBLIC ohs_geometry ohs_gear ohs_report ohs_kinematics PRIVATE tomlplusplus::tomlplusplus)
+
 ohs_library(ohs_cases cases/cases.cpp cases/verification.cpp)
 target_link_libraries(ohs_cases PUBLIC ohs_fea ohs_gear ohs_geometry)
+
+ohs_library(ohs_reports reports/report_builder.cpp)
+target_link_libraries(ohs_reports PUBLIC ohs_manufacturing ohs_cases ohs_dynamics ohs_explain ohs_rigging ohs_report)
 
 ohs_library(ohs_app app/import.cpp)
 target_link_libraries(ohs_app PUBLIC ohs_geometry ohs_rigging PRIVATE tomlplusplus::tomlplusplus spdlog::spdlog)
@@ -54,8 +68,8 @@ target_link_libraries(ohs_app PUBLIC ohs_geometry ohs_rigging PRIVATE tomlpluspl
 ohs_library(ohs_animation animation/gltf_animation.cpp)
 target_link_libraries(ohs_animation PUBLIC ohs_geometry ohs_kinematics PRIVATE nlohmann_json::nlohmann_json)
 
-add_executable(ohs cli/main.cpp cli/dynamics_cli.cpp cli/fea_cli.cpp)
-target_link_libraries(ohs PRIVATE ohs_app ohs_cases ohs_kinematics ohs_dynamics ohs_explain ohs_animation CLI11::CLI11 nlohmann_json::nlohmann_json spdlog::spdlog)
+add_executable(ohs cli/main.cpp cli/dynamics_cli.cpp cli/fea_cli.cpp cli/manufacturing_cli.cpp)
+target_link_libraries(ohs PRIVATE ohs_app ohs_reports ohs_cases ohs_kinematics ohs_dynamics ohs_explain ohs_animation CLI11::CLI11 nlohmann_json::nlohmann_json spdlog::spdlog)
 target_include_directories(ohs PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(ohs PRIVATE OHS_VERSION="${PROJECT_VERSION}" OHS_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 install(TARGETS ohs RUNTIME DESTINATION bin)

@@ -3,7 +3,7 @@
 Watch movement design and analysis. Model in any CAD tool, export STEP, and OHS rigs the
 assembly into a working movement. See `plan.md` for the full design.
 
-**Status: M3.** Structural analysis (`ohs fea`, `materials`, `thermal`, `verify physics`) and timekeeping simulation (`ohs timekeeping`, `simulate`, `timegrapher`, `whatif`, `bench`) is in; see plan.md. Earlier milestones: STEP import (Open CASCADE), tooth counting from the
+**Status: M4.** Manufacturing (`ohs gear`, `draw`, `tolerance`, `dfm`, `collisions`, `report`), structural analysis (`ohs fea`, `materials`, `thermal`, `verify physics`) and timekeeping simulation (`ohs timekeeping`, `simulate`, `timegrapher`, `whatif`, `bench`) is in; see plan.md. Earlier milestones: STEP import (Open CASCADE), tooth counting from the
 B-rep, part classification, mobile grouping, gear-mesh inference, TOML rig/project files,
 rigid-ratio train kinematics (beat rate, per-mobile speeds) and the `ohs` CLI. Not yet: UI,
 dynamics, FEA, tolerance/DFM, Python bindings, Windows/macOS build scripts.

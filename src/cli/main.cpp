@@ -15,6 +15,7 @@
 #include "animation/gltf_animation.hpp"
 #include "cli/dynamics_cli.hpp"
 #include "cli/fea_cli.hpp"
+#include "cli/manufacturing_cli.hpp"
 #include "app/import.hpp"
 #include "core/error.hpp"
 #include "explain/explain.hpp"
@@ -393,6 +394,7 @@ int main(int argc, char** argv) {
     std::function<int()> custom;
     ohs::cli::add_dynamics_commands(app, o.json_output, custom);
     ohs::cli::add_fea_commands(app, o.json_output, custom);
+    ohs::cli::add_manufacturing_commands(app, o.json_output, custom);
 
     try {
         app.parse(argc, argv);
