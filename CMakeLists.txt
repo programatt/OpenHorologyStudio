@@ -16,6 +16,7 @@ find_package(tomlplusplus REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(CLI11 REQUIRED)
+find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 
 add_library(ohs_options INTERFACE)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

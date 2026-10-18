@@ -244,3 +244,82 @@ TEST_CASE("ohs timekeeping commands end to end") {
         CHECK(run("torque " + proj + " --calibre " + (dir / "broken.toml").string(), dir).exit_code == 2);
     }
 }
+
+TEST_CASE("ohs structural commands end to end") {
+    static const fs::path dir = [] {
+        const fs::path d = fs::temp_directory_path() / "ohs_cli_m3_test";
+        fs::remove_all(d);
+        fs::create_directories(d);
+        return d;
+    }();
+    const std::string step = (dir / "m.step").string();
+    const std::string proj = (dir / "m.hsproj").string();
+    if (!fs::exists(proj)) {
+        REQUIRE(run("dev gen-movement -o " + step, dir).exit_code == 0);
+        REQUIRE(run("import " + step + " -o " + proj + " --beat-rate 25200", dir).exit_code == 0);
+    }
+
+    SECTION("materials and thermal coefficient") {
+        const auto m = run("--json materials", dir);
+        REQUIRE(m.exit_code == 0);
+        const auto j = nlohmann::json::parse(m.output);
+        CHECK(j.size() >= 8);
+        CHECK(run("materials", dir).output.find("brass_leaded") != std::string::npos);
+
+        const auto t = run("--json thermal --hairspring steel_hardened --balance steel_hardened", dir);
+        REQUIRE(t.exit_code == 0);
+        CHECK(nlohmann::json::parse(t.output)["rate_s_per_day_per_k"].get<double>() < -8.0);
+        const auto good = run("--json thermal", dir);
+        CHECK(std::abs(nlohmann::json::parse(good.output)["rate_s_per_day_per_k"].get<double>()) < 1.0);
+        CHECK(run("thermal --hairspring unobtainium", dir).exit_code == 2);
+    }
+
+    SECTION("gate: the physics verification suite passes and can fail loudly") {
+        const auto v = run("--json verify physics", dir);
+        REQUIRE(v.exit_code == 0);
+        const auto j = nlohmann::json::parse(v.output);
+        CHECK(j["ok"] == true);
+        CHECK(j["checks"].size() >= 4);
+#ifndef OHS_SANITIZED
+        // The full set is minutes under a sanitizer; it runs in the normal build.
+        const auto full = run("--json verify physics --full", dir);
+        REQUIRE(full.exit_code == 0);
+        CHECK(nlohmann::json::parse(full.output)["checks"].size() >= 9);
+#endif
+    }
+
+    SECTION("tooth bending from the torque chain") {
+        const auto r = run("--json fea " + proj + " --part third_wheel --vtu " + (dir / "tooth.vtu").string(), dir);
+        REQUIRE(r.exit_code == 0);
+        const auto j = nlohmann::json::parse(r.output);
+        CHECK(j["teeth"] == 75);
+        CHECK(j["module"].get<double>() == Approx(0.15));
+        CHECK(j["load_source"].get<std::string>().find("torque of mobile") != std::string::npos);
+        // The load is the mobile's torque over the pitch radius: 1.1 N·mm * 0.9^2 / 8 / 8 / 7.5 ... checked loosely.
+        CHECK(j["load_n"].get<double>() > 0);
+        CHECK(j["concentration_over_lewis"].get<double>() > 1.0);
+        CHECK(j["concentration_over_lewis"].get<double>() < 2.4);
+        CHECK(slurp(dir / "tooth.vtu").find("von_mises") != std::string::npos);
+        // A given load overrides the chain and scales the stress linearly.
+        const auto a = nlohmann::json::parse(run("--json fea " + proj + " --part third_wheel --load-n 0.1", dir).output);
+        const auto b = nlohmann::json::parse(run("--json fea " + proj + " --part third_wheel --load-n 0.2", dir).output);
+        CHECK(b["fe_max_principal_mpa"].get<double>() == Approx(2 * a["fe_max_principal_mpa"].get<double>()).epsilon(1e-6));
+        CHECK(run("fea " + proj + " --part third_wheel", dir).output.find("Lewis hand calculation") != std::string::npos);
+    }
+
+    SECTION("shock on a part and errors") {
+        const auto r = run("--json fea " + proj + " --part escape_wheel --case shock --size 0.3 --g 1000", dir);
+        REQUIRE(r.exit_code == 0);
+        const auto j = nlohmann::json::parse(r.output);
+        CHECK(j["max_von_mises_mpa"].get<double>() > 0);
+        CHECK(j["safety_factor"].get<double>() > 10);
+        const auto j2 = nlohmann::json::parse(run("--json fea " + proj + " --part escape_wheel --case shock --size 0.3 --g 2000", dir).output);
+        CHECK(j2["max_von_mises_mpa"].get<double>() == Approx(2 * j["max_von_mises_mpa"].get<double>()).epsilon(1e-6));
+
+        CHECK(run("fea " + proj + " --part nope", dir).exit_code == 2);
+        CHECK(run("fea " + proj + " --part main_plate", dir).exit_code == 2);                    // no teeth
+        CHECK(run("fea " + proj + " --part main_plate --case shock", dir).exit_code == 2);       // too many dofs / no holes
+        CHECK(run("fea " + proj + " --part third_wheel --case buckling", dir).exit_code == 2);
+        CHECK(run("fea " + proj + " --part third_wheel --material unobtainium", dir).exit_code == 2);
+    }
+}

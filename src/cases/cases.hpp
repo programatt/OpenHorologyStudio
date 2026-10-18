@@ -1,0 +1,88 @@
+// SPDX-License-Identifier: Apache-2.0
+#pragma once
+
+#include <string>
+#include <vector>
+
+#include <TopoDS_Shape.hxx>
+
+#include "fea/analysis.hpp"
+#include "fea/fea.hpp"
+#include "gear/gear.hpp"
+
+namespace ohs::cases {
+
+// ---- tooth bending ----------------------------------------------------------------------------------
+
+struct ToothCaseInput {
+    gear::GearSpec spec;
+    double face_width{1.0};          ///< mm
+    double tangential_load_n{1.0};   ///< at the tooth tip, perpendicular to the tooth axis
+    fea::Material material;
+    double size_factor{0.14};        ///< element size at the root in modules
+    int teeth_in_sector{3};
+};
+
+struct ToothCaseResult {
+    double lewis_mpa{};
+    double fe_max_principal_mpa{};
+    double fe_max_von_mises_mpa{};
+    double concentration{};     ///< FE peak over the Lewis stress
+    double safety_factor{};     ///< material strength over the FE peak; 0 when the strength is unknown
+    double tip_deflection_mm{};
+    std::size_t nodes{};
+    std::size_t dofs{};
+    fea::Model model;
+    fea::StaticResult solution;
+};
+
+/// A sector of the wheel is clamped at its rim and loaded at the tip of the middle tooth; the
+/// FE root stress is reported next to the Lewis hand calculation.
+ToothCaseResult run_tooth_case(const ToothCaseInput& input);
+
+// ---- a part under shock, and its vibration modes -------------------------------------------------------
+
+struct PartCaseInput {
+    TopoDS_Shape shape;            ///< with the dial plane normal to Z
+    double element_size{0.2};
+    int layers{2};
+    fea::Material material;
+    double shock_g{5000};          ///< acceleration along -Z (end shake) in g, for the static case
+    bool in_plane_shock{false};    ///< apply it along -X instead
+    int modes{0};                  ///< >0 also computes this many natural frequencies
+    std::size_t max_dofs{250000};  ///< refuse meshes larger than this (a direct solver needs memory for the fill)
+};
+
+struct PartCaseResult {
+    std::size_t nodes{};
+    std::size_t dofs{};
+    double mass_g{};
+    double max_displacement_mm{};
+    double max_von_mises_mpa{};
+    double safety_factor{};
+    std::vector<double> frequencies_hz;
+    fea::Model model;
+    fea::StaticResult solution;
+};
+
+/// Slices the part at mid-height, meshes the outline with quadratic tetrahedra, clamps every hole
+/// (pivots and screws) and applies the shock as a body force.
+PartCaseResult run_part_case(const PartCaseInput& input);
+
+// ---- the physics verification suite ----------------------------------------------------------------------
+
+struct Check {
+    std::string name;
+    std::string category;   ///< "analytical", "convergence" or "benchmark"
+    double expected{};
+    double actual{};
+    double tolerance{};     ///< relative
+    bool passed{};
+    std::string note;
+};
+
+/// Re-runs the solvers against known answers. The fast set takes a few seconds; `full` adds the
+/// finer meshes, convergence rates, contact, press fit and tooth-root benchmarks.
+std::vector<Check> run_physics_checks(bool full);
+
+}  // namespace ohs::cases

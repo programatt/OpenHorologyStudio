@@ -6,6 +6,11 @@ add_executable(ohs_tests
   unit/kinematics_test.cpp
   unit/m1_test.cpp
   unit/dynamics_test.cpp
+  unit/mesh_test.cpp
+  unit/fea_test.cpp
+  unit/fea_analysis_test.cpp
+  unit/gear_test.cpp
+  unit/structural_cases_test.cpp
   unit/model_test.cpp
   unit/profile_test.cpp
   unit/rigging_test.cpp
@@ -14,8 +19,11 @@ add_executable(ohs_tests
   integration/animation_test.cpp
   integration/cli_test.cpp)
 target_include_directories(ohs_tests PRIVATE ${PROJECT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(ohs_tests PRIVATE ohs_app ohs_kinematics ohs_dynamics ohs_explain ohs_animation Catch2::Catch2WithMain nlohmann_json::nlohmann_json)
+target_link_libraries(ohs_tests PRIVATE ohs_app ohs_kinematics ohs_dynamics ohs_mesh ohs_fea ohs_gear ohs_cases ohs_explain ohs_animation Catch2::Catch2WithMain nlohmann_json::nlohmann_json)
 target_compile_definitions(ohs_tests PRIVATE OHS_CLI_PATH="$<TARGET_FILE:ohs>")
+if(OHS_ASAN)
+  target_compile_definitions(ohs_tests PRIVATE OHS_SANITIZED=1)
+endif()
 add_dependencies(ohs_tests ohs)
 catch_discover_tests(ohs_tests DISCOVERY_MODE PRE_TEST
   PROPERTIES ENVIRONMENT "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")

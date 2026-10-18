@@ -1,0 +1,101 @@
+# SPDX-License-Identifier: Apache-2.0
+# Typical handbook values for horological materials. They are starting points: confirm every
+# number against your supplier's data sheet and override it in a project file where it matters.
+# Units: youngs_gpa GPa, density kg/m3, cte 1/K, strength_mpa MPa (0.2 % yield for metals,
+# flexural/fracture strength for ruby and silicon), thermoelastic 1/K = (1/E) dE/dT.
+
+[[material]]
+name = "brass_leaded"
+description = "Leaded brass CuZn39Pb3 (plates, bridges, wheels)"
+youngs_gpa = 97
+poisson = 0.34
+density = 8440
+cte = 20.5e-6
+strength_mpa = 350
+thermoelastic = -4.5e-4
+temp_range_c = [-20, 80]
+source = "typical handbook values for CW614N half-hard"
+
+[[material]]
+name = "steel_hardened"
+description = "Hardened and tempered carbon steel (pivots, staffs, pinions, levers)"
+youngs_gpa = 210
+poisson = 0.30
+density = 7850
+cte = 11.5e-6
+strength_mpa = 1500
+thermoelastic = -2.5e-4
+temp_range_c = [-20, 80]
+source = "typical handbook values for tempered tool steel"
+
+[[material]]
+name = "stainless_316l"
+description = "Austenitic stainless steel 316L (cases, screws)"
+youngs_gpa = 193
+poisson = 0.30
+density = 8000
+cte = 16.0e-6
+strength_mpa = 220
+thermoelastic = -3.0e-4
+temp_range_c = [-20, 80]
+source = "typical handbook values, annealed"
+
+[[material]]
+name = "nife_hairspring"
+description = "Ni-Fe self-compensating hairspring alloy (Nivarox / Elinvar family)"
+youngs_gpa = 200
+poisson = 0.30
+density = 8000
+cte = 8.0e-6
+strength_mpa = 1800
+thermoelastic = 0.0
+temp_range_c = [8, 38]
+source = "typical values; the thermoelastic coefficient is tuned by the maker to nearly zero over the range"
+
+[[material]]
+name = "coni_mainspring"
+description = "Co-Ni-Cr-Mo mainspring alloy (Nivaflex family)"
+youngs_gpa = 200
+poisson = 0.30
+density = 8300
+cte = 12.0e-6
+strength_mpa = 2000
+thermoelastic = -2.0e-4
+temp_range_c = [-20, 80]
+source = "typical values for work-hardened cobalt-nickel spring alloys"
+
+[[material]]
+name = "ruby_synthetic"
+description = "Synthetic ruby / sapphire (jewels)"
+youngs_gpa = 400
+poisson = 0.25
+density = 3980
+cte = 5.3e-6
+strength_mpa = 600
+thermoelastic = -5.0e-5
+temp_range_c = [-20, 80]
+source = "typical single-crystal alumina values; strength is a flexural figure and varies with finish"
+
+[[material]]
+name = "silicon_110"
+description = "Monocrystalline silicon, isotropic approximation of the (110) plane"
+youngs_gpa = 169
+poisson = 0.28
+density = 2329
+cte = 2.6e-6
+strength_mpa = 1000
+thermoelastic = -6.0e-5
+temp_range_c = [-20, 80]
+source = "typical values; real silicon is anisotropic and its strength depends on etching"
+
+[[material]]
+name = "titanium_grade5"
+description = "Titanium Ti-6Al-4V (cases, bridges)"
+youngs_gpa = 114
+poisson = 0.34
+density = 4430
+cte = 8.6e-6
+strength_mpa = 880
+thermoelastic = -3.0e-4
+temp_range_c = [-20, 80]
+source = "typical handbook values, annealed"
