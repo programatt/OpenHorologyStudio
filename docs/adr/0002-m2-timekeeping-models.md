@@ -18,8 +18,17 @@
   location, and the wheel/pallet interaction as a stiff damped one-sided contact. The impulse,
   inelastic pick-up, drop and lock arise from that contact. The models share parameters only.
   `ohs verify levels` fails (exit 1) when amplitude differs by more than 2 % or rate by more than
-  1 s/day. Replacing this model by a Chrono adapter stays on the roadmap; the interface
-  (`DetailedConditions` → events) is what an adapter would implement.
+  1 s/day. The interface (`DetailedConditions` → events) is what the Chrono adapter implements.
+- **Chrono adapter (optional).** `simulate_chrono` runs the same model on Project Chrono 9
+  (`OHS_WITH_CHRONO`): the balance and the escape wheel are `ChShaft`s (one degree of freedom
+  each, so no joints or constraint solver), the hairspring is `ChShaftsTorsionSpring`, the
+  mainspring drive `ChShaftsAppliedTorque`, and the escapement (contact, lever kinematics, friction,
+  unpoise, unlocking) a `ChShaftsTorque` subclass. Rigid bodies with collision geometry were not
+  used: the pallet position is a function of the balance angle, and a collision model would have
+  to reproduce that and a calibrated contact stiffness, with no gain for the check. The step is
+  0.4/ω_contact (4x the built-in loop's) because a Chrono step costs far more; both engines agree
+  within 1 % on amplitude in the tests. Chrono's headers are compiled only into
+  `chrono_adapter.cpp`, with Chrono's own flags (`-march=native -fopenmp` change Eigen's alignment).
 - **Quasi-static run-down.** Amplitude settles in about a minute while the spring unwinds over
   tens of hours, so power-reserve and run-down results are sequences of settled states, one per
   state of wind, not a single 48 h integration.

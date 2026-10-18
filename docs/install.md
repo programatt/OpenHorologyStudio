@@ -30,6 +30,25 @@ sudo apt install cmake ninja-build g++ git python3 \
 `build.sh` prints the install hint for whatever is missing. The `ohs` binary ends up in
 `build/release/src/ohs`.
 
+### Project Chrono (optional)
+
+Chrono 9 is not packaged for Debian or Ubuntu and has no usable PyPI wheel. Build the core module
+and point OHS at it:
+
+```
+git clone --depth 1 --branch 9.0.1 https://github.com/projectchrono/chrono.git
+cmake -S chrono -B chrono-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$HOME/chrono \
+      -DBUILD_DEMOS=OFF -DBUILD_DEMOS_BASE=OFF -DBUILD_DEMOS_COSIMULATION=OFF -DBUILD_DEMOS_FEA=OFF \
+      -DBUILD_DEMOS_ROBOT=OFF
+cmake --build chrono-build && cmake --install chrono-build
+cmake -S . -B build/chrono -G Ninja -DOHS_WITH_CHRONO=ON -DChrono_DIR=$HOME/chrono/lib/cmake/Chrono
+```
+
+`ohs verify levels --engine chrono` then runs the detailed model on Chrono. On a machine whose
+clocksource is `hpet` (check `/sys/devices/system/clocksource/clocksource0/current_clocksource`)
+it is several times slower, because Chrono's profiling timers call `clock_gettime` every step and
+each call is a system call.
+
 ### Desktop application
 
 ```

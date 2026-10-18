@@ -265,6 +265,7 @@ Options:
   --calibre TEXT:FILE         Calibre parameters (TOML); default: a reference lever calibre
   --beat-rate FLOAT           Beat rate in vph (default: from project)
   --level TEXT [reduced]      reduced or detailed
+  --engine TEXT [builtin]     Engine for --level detailed: builtin or chrono (needs a Chrono build)
   --duration TEXT [60s]       Simulated time: 90s, 10m, 48h (over 10 minutes follows the run-down)
   --position TEXT [dial_up]   dial_up, dial_down, crown_up, crown_down, crown_left, crown_right
   --wind FLOAT [1]            State of wind for runs up to 10 minutes
@@ -354,6 +355,7 @@ Options:
   --calibre TEXT:FILE         Calibre parameters (TOML); default: a reference lever calibre
   --beat-rate FLOAT           Beat rate in vph (default: from project)
   --wind FLOAT [1]            State of wind
+  --engine TEXT [builtin]     Engine for the detailed model: builtin or chrono (needs a Chrono build)
   --position TEXT [dial_up]   Orientation
   --amplitude-tolerance FLOAT [2] 
                               Allowed amplitude difference in percent

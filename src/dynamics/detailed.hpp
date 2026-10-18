@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <string>
+
 #include "dynamics/oscillator.hpp"
 
 namespace ohs::dynamics {
@@ -11,7 +13,11 @@ namespace ohs::dynamics {
 /// roller are a kinematic constraint), so the impulse, the inelastic pick-up of the wheel, the
 /// drop and the lock arise from the contact instead of being imposed. It shares only the
 /// parameters with the level-2 model, which makes it an independent check on that model's
-/// reductions (the stand-in for the Chrono multibody adapter until that is built).
+/// reductions. `simulate_chrono` (chrono_adapter.hpp) runs the same model on Project Chrono.
+enum class Engine { Builtin, Chrono };
+const char* to_string(Engine e);
+Engine engine_from_string(const std::string& text);  // throws ohs::Error
+
 struct DetailedConditions {
     Position position{Position::DialUp};
     double wheel_torque_nm{0.0};
@@ -32,7 +38,8 @@ struct Agreement {
 
 /// Runs both models from the level-2 steady state and compares a measurement window of each.
 /// `warmup_s` and `window_s` apply to the detailed run.
+/// `engine` picks what runs the detailed model: OHS's own integrator or Project Chrono.
 Agreement compare_levels(const Calibre& calibre, double wheel_torque_nm, Position position = Position::DialUp,
-                         double warmup_s = 30.0, double window_s = 20.0);
+                         double warmup_s = 30.0, double window_s = 20.0, Engine engine = Engine::Builtin);
 
 }  // namespace ohs::dynamics

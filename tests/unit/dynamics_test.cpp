@@ -11,6 +11,7 @@
 #include "core/error.hpp"
 #include "dynamics/bench.hpp"
 #include "dynamics/calibre.hpp"
+#include "dynamics/chrono_adapter.hpp"
 #include "dynamics/detailed.hpp"
 #include "dynamics/oscillator.hpp"
 #include "dynamics/study.hpp"
@@ -466,6 +467,35 @@ TEST_CASE("verification: detailed contact model agrees with the reduced model") 
         CHECK(std::abs(a.amplitude_diff_percent) < 1.5);
         CHECK(std::abs(a.rate_diff_s_per_day) < 0.5);
         CHECK(a.level3.beats > 60);
+    }
+}
+
+TEST_CASE("chrono adapter: engines parse, and a build without Chrono refuses clearly") {
+    CHECK(engine_from_string("chrono") == Engine::Chrono);
+    CHECK(engine_from_string("builtin") == Engine::Builtin);
+    CHECK_THROWS_AS(engine_from_string("bullet"), Error);
+    if (!chrono_available()) {
+        CHECK_THROWS_WITH(simulate_chrono(default_calibre(), DetailedConditions{}, [](const Event&) {}),
+                          Catch::Matchers::ContainsSubstring("does not include Project Chrono"));
+    } else {
+        CHECK(std::string(chrono_version()).starts_with("9."));
+    }
+}
+
+TEST_CASE("verification: the Chrono model agrees with the reduced model and with the built-in contact model") {
+    if (!chrono_available()) SKIP("built without Project Chrono");
+    Calibre c = default_calibre();
+    c.contact_frequency_hz = 6000;
+    const TorqueChain chain = test_chain(c);
+    for (auto [wind, pos] : {std::pair{1.0, Position::DialUp}, std::pair{0.3, Position::CrownUp}}) {
+        const double torque = escape_torque_nm(chain, c, wind);
+        const Agreement a = compare_levels(c, torque, pos, 8.0, 6.0, Engine::Chrono);
+        const Agreement own = compare_levels(c, torque, pos, 8.0, 6.0, Engine::Builtin);
+        INFO("wind " << wind << " " << to_string(pos));
+        CHECK(std::abs(a.amplitude_diff_percent) < 1.5);
+        CHECK(std::abs(a.rate_diff_s_per_day) < 0.5);
+        CHECK(a.level3.beats > 30);
+        CHECK(std::abs(a.level3.amplitude_deg - own.level3.amplitude_deg) < 0.01 * own.level3.amplitude_deg);
     }
 }
 

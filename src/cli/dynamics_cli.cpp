@@ -16,6 +16,7 @@
 #include "core/error.hpp"
 #include "dynamics/bench.hpp"
 #include "dynamics/calibre.hpp"
+#include "dynamics/chrono_adapter.hpp"
 #include "dynamics/detailed.hpp"
 #include "dynamics/oscillator.hpp"
 #include "dynamics/study.hpp"
@@ -36,7 +37,7 @@ constexpr int kExitOk = 0;
 constexpr int kExitCheckFailed = 1;
 
 struct DynOptions {
-    std::string project, calibre_file, position = "dial_up", level = "reduced", duration = "60s", out, events_out;
+    std::string project, calibre_file, position = "dial_up", level = "reduced", engine = "builtin", duration = "60s", out, events_out;
     std::string study_file, readings_file, csv_out, calibre_out;
     double wind = 1.0, beat_rate = 0.0, jitter_us = 0.0;
     double amp_tolerance_percent = 2.0, rate_tolerance = 1.0;
@@ -136,9 +137,12 @@ int cmd_simulate(const DynOptions& o, bool as_json) {
     const Position pos = position_from_string(o.position);
     const double seconds = parse_duration(o.duration);
     if (o.level != "reduced" && o.level != "detailed") throw Error("--level must be reduced or detailed");
+    const Engine engine = engine_from_string(o.engine);
+    if (engine == Engine::Chrono && o.level != "detailed") throw Error("--engine chrono applies to --level detailed");
 
     json j;
     j["level"] = o.level;
+    if (o.level == "detailed") j["engine"] = to_string(engine);
     j["position"] = to_string(pos);
     if (seconds <= 600.0) {
         const double torque = escape_torque_nm(s.chain, s.calibre, o.wind);
@@ -155,7 +159,7 @@ int cmd_simulate(const DynOptions& o, bool as_json) {
             c.position = pos;
             c.wheel_torque_nm = torque;
             c.duration_s = seconds;
-            run = simulate_detailed(s.calibre, c, log.sink());
+            run = engine == Engine::Chrono ? simulate_chrono(s.calibre, c, log.sink()) : simulate_detailed(s.calibre, c, log.sink());
         }
         const double from = run.end_time * 0.5;
         const Measurement m = measure(log.events, s.calibre, from, run.end_time);
@@ -309,17 +313,18 @@ int cmd_whatif(const DynOptions& o, bool as_json) {
 int cmd_verify_levels(const DynOptions& o, bool as_json) {
     const Setup s = load_setup(o);
     const Position pos = position_from_string(o.position);
-    const Agreement a = compare_levels(s.calibre, escape_torque_nm(s.chain, s.calibre, o.wind), pos);
+    const Engine engine = engine_from_string(o.engine);
+    const Agreement a = compare_levels(s.calibre, escape_torque_nm(s.chain, s.calibre, o.wind), pos, 30.0, 20.0, engine);
     const bool ok = std::abs(a.amplitude_diff_percent) <= o.amp_tolerance_percent &&
                     std::abs(a.rate_diff_s_per_day) <= o.rate_tolerance;
     if (as_json) {
-        json j = {{"position", to_string(pos)}, {"wind", o.wind}, {"reduced", to_json(a.level2)}, {"detailed", to_json(a.level3)},
+        json j = {{"engine", to_string(engine)}, {"position", to_string(pos)}, {"wind", o.wind}, {"reduced", to_json(a.level2)}, {"detailed", to_json(a.level3)},
                   {"amplitude_diff_percent", a.amplitude_diff_percent}, {"rate_diff_s_per_day", a.rate_diff_s_per_day},
                   {"tolerance_percent", o.amp_tolerance_percent}, {"tolerance_s_per_day", o.rate_tolerance}, {"ok", ok}};
         std::cout << j.dump(2) << '\n';
     } else {
         std::cout << std::fixed << std::setprecision(2) << "reduced : amplitude " << a.level2.amplitude_deg << " deg, rate "
-                  << a.level2.rate_s_per_day << " s/day\ndetailed: amplitude " << a.level3.amplitude_deg << " deg, rate "
+                  << a.level2.rate_s_per_day << " s/day\ndetailed (" << to_string(engine) << "): amplitude " << a.level3.amplitude_deg << " deg, rate "
                   << a.level3.rate_s_per_day << " s/day\ndifference " << a.amplitude_diff_percent << " % amplitude, "
                   << a.rate_diff_s_per_day << " s/day rate -> " << (ok ? "agree" : "DISAGREE") << " (tolerance "
                   << o.amp_tolerance_percent << " %, " << o.rate_tolerance << " s/day)\n";
@@ -412,6 +417,7 @@ void add_dynamics_commands(CLI::App& app, const bool& json_flag, std::function<i
     auto* sim = app.add_subcommand("simulate", "Simulate timekeeping (reduced event-driven or detailed contact model)");
     common(sim);
     sim->add_option("--level", o->level, "reduced or detailed")->capture_default_str();
+    sim->add_option("--engine", o->engine, "Engine for --level detailed: builtin or chrono (needs a Chrono build)")->capture_default_str();
     sim->add_option("--duration", o->duration, "Simulated time: 90s, 10m, 48h (over 10 minutes follows the run-down)")->capture_default_str();
     sim->add_option("--position", o->position, "dial_up, dial_down, crown_up, crown_down, crown_left, crown_right")->capture_default_str();
     sim->add_option("--wind", o->wind, "State of wind for runs up to 10 minutes")->capture_default_str();
@@ -445,6 +451,7 @@ void add_dynamics_commands(CLI::App& app, const bool& json_flag, std::function<i
     auto* levels = verify->add_subcommand("levels", "Detailed contact model against the reduced event-driven model");
     common(levels);
     levels->add_option("--wind", o->wind, "State of wind")->capture_default_str();
+    levels->add_option("--engine", o->engine, "Engine for the detailed model: builtin or chrono (needs a Chrono build)")->capture_default_str();
     levels->add_option("--position", o->position, "Orientation")->capture_default_str();
     levels->add_option("--amplitude-tolerance", o->amp_tolerance_percent, "Allowed amplitude difference in percent")->capture_default_str();
     levels->add_option("--rate-tolerance", o->rate_tolerance, "Allowed rate difference in s/day")->capture_default_str();

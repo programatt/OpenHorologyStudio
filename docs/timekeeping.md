@@ -85,3 +85,7 @@ ohs verify levels movement.hsproj
 
 Runs the detailed model beside the reduced one at the same state of wind and fails when they
 differ by more than the tolerances (`--amplitude-tolerance`, `--rate-tolerance`).
+
+`--engine chrono` (also on `ohs simulate --level detailed`) runs the detailed model on Project
+Chrono instead of OHS's own integrator. It needs a build with `-DOHS_WITH_CHRONO=ON` (see
+[Install](install.md)) and is much slower per step, so allow minutes rather than seconds.

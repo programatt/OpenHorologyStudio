@@ -11,6 +11,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include "dynamics/chrono_adapter.hpp"
+
 namespace fs = std::filesystem;
 using Catch::Approx;
 
@@ -215,6 +217,16 @@ TEST_CASE("ohs timekeeping commands end to end") {
         CHECK(j["ok"] == true);
         CHECK(std::abs(j["amplitude_diff_percent"].get<double>()) < 2.0);
         CHECK(run("verify levels " + proj + " --amplitude-tolerance 0.0001 --rate-tolerance 0.0001", dir).exit_code == 1);
+        CHECK(run("verify levels " + proj + " --engine bullet", dir).exit_code == 2);
+        if (ohs::dynamics::chrono_available()) {
+            const auto c = run("--json verify levels " + proj + " --engine chrono", dir);
+            REQUIRE(c.exit_code == 0);
+            const auto cj = nlohmann::json::parse(c.output);
+            CHECK(cj["engine"] == "chrono");
+            CHECK(std::abs(cj["amplitude_diff_percent"].get<double>()) < 2.0);
+        } else {
+            CHECK(run("verify levels " + proj + " --engine chrono", dir).exit_code == 2);
+        }
 
         // Bench: a movement with more friction than the reference. Calibrating on its readings
         // brings the simulated amplitude trend in line with the measured one.

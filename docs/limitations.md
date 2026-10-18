@@ -13,10 +13,12 @@ know where to be careful.
   undo covers role changes only; and jobs run on a thread of the window's process, in a queue that
   does not survive a restart, instead of in worker processes. It is built
   only with `-DOHS_BUILD_GUI=ON`, and has been exercised on Linux only (offscreen scripted test).
-- **No Chrono, MFEM or Netgen.** The detailed timekeeping model, the finite-element stack and the
-  mesher are OHS's own (ADR 2 and 3). The detailed model is an independent cross-check of the
-  reduced one, not a full multibody contact simulation of every mobile. An adapter for the real
-  libraries can sit behind the same interfaces later.
+- **Chrono is optional and covers the escapement only; no MFEM or Netgen.** The detailed
+  timekeeping model can run on Project Chrono (`-DOHS_WITH_CHRONO=ON`, `--engine chrono`), but as
+  two one-degree-of-freedom shafts with the wheel/pallet contact written as a force law, not as
+  rigid bodies with collision geometry, and not for the whole train. The finite-element stack and
+  the mesher are OHS's own (ADR 3). An adapter for MFEM and Netgen can sit behind the same
+  interfaces later.
 - **No general 3D meshing.** Parts are meshed from their mid-height section and extruded; features
   that vary through the thickness are not seen by the mesher or by the DFM rules.
 - **No cycloidal gear profiles.** Gears are fitted and generated as involutes.

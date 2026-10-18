@@ -14,7 +14,12 @@ option(OHS_BUILD_TESTS "Build the test suite" ON)
 option(OHS_BUILD_PYTHON "Build the Python extension module (needs nanobind)" OFF)
 option(OHS_BUILD_GUI "Build the Qt 6 desktop application ohs-gui (needs Qt 6 Widgets)" OFF)
 
+option(OHS_WITH_CHRONO "Build the Project Chrono adapter for the level-3 simulation (needs Chrono 9; set Chrono_DIR)" OFF)
+
 find_package(OpenCASCADE REQUIRED)
+if(OHS_WITH_CHRONO)
+  find_package(Chrono REQUIRED)
+endif()
 find_package(tomlplusplus REQUIRED)
 find_package(nlohmann_json REQUIRED)
 find_package(spdlog REQUIRED)

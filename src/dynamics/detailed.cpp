@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "dynamics/detailed.hpp"
 
+#include "core/error.hpp"
+#include "dynamics/chrono_adapter.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -175,7 +178,16 @@ RunSummary simulate_detailed(const Calibre& c, const DetailedConditions& cond, c
     return out;
 }
 
-Agreement compare_levels(const Calibre& c, double wheel_torque_nm, Position position, double warmup_s, double window_s) {
+const char* to_string(Engine e) { return e == Engine::Chrono ? "chrono" : "builtin"; }
+
+Engine engine_from_string(const std::string& text) {
+    if (text == "builtin") return Engine::Builtin;
+    if (text == "chrono") return Engine::Chrono;
+    throw Error("unknown engine '" + text + "' (builtin or chrono)");
+}
+
+Agreement compare_levels(const Calibre& c, double wheel_torque_nm, Position position, double warmup_s, double window_s,
+                         Engine engine) {
     Agreement a;
     const SteadyState ss = steady_state(c, wheel_torque_nm, position);
     a.level2 = ss.m;
@@ -186,7 +198,11 @@ Agreement compare_levels(const Calibre& c, double wheel_torque_nm, Position posi
     cond.initial_amplitude_deg = ss.m.amplitude_deg;
     cond.duration_s = warmup_s + window_s;
     EventLog log;
-    simulate_detailed(c, cond, log.sink());
+    if (engine == Engine::Chrono) {
+        simulate_chrono(c, cond, log.sink());
+    } else {
+        simulate_detailed(c, cond, log.sink());
+    }
     a.level3 = measure(log.events, c, warmup_s, warmup_s + window_s);
     if (a.level2.amplitude_deg > 0) {
         a.amplitude_diff_percent = 100.0 * (a.level3.amplitude_deg - a.level2.amplitude_deg) / a.level2.amplitude_deg;

@@ -9,6 +9,9 @@ Semantic Versioning, with the Python API and the plugin ABI versioned as describ
 Found by running the plan's gates on the real OM10 file.
 
 ### Added
+- Optional Project Chrono adapter for the level-3 simulation (`-DOHS_WITH_CHRONO=ON`,
+  `--engine chrono` on `ohs simulate --level detailed` and `ohs verify levels`): the balance and
+  escape wheel as Chrono shafts with its torsion spring and timestepper.
 - `ohs-gui` is a basic Qt 6 desktop application (optional, `-DOHS_BUILD_GUI=ON`), with
   a 3D viewport, rig list, Explain panel, animation timeline, analyses as queued jobs, one plot,
   undo of role changes and a `--snapshot` option that renders the viewport to a PNG.
@@ -46,6 +49,6 @@ First release.
   CLI reference, CPack packages, benchmarks.
 
 ### Not in this release
-See `docs/limitations.md`: only a basic Qt desktop application (`ohs-gui`, optional), no Chrono/MFEM/Netgen (OHS's own detailed
+See `docs/limitations.md`: only a basic Qt desktop application (`ohs-gui`, optional), no MFEM/Netgen and Chrono only as an optional escapement adapter (OHS's own detailed
 model, finite elements and mesher stand in for them), no 3D volume meshing, involute gears only,
 Swiss lever escapement only, Windows and macOS builds configured but not exercised.
