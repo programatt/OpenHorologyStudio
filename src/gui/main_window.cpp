@@ -44,6 +44,7 @@
 
 #include "cli/cli_run.hpp"
 #include "core/error.hpp"
+#include "explain/explain.hpp"
 #include "geometry/procedural.hpp"
 #include "geometry/step_io.hpp"
 
@@ -666,9 +667,16 @@ void MainWindow::select_part(const QString& name) {
         explain_->clear();
         return;
     }
+    // The same text as `ohs explain`, from the rig and train already in memory: no waiting for queued jobs
+    // (run_command would) and no re-reading of the project file on every click.
     QString text;
-    const int code = run_command({"explain", project_, name}, &text);
-    explain_->setPlainText(code == 0 ? text : tr("No explanation for '%1'.").arg(name));
+    if (scene_->train_error().empty()) {
+        try {
+            text = QString::fromStdString(explain::to_text(explain::explain_part(scene_->movement(), scene_->train(), name.toStdString())));
+        } catch (const std::exception&) {
+        }
+    }
+    explain_->setPlainText(!text.isEmpty() ? text : tr("No explanation for '%1'.").arg(name));
     rebuilding_ = true;
     for (QTreeWidgetItemIterator it(tree_); *it; ++it) {
         if ((*it)->text(0) == name) tree_->setCurrentItem(*it);

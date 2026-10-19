@@ -114,10 +114,14 @@ TEST_CASE("gui: clicking a part selects it and fills the Explain panel", "[gui]"
     REQUIRE_FALSE(hit.empty());
     CHECK(w.viewport()->pick(QPoint(0, 0)).empty());
 
+    // Selecting does not wait for the analyses in the queue.
+    w.submit("timekeeping", {"timekeeping", w.project()});
     w.select_part(QString::fromStdString(hit));
+    CHECK(w.unfinished_jobs() == 1);
     CHECK(w.viewport()->selected() == hit);
     CHECK_FALSE(w.explain_panel()->toPlainText().isEmpty());
     CHECK(w.explain_panel()->toPlainText().contains(QString::fromStdString(hit)));
+    w.wait_for_jobs();
 }
 
 TEST_CASE("gui: the timeline turns the train, explode and cut-away change the picture", "[gui]") {
