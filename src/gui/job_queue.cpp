@@ -38,7 +38,10 @@ JobQueue::State state_from_name(const QString& name) {
 
 JobQueue::JobQueue(QString program, QObject* parent) : QObject(parent), program_(std::move(program)) {}
 
-JobQueue::~JobQueue() { stop_worker(); }
+JobQueue::~JobQueue() {
+    if (save_pending_) save();
+    stop_worker();
+}
 
 QString JobQueue::state_name(State state) {
     switch (state) {
@@ -64,6 +67,7 @@ void JobQueue::stop_worker() {
 }
 
 void JobQueue::detach() {
+    if (save_pending_) save();  // the old project's journal gets its last change
     stop_worker();
     jobs_.clear();
     journal_.clear();
@@ -103,7 +107,16 @@ int JobQueue::load(const QString& journal) {
     return unfinished;
 }
 
-void JobQueue::save() const {
+void JobQueue::save_soon() {
+    if (save_pending_) return;
+    save_pending_ = true;
+    QTimer::singleShot(0, this, [this] {
+        if (save_pending_) save();
+    });
+}
+
+void JobQueue::save() {
+    save_pending_ = false;
     if (journal_.isEmpty()) return;
     QJsonArray array;
     for (const Job& j : jobs_) {
@@ -130,7 +143,7 @@ int JobQueue::submit(const QString& label, const QStringList& args) {
     job.args = args;
     jobs_.push_back(std::move(job));
     const int index = static_cast<int>(jobs_.size()) - 1;
-    save();
+    save_soon();
     emit changed(index);
     start_next();
     return index;
@@ -149,7 +162,7 @@ bool JobQueue::cancel(int index) {
     Job& job = jobs_[static_cast<std::size_t>(index)];
     if (job.state == State::Queued) {
         job.state = State::Cancelled;
-        save();
+        save_soon();
         emit changed(index);
         return true;
     }
@@ -182,7 +195,7 @@ void JobQueue::start_next() {
         connect(process_, &QProcess::errorOccurred, this, &JobQueue::on_process_error);
         process_->setProgram(program_);
         process_->setArguments(job.args);
-        save();
+        save_soon();
         emit changed(running_);
         process_->start();
         return;
@@ -203,7 +216,7 @@ void JobQueue::on_process_finished(int exit_code, QProcess::ExitStatus status) {
     process_ = nullptr;
     running_ = -1;
     cancel_requested_ = false;
-    save();
+    save_soon();
     emit changed(index);
     if (!cancelled) emit finished(index);
     start_next();
@@ -219,7 +232,7 @@ void JobQueue::on_process_error(QProcess::ProcessError error) {
     process_->deleteLater();
     process_ = nullptr;
     running_ = -1;
-    save();
+    save_soon();
     emit changed(index);
     emit finished(index);
     start_next();

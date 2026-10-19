@@ -65,7 +65,10 @@ private:
     void on_process_finished(int exit_code, QProcess::ExitStatus status);
     void on_process_error(QProcess::ProcessError error);
     void stop_worker();
-    void save() const;
+    void save();
+    /// Saves at the next turn of the event loop: a burst of changes (a job submitted and started, one
+    /// finished and the next started) is one write of the journal, not one each.
+    void save_soon();
 
     QString program_;
     QString journal_;
@@ -73,6 +76,7 @@ private:
     QProcess* process_{};
     int running_{-1};
     bool cancel_requested_{false};
+    bool save_pending_{false};
 };
 
 }  // namespace ohs::gui
