@@ -711,7 +711,7 @@ void MainWindow::on_tree_changed() {
 void MainWindow::set_time(double seconds) {
     time_ = seconds;
     if (scene_) scene_->set_time(seconds);
-    viewport_->update();
+    viewport_->interactive_update();
 }
 
 void MainWindow::set_playing(bool playing) {
@@ -756,7 +756,7 @@ void MainWindow::on_view_changed() {
     }
     scene_->set_show_forces(forces_check_->isChecked());
     scene_->set_show_trails(trails_check_->isChecked(), trail_seconds_->value());
-    viewport_->update();
+    viewport_->interactive_update();
 }
 
 void MainWindow::on_run_analysis() {

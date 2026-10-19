@@ -5,6 +5,7 @@
 #include <string>
 
 #include <QImage>
+#include <QTimer>
 #include <QWidget>
 
 #include "gui/scene.hpp"
@@ -25,6 +26,10 @@ public:
     void set_view(double yaw_deg, double pitch_deg);
     void fit();
     void select(const std::string& part);
+    /// Repaints for a change that comes in a stream (the timeline playing, a slider being dragged): the
+    /// frame is drawn quickly without antialiasing, and once the stream stops the view is drawn again at
+    /// full quality.
+    void interactive_update();
     const std::string& selected() const { return selected_; }
 
     /// Name of the part under `pos` (widget coordinates), or an empty string.
@@ -51,7 +56,9 @@ private:
         double value;  ///< field value at the triangle (mean of its corners), NaN without a field
     };
     std::vector<Projected> project(const QSize& size) const;
-    void draw(QPainter& painter, const QSize& size) const;
+    /// `fast` fills the triangles without antialiasing or outlines: about a ninth of the time, with jagged
+    /// silhouettes, for frames that are about to be replaced.
+    void draw(QPainter& painter, const QSize& size, bool fast = false) const;
     void draw_legend(QPainter& painter, const QSize& size, const FieldOverlay& field) const;
     void draw_overlays(QPainter& painter, const QSize& size) const;  ///< force arrows and motion trails
     QPointF to_screen(const Point3& p, const QSize& size) const;
@@ -64,6 +71,8 @@ private:
     QPoint last_;
     QPoint press_;
     bool dragged_{false};
+    bool fast_{false};          ///< the next paint is an interactive one
+    QTimer* settle_{};          ///< draws at full quality once the interaction pauses
 };
 
 }  // namespace ohs::gui

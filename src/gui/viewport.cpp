@@ -35,6 +35,19 @@ QColor role_colour(model::Role role) {
 Viewport::Viewport(QWidget* parent) : QWidget(parent) {
     setMinimumSize(320, 240);
     setFocusPolicy(Qt::StrongFocus);
+    settle_ = new QTimer(this);
+    settle_->setSingleShot(true);
+    settle_->setInterval(150);
+    connect(settle_, &QTimer::timeout, this, [this] {
+        fast_ = false;
+        update();
+    });
+}
+
+void Viewport::interactive_update() {
+    fast_ = true;
+    settle_->start();
+    update();
 }
 
 void Viewport::set_scene(std::shared_ptr<Scene> scene) {
@@ -166,9 +179,12 @@ std::vector<Viewport::Projected> Viewport::project(const QSize& size) const {
     return out;
 }
 
-void Viewport::draw(QPainter& painter, const QSize& size) const {
+void Viewport::draw(QPainter& painter, const QSize& size, bool fast) const {
     painter.fillRect(QRect(QPoint(0, 0), size), palette().window().color().lightness() < 128 ? QColor(34, 36, 40) : QColor(236, 238, 242));
-    painter.setRenderHint(QPainter::Antialiasing, true);
+    // Antialiased triangles need a thin outline to hide the seams between them, and the two together are most
+    // of a frame. Aliased fills tile without seams, so a fast frame draws neither.
+    painter.setRenderHint(QPainter::Antialiasing, !fast);
+    if (fast) painter.setPen(Qt::NoPen);
     if (!scene_) {
         painter.setPen(palette().text().color());
         painter.drawText(QRect(QPoint(0, 0), size), Qt::AlignCenter, tr("Open a project to see the movement"));
@@ -184,11 +200,12 @@ void Viewport::draw(QPainter& painter, const QSize& size) const {
         }
         const QColor col(std::min(255, int(base.red() * p.shade)), std::min(255, int(base.green() * p.shade)),
                          std::min(255, int(base.blue() * p.shade)));
-        painter.setPen(QPen(col, 0.6));
+        if (!fast) painter.setPen(QPen(col, 0.6));
         painter.setBrush(col);
         const QPointF pts[3] = {{p.x[0], p.y[0]}, {p.x[1], p.y[1]}, {p.x[2], p.y[2]}};
         painter.drawPolygon(pts, 3);
     }
+    painter.setRenderHint(QPainter::Antialiasing, true);  // the overlays are few: always smooth
     draw_overlays(painter, size);
     if (field) draw_legend(painter, size, *field);
 }
@@ -214,7 +231,7 @@ void Viewport::draw_legend(QPainter& painter, const QSize& size, const FieldOver
 
 void Viewport::paintEvent(QPaintEvent*) {
     QPainter painter(this);
-    draw(painter, size());
+    draw(painter, size(), fast_);
 }
 
 QImage Viewport::render(const QSize& size) const {
@@ -244,11 +261,13 @@ void Viewport::mouseMoveEvent(QMouseEvent* e) {
     last_ = e->pos();
     if ((e->pos() - press_).manhattanLength() > 3) dragged_ = true;
     if (e->buttons() & Qt::LeftButton) {
-        set_view(yaw_ - d.x() * 0.5, pitch_ - d.y() * 0.5);
+        yaw_ -= d.x() * 0.5;
+        pitch_ = std::clamp(pitch_ - d.y() * 0.5, -180.0, 0.0);
+        interactive_update();
     } else if (e->buttons() & (Qt::RightButton | Qt::MiddleButton)) {
         pan_x_ += d.x();
         pan_y_ += d.y();
-        update();
+        interactive_update();
     }
 }
 
@@ -261,7 +280,7 @@ void Viewport::mouseReleaseEvent(QMouseEvent* e) {
 
 void Viewport::wheelEvent(QWheelEvent* e) {
     zoom_ = std::clamp(zoom_ * std::pow(1.0015, e->angleDelta().y()), 0.1, 50.0);
-    update();
+    interactive_update();
 }
 
 }  // namespace ohs::gui

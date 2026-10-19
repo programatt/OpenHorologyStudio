@@ -149,6 +149,19 @@ TEST_CASE("gui: the timeline turns the train, explode and cut-away change the pi
     const double t = scene->time();
     CHECK(t == Catch::Approx(18.0).margin(0.01));
 
+    // A frame drawn while the timeline moves is the quick, aliased one; when it stops the view settles at
+    // full quality, the same picture render() gives.
+    auto* v = w.viewport();
+    v->resize(320, 240);
+    w.timeline()->setValue(3100);
+    const QImage fast = v->grab().toImage().convertToFormat(QImage::Format_RGB32);
+    QElapsedTimer settle;
+    settle.start();
+    while (settle.elapsed() < 400) QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    const QImage settled = v->grab().toImage().convertToFormat(QImage::Format_RGB32);
+    CHECK(fast != settled);
+    CHECK(settled == v->render(v->size()).convertToFormat(QImage::Format_RGB32));
+
     // Exploded view lifts parts apart along the dial axis.
     const double z0 = [&] { double lo = 1e300; for (auto& tr : scene->draw_list().triangles) lo = std::min(lo, tr.a[2]); return lo; }();
     w.explode_slider()->setValue(100);
