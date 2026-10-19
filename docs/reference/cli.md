@@ -497,6 +497,7 @@ Options:
   --modes INT                 Also compute this many natural frequencies
   --step TEXT                 STEP file (default: next to the project)
   --up TEXT                   CAD axis normal to the dial (default: the one found at import)
+  --mesher TEXT [section]     Shock case mesher: section (mid-height section, extruded) or netgen (the whole B-rep; needs 'pip install netgen-mesher')
   --vtu TEXT                  Write the result for ParaView
   --hdf5 TEXT                 Write mesh and fields to an HDF5 file (needs a build with libhdf5)
   --crosscheck                Compare with CalculiX if it is installed

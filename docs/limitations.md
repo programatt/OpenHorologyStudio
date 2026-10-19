@@ -20,9 +20,12 @@ know where to be careful.
   rigid bodies with collision geometry, and not for the whole train. The finite-element stack and
   the mesher are OHS's own (ADR 3). MFEM (optional, found at configure time) is linked only to
   re-solve a shock case with its own elements and solver (`ohs fea --mfem`: one material, no ties); it
-  does not replace the solver, and a Netgen adapter does not exist yet.
-- **No general 3D meshing.** Parts are meshed from their mid-height section and extruded; features
-  that vary through the thickness are not seen by the mesher or by the DFM rules.
+  does not replace the solver, and Netgen is used only as an out-of-process mesher.
+- **3D meshing is optional.** By default parts are meshed from their mid-height section and extruded,
+  so features that vary through the thickness are not seen by the mesher or by the DFM rules.
+  `ohs fea --case shock --mesher netgen` meshes the B-rep with Netgen (an external Python module,
+  `pip install netgen-mesher`), but only the shock case uses it, hole clamping still comes from the
+  mid-height section, and OHS has no mesher of its own for general solids.
 - **Cycloidal gears** are generated and fitted (one rolling circle for both flanks), but the Lewis
   hand calculation and the tolerance stack-up's contact ratio use involute formulas, and a cycloid
   fit is only tried for flanks the involute fit rejects.

@@ -328,6 +328,19 @@ TEST_CASE("ohs structural commands end to end") {
         const auto j2 = nlohmann::json::parse(run("--json fea " + proj + " --part escape_wheel --case shock --size 0.3 --g 2000", dir).output);
         CHECK(j2["max_von_mises_mpa"].get<double>() == Approx(2 * j["max_von_mises_mpa"].get<double>()).epsilon(1e-6));
 
+        // The same part meshed by Netgen (the whole B-rep), or a clear refusal when Netgen is not installed.
+        const auto n = run("--json fea " + proj + " --part escape_wheel --case shock --size 0.3 --g 1000 --mesher netgen", dir);
+        if (n.exit_code == 0) {
+            const auto nj = nlohmann::json::parse(n.output);
+            CHECK(nj["mesher"] == "netgen");
+            CHECK(nj["mass_g"].get<double>() == Approx(j["mass_g"].get<double>()).epsilon(0.05));
+            CHECK(nj["max_displacement_mm"].get<double>() == Approx(j["max_displacement_mm"].get<double>()).epsilon(0.25));
+        } else {
+            CHECK(n.exit_code == 2);
+            CHECK(n.error.find("Netgen") != std::string::npos);
+        }
+        CHECK(run("fea " + proj + " --part escape_wheel --case shock --mesher gmsh", dir).exit_code == 2);
+
         // MFEM re-solves the real part (mesh from the section, clamped holes, gravity) with its own elements.
         const auto m = run("--json fea " + proj + " --part escape_wheel --case shock --size 0.3 --g 1000 --mfem", dir);
         REQUIRE(m.exit_code == 0);

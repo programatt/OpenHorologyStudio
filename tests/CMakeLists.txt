@@ -40,6 +40,7 @@ add_executable(ohs_tests
   unit/geometry_test.cpp
   unit/cad_io_test.cpp
   unit/cycloidal_fit_test.cpp
+  unit/netgen_test.cpp
   integration/pipeline_test.cpp
   integration/animation_test.cpp
   integration/cli_test.cpp)

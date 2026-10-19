@@ -3,13 +3,16 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <limits>
 #include <numbers>
+#include <random>
 
 #include <BRepBndLib.hxx>
 #include <Bnd_Box.hxx>
 
 #include "core/error.hpp"
+#include "geometry/netgen_mesh.hpp"
 #include "geometry/section.hpp"
 #include "mesh/mesh2d.hpp"
 #include "mesh/tetmesh.hpp"
@@ -77,13 +80,16 @@ PartCaseResult run_part_case(const PartCaseInput& in) {
     if (z1 - z0 <= 0) throw Error("the part has no thickness");
 
     const mesh::Region region = geometry::section_region(in.shape, 0.5 * (z0 + z1), 0.01 * in.element_size, 0.03 * in.element_size);
-    mesh::Mesh2dOptions mo;
-    mo.size = in.element_size;
-    const mesh::Mesh2d surface = mesh::triangulate(region, mo);
-
     PartCaseResult r;
     r.model.material = in.material;
-    r.model.mesh = mesh::extrude(surface, z0, z1, std::max(in.layers, 1), 2);
+    if (in.mesher == Mesher::Netgen) {
+        r.model.mesh = geometry::mesh_solid_with_netgen(
+            in.shape, in.element_size, 2, std::filesystem::temp_directory_path() / ("ohs_netgen_" + std::to_string(std::random_device{}())));
+    } else {
+        mesh::Mesh2dOptions mo;
+        mo.size = in.element_size;
+        r.model.mesh = mesh::extrude(mesh::triangulate(region, mo), z0, z1, std::max(in.layers, 1), 2);
+    }
     r.nodes = r.model.mesh.nodes.size();
     r.dofs = r.model.dofs();
     if (r.dofs > in.max_dofs) {
@@ -110,7 +116,8 @@ PartCaseResult run_part_case(const PartCaseInput& in) {
     }
     r.clamped_holes = static_cast<int>(clamp_rings.size());
     r.free_openings = static_cast<int>(region.rings.size()) - 1 - r.clamped_holes;
-    const double tol = 1e-4 * in.element_size;
+    // Netgen's nodes lie on the true circle of a hole, the section's ring is a polygon inscribed in it.
+    const double tol = (in.mesher == Mesher::Netgen ? 0.02 : 1e-4) * in.element_size;
     auto on_hole = [&](const mesh::P2 p) {
         for (std::size_t k : clamp_rings) {
             const auto& ring = region.rings[k];

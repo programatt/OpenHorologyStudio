@@ -31,6 +31,14 @@ von Mises stress, safety factor against the material's strength, and the lowest 
 frequencies. `--vtu` writes a file for ParaView; `--hdf5` writes the mesh and every field to an HDF5 file
 for Python (`h5py`) or MATLAB (needs a build with libhdf5; the Linux packages have it).
 
+By default the mesh comes from the mid-height section, extruded, which is exact for a prismatic part
+and fast. `--mesher netgen` meshes the whole B-rep with Netgen instead, so counterbores, steps, bosses
+and chamfers through the thickness are meshed where they are (it uses far more elements: expect 10
+times the dofs, and set `--size` accordingly). Netgen runs in a Python process (`pip install
+netgen-mesher` into the `python3` on your PATH, or point `OHS_NETGEN_PYTHON` at the interpreter that
+has it); OHS links nothing from it. The holes that are clamped are still the round holes found in the
+mid-height section.
+
 `--mfem` re-solves the shock case with MFEM, an independent finite element code, built from the same
 mesh and loads but with its own elements, assembly and conjugate-gradient solver, and prints the
 largest displacement difference. The two codes use the same discretisation, so they agree to solver

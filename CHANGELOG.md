@@ -9,6 +9,8 @@ Semantic Versioning, with the Python API and the plugin ABI versioned as describ
 Found by running the plan's gates on the real OM10 file.
 
 ### Added
+- `ohs fea --case shock --mesher netgen` meshes the whole B-rep with Netgen (out of process, from
+  `pip install netgen-mesher`), so features through the thickness are kept; `section` stays the default.
 - `ohs fea --mfem`: the shock case re-solved with MFEM (optional `libmfem`, linked serially) as an
   independent check; it agrees with OHS to about 1e-8 on the test blocks and 1e-6 on a real part.
 - `ohs-gui` runs analyses as worker processes (the `ohs` program) in a journalled queue: a running job

@@ -42,10 +42,17 @@ ToothCaseResult run_tooth_case(const ToothCaseInput& input);
 
 // ---- a part under shock, and its vibration modes -------------------------------------------------------
 
+/// How a part is turned into a tetrahedral mesh.
+enum class Mesher {
+    Section,  ///< the mid-height section meshed in 2D and extruded: fast, exact for prismatic parts
+    Netgen,   ///< Netgen meshes the B-rep, so steps, pockets and bosses through the thickness are kept
+};
+
 struct PartCaseInput {
     TopoDS_Shape shape;            ///< with the dial plane normal to Z
     double element_size{0.2};
-    int layers{2};
+    int layers{2};                 ///< Section mesher only
+    Mesher mesher{Mesher::Section};
     fea::Material material;
     double shock_g{5000};          ///< acceleration along -Z (end shake) in g, for the static case
     bool in_plane_shock{false};    ///< apply it along -X instead
@@ -72,8 +79,9 @@ struct PartCaseResult {
     fea::StaticResult solution;
 };
 
-/// Slices the part at mid-height, meshes the outline with quadratic tetrahedra, clamps every hole
-/// (pivots and screws) and applies the shock as a body force.
+/// Meshes the part with quadratic tetrahedra (by default from its mid-height section, extruded; or with
+/// Netgen), clamps every round hole (pivots and screws) found in the mid-height section and applies the
+/// shock as a body force.
 PartCaseResult run_part_case(const PartCaseInput& input);
 
 // ---- the physics verification suite ----------------------------------------------------------------------

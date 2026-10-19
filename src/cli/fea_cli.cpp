@@ -32,7 +32,7 @@ constexpr int kExitOk = 0;
 constexpr int kExitCheckFailed = 1;
 
 struct FeaOptions {
-    std::string project, part, case_name = "tooth-bending", material, materials_file, step_override, up, vtu, hdf5;
+    std::string project, part, case_name = "tooth-bending", material, materials_file, step_override, up, vtu, hdf5, mesher = "section";
     std::string hairspring = "nife_hairspring", balance = "brass_leaded";
     double load_n = 0, wind = 1.0, size = 0.2, size_factor = 0.14, shock_g = 5000, beat_rate = 0;
     int modes = 0;
@@ -188,12 +188,15 @@ int cmd_fea(const FeaOptions& o, bool as_json) {
         cases::PartCaseInput in;
         in.shape = shape;
         in.element_size = o.size;
+        if (o.mesher == "netgen") in.mesher = cases::Mesher::Netgen;
+        else if (o.mesher != "section") throw Error("--mesher must be section or netgen");
         in.shock_g = o.shock_g;
         in.in_plane_shock = o.in_plane;
         in.modes = o.modes;
         in.material = fea::find_material(o.material.empty() ? "brass_leaded" : o.material, extra);
         const cases::PartCaseResult r = cases::run_part_case(in);
         j["material"] = in.material.name;
+        j["mesher"] = o.mesher;
         j["shock_g"] = o.shock_g;
         j["mass_g"] = r.mass_g;
         j["max_displacement_mm"] = r.max_displacement_mm;
@@ -289,6 +292,7 @@ void add_fea_commands(CLI::App& app, const bool& json_flag, std::function<int()>
     fea->add_option("--modes", o->modes, "Also compute this many natural frequencies");
     fea->add_option("--step", o->step_override, "STEP file (default: next to the project)");
     fea->add_option("--up", o->up, "CAD axis normal to the dial (default: the one found at import)");
+    fea->add_option("--mesher", o->mesher, "Shock case mesher: section (mid-height section, extruded) or netgen (the whole B-rep; needs 'pip install netgen-mesher')")->capture_default_str();
     fea->add_option("--vtu", o->vtu, "Write the result for ParaView");
     fea->add_option("--hdf5", o->hdf5, "Write mesh and fields to an HDF5 file (needs a build with libhdf5)");
     fea->add_flag("--crosscheck", o->crosscheck, "Compare with CalculiX if it is installed");
