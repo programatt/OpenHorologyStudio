@@ -49,6 +49,23 @@ clocksource is `hpet` (check `/sys/devices/system/clocksource/clocksource0/curre
 it is several times slower, because Chrono's profiling timers call `clock_gettime` every step and
 each call is a system call.
 
+### Superbuild of Chrono and MFEM (optional)
+
+`cmake/superbuild` fetches Chrono 9.0.1 and MFEM 4.5.2 (serial, no MPI) at pinned commit hashes and
+installs them into one prefix (Netgen can be added with `-DOHS_SUPERBUILD_NETGEN=ON`; OHS reaches
+Netgen through `pip install netgen-mesher` otherwise):
+
+```
+cmake -S cmake/superbuild -B build/superbuild -DCMAKE_INSTALL_PREFIX=$PWD/build/deps
+cmake --build build/superbuild --parallel
+cmake -S . -B build/deps-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$PWD/build/deps \
+      -DOHS_WITH_CHRONO=ON -DChrono_DIR=$PWD/build/deps/lib/cmake/Chrono
+```
+
+The pins are in `cmake/superbuild/CMakeLists.txt` (commit `2617649b` for Chrono, `00b2a070` for MFEM). It
+was run on Linux with GCC 13: both build at the pins (MFEM needs the `-include cstdint` flag the script
+passes), and the OHS build against the result finds them. It was not run on Windows or macOS.
+
 ### Desktop application
 
 ```

@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "geometry/pmi.hpp"
 #include "model/model.hpp"
 
 namespace ohs::manufacturing {
@@ -37,6 +38,22 @@ struct ToleranceConfig {
     double end_shake_min = 0.010, end_shake_max = 0.080;
     double side_shake_min = 0.004, side_shake_max = 0.040;
 };
+
+/// What reading the tolerances of a STEP file's PMI changed in a configuration.
+struct PmiApplied {
+    std::string field;   ///< a ToleranceConfig field
+    double value{};      ///< +- mm now in force
+    std::string source;  ///< the dimension it came from, e.g. "fourth_wheel diameter 0.800 +0.003/-0.001"
+};
+
+/// Takes the dimensional tolerances of a STEP AP242 file and sets the matching fields of `config`, each to the
+/// loosest (worst-case) +- tolerance among the dimensions that apply:
+///   diameter on a rotating part (arbor, wheel, pinion, escape wheel, ...) -> pivot_diameter_tol
+///   diameter on a plate or bridge                                          -> hole_diameter_tol
+///   length on an arbor                                                     -> arbor_length_tol
+///   length on a bridge                                                     -> bridge_gap_tol
+/// Dimensions on other parts, or of other kinds, change nothing. Fields without a matching dimension keep their value.
+std::vector<PmiApplied> apply_pmi(ToleranceConfig& config, const std::vector<geometry::PmiDimension>& dimensions, const model::Movement& movement);
 
 /// `[tolerance]` table with the field names above; unknown keys are an error.
 ToleranceConfig tolerance_from_toml(const std::string& text);

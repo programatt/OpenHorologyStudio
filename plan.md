@@ -357,13 +357,13 @@ Six milestones to 1.0, each usable on its own and closed by a gate you check.
 - [x] HDF5 results for the structural fields (`ohs fea --hdf5`; JSON, CSV and VTU as before)
 - [x] USD export (`ohs animate -o x.usda`, checked with Pixar's reader)
 - [x] IGES and DXF import (`ohs import x.igs|x.dxf`; DXF is a flat drawing, extruded)
-- [ ] STEP PMI tolerances
+- [x] STEP PMI dimensional tolerances (`ohs tolerance --pmi`; tested on OCCT-written AP242, not on CAD-system files)
 - [x] Cycloidal gear profiles (generated, fitted, meshing-checked; Lewis and contact-ratio formulas stay involute)
 - [x] Spring detent (chronometer) escapement in the reduced model (calibre `escapement = "detent"`)
 - [ ] Escapements other than the Swiss lever and the detent (co-axial, Robin, cylinder, verge), and a contact model of the detent; coil-contact mainspring and hairspring models
 - [ ] Windows and macOS builds, installers and CI run (configured only); Fusion 360 and SolidWorks add-in runs
 - [x] TSan (clean under `setarch -R`), coverage and static-analysis CI jobs (TSan run locally; coverage and clang-tidy jobs are configured, not run here)
-- [ ] vcpkg superbuild of Chrono, MFEM and Netgen at pinned commits
+- [x] Superbuild of Chrono and MFEM at pinned commits (CMake ExternalProject, built on Linux; Netgen optional; not vcpkg, not run on Windows/macOS)
 - [ ] Human-run gates: OM10 timegrapher trend and bench calibration, machining one part from a drawing, an OM10 study done by a person from the lessons alone
 - [ ] Trademark and domain check on the name; a sanctioned OM10 download URL from openmovement
 

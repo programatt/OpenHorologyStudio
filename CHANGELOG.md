@@ -9,6 +9,9 @@ Semantic Versioning, with the Python API and the plugin ABI versioned as describ
 Found by running the plan's gates on the real OM10 file.
 
 ### Added
+- `ohs tolerance --pmi` reads the dimensional tolerances of a STEP AP242 file into the tolerance table.
+- `cmake/superbuild`: Chrono and MFEM fetched and built at pinned commits (run on Linux, GCC 13); OHS finds a
+  serial MFEM.
 - `ohs fea --vtu-compressed` writes a binary, zlib-compressed VTU through VTK (optional `libvtk9-dev`); the
   text VTU files are now checked by opening them with VTK's own reader.
 - A spring detent (chronometer) escapement in the reduced timekeeping model (`escapement = "detent"` and

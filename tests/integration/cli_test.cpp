@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
 
 #include <catch2/catch_approx.hpp>
@@ -12,6 +13,8 @@
 #include <nlohmann/json.hpp>
 
 #include "dynamics/chrono_adapter.hpp"
+#include "geometry/pmi.hpp"
+#include "geometry/procedural.hpp"
 
 namespace fs = std::filesystem;
 using Catch::Approx;
@@ -508,6 +511,25 @@ TEST_CASE("ohs manufacturing commands on the generated movement") {
         std::ofstream(dir / "tight.toml") << "[tolerance]\nposition_tol = 0.002\ntooth_thickness_tol = 0.002\narbor_length_tol = 0.004\nbridge_gap_tol = 0.004\n"
                                              "plate_flatness_tol = 0.004\npivot_diameter_tol = 0.001\nhole_diameter_tol = 0.001\n";
         CHECK(run("tolerance " + proj + " --samples 3000 --tolerances " + (dir / "tight.toml").string(), dir).exit_code == 0);
+    }
+
+    SECTION("tolerance --pmi: dimensional tolerances in the STEP file set the table") {
+        const std::string pmi_step = (dir / "pmi.step").string(), pmi_proj = (dir / "pmi.hsproj").string();
+        const auto parts = ohs::geometry::make_test_movement();
+        ohs::geometry::export_step_with_pmi(parts, {{"main_plate", "diameter", 0.8, 0.020, 0.020}, {"third_wheel", "diameter", 0.8, 0.050, 0.010}}, pmi_step);
+        REQUIRE(run("import " + pmi_step + " -o " + pmi_proj + " --beat-rate 25200", dir).exit_code == 0);
+        const auto r = run("--json tolerance " + pmi_proj + " --samples 2000 --pmi", dir);
+        REQUIRE((r.exit_code == 0 || r.exit_code == 1));
+        const auto j = nlohmann::json::parse(r.output);
+        REQUIRE(j["pmi"].size() == 2);
+        std::map<std::string, double> got;
+        for (const auto& a : j["pmi"]) got[a["field"].get<std::string>()] = a["value_mm"].get<double>();
+        CHECK(got["hole_diameter_tol"] == Approx(0.020));
+        CHECK(got["pivot_diameter_tol"] == Approx(0.050));
+        // Without --pmi the file's tolerances are ignored.
+        const auto plain = nlohmann::json::parse(run("--json tolerance " + pmi_proj + " --samples 2000", dir).output);
+        CHECK(plain["pmi"].empty());
+        CHECK(run("tolerance " + pmi_proj + " --samples 500 --pmi", dir).output.find("tolerances from the STEP file's PMI") != std::string::npos);
     }
 
     SECTION("collisions: the generated train meshes without overlap") {

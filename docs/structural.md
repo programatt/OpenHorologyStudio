@@ -39,6 +39,14 @@ netgen-mesher` into the `python3` on your PATH, or point `OHS_NETGEN_PYTHON` at 
 has it); OHS links nothing from it. The holes that are clamped are still the round holes found in the
 mid-height section.
 
+`ohs tolerance --pmi` takes tolerances from the STEP file itself: the dimensional tolerances of a STEP
+AP242 file (its product and manufacturing information) set `pivot_diameter_tol` (a diameter on a wheel,
+pinion, arbor or other rotating part), `hole_diameter_tol` (a diameter on a plate or bridge),
+`arbor_length_tol` and `bridge_gap_tol`, each to the loosest tolerance among the dimensions that apply,
+on top of the table. Other dimensions are ignored, and the command prints what it applied. Files from
+CAD systems encode PMI in several ways, and only what OpenCASCADE reads as a dimension with a tolerance
+is used.
+
 `--vtu-compressed` writes the same result as a zlib-compressed binary VTU through VTK (about 40 % smaller
 on a real part; it needs a build with VTK, `libvtk9-dev`). The VTU files `--vtu` writes were checked by opening them with VTK's own
 reader, so ParaView will take them: the points, the quadratic tetrahedra and the arrays all arrive.

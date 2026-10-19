@@ -569,6 +569,7 @@ Options:
   --up TEXT                   CAD axis normal to the dial (default: the one found at import)
   --samples INT [10000]       Number of virtual builds
   --seed UINT [42]            Random seed
+  --pmi                       Take pivot, hole, arbor-length and bridge-gap tolerances from the STEP file's PMI (AP242 dimensional tolerances), on top of the table
   --tolerances TEXT:FILE      Tolerance table TOML ([tolerance])
   --fail-above FLOAT [0.02]   Exit 1 when more than this fraction of builds has a problem
 ```

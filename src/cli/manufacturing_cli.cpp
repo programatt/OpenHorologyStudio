@@ -42,7 +42,7 @@ struct MfgOptions {
     double thickness = 0.5, beat_rate = 0, fail_above = 0.02;
     int samples = 10000;
     unsigned long seed = 42;
-    bool profile_only = false, list = false, no_fea = false, no_timekeeping = false, no_geometry_sections = false;
+    bool pmi = false, profile_only = false, list = false, no_fea = false, no_timekeeping = false, no_geometry_sections = false;
 };
 
 geometry::Axis axis_of(const std::string& up);
@@ -171,11 +171,18 @@ json stat_json(const manufacturing::Stat& s) { return {{"mean", s.mean}, {"sd", 
 int cmd_tolerance(const MfgOptions& o, bool as_json) {
     const model::Movement m = model::load_rig(o.project);
     manufacturing::ToleranceConfig cfg = o.tolerance_file.empty() ? manufacturing::ToleranceConfig{} : manufacturing::load_tolerance(o.tolerance_file);
+    std::vector<manufacturing::PmiApplied> pmi;
+    if (o.pmi) {
+        const auto parts_step = o.step_override.empty() ? fs::path(o.project).parent_path() / m.source_geometry : fs::path(o.step_override);
+        pmi = manufacturing::apply_pmi(cfg, geometry::read_step_pmi(parts_step), m);
+    }
     cfg.samples = o.samples;
     cfg.seed = o.seed;
     const auto r = manufacturing::run_tolerance(m, cfg);
     if (as_json) {
         json j = {{"samples", r.samples}, {"seed", r.seed}, {"failing_fraction", r.failing_fraction}, {"meshes", json::array()}, {"mobiles", json::array()}};
+        j["pmi"] = json::array();
+        for (const auto& a : pmi) j["pmi"].push_back({{"field", a.field}, {"value_mm", a.value}, {"source", a.source}});
         for (const auto& mt : r.meshes) {
             json sens = json::array();
             for (const auto& s : mt.backlash_sensitivity) sens.push_back({{"input", s.input}, {"share", s.share}, {"correlation", s.correlation}});
@@ -189,6 +196,10 @@ int cmd_tolerance(const MfgOptions& o, bool as_json) {
         }
         std::cout << j.dump(2) << '\n';
     } else {
+        if (o.pmi) {
+            std::cout << "tolerances from the STEP file's PMI: " << (pmi.empty() ? "none applied (no matching dimensions)" : "") << "\n";
+            for (const auto& a : pmi) std::cout << "  " << a.field << " = +-" << a.value << " mm (" << a.source << ")\n";
+        }
         std::cout << r.samples << " builds, seed " << r.seed << "\n" << std::fixed << std::setprecision(4);
         for (const auto& mt : r.meshes) {
             std::cout << mt.a << " / " << mt.b << ": backlash " << mt.backlash.mean << " +- " << mt.backlash.sd << " mm (nominal " << mt.nominal_backlash << "), contact ratio "
@@ -387,6 +398,7 @@ void add_manufacturing_commands(CLI::App& app, const bool& json_flag, std::funct
     project(t);
     t->add_option("--samples", o->samples, "Number of virtual builds")->capture_default_str();
     t->add_option("--seed", o->seed, "Random seed")->capture_default_str();
+    t->add_flag("--pmi", o->pmi, "Take pivot, hole, arbor-length and bridge-gap tolerances from the STEP file's PMI (AP242 dimensional tolerances), on top of the table");
     t->add_option("--tolerances", o->tolerance_file, "Tolerance table TOML ([tolerance])")->check(CLI::ExistingFile);
     t->add_option("--fail-above", o->fail_above, "Exit 1 when more than this fraction of builds has a problem")->capture_default_str();
     t->callback(pick(cmd_tolerance));

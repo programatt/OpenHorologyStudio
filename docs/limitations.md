@@ -33,7 +33,9 @@ know where to be careful.
 - **Escapements:** the Swiss lever and, in the reduced model only, a spring detent (chronometer) escapement
   described by calibre parameters. There is no co-axial, Robin, cylinder, verge or other escapement, no
   contact model of the detent, and the rig does not recognise escapement geometry in CAD.
-- **No STEP PMI tolerances:** they come from a TOML table. HDF5 (`ohs fea --hdf5`) holds the
+- **STEP PMI tolerances** are read for diameters and lengths only (`ohs tolerance --pmi`); it was tested on files
+  OpenCASCADE itself writes, not on files from a CAD system. Geometric tolerances (flatness, position) and
+  datum references are not read; they come from the TOML table. HDF5 (`ohs fea --hdf5`) holds the
   structural fields only; the timekeeping results are JSON and CSV.
 - **IGES and DXF import are plain.** IGES files carry no assembly names, so parts are called `part`,
   `part#2` and so on (rename them with a preset). A DXF is a flat drawing: closed contours are

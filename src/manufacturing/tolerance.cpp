@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <iomanip>
+#include <map>
 #include <numbers>
 #include <sstream>
 #include <thread>
@@ -121,6 +123,45 @@ void parallel_samples(int n, F f) {
 }
 
 }  // namespace
+
+std::vector<PmiApplied> apply_pmi(ToleranceConfig& config, const std::vector<geometry::PmiDimension>& dimensions, const model::Movement& movement) {
+    struct Target {
+        const char* field;
+        double ToleranceConfig::*member;
+    };
+    std::vector<PmiApplied> applied;
+    std::map<std::string, std::pair<double, std::string>> loosest;  // field -> tolerance and the dimension it came from
+    std::map<std::string, double ToleranceConfig::*> members;
+    for (const Target& t : {Target{"pivot_diameter_tol", &ToleranceConfig::pivot_diameter_tol}, Target{"hole_diameter_tol", &ToleranceConfig::hole_diameter_tol},
+                            Target{"arbor_length_tol", &ToleranceConfig::arbor_length_tol}, Target{"bridge_gap_tol", &ToleranceConfig::bridge_gap_tol}}) {
+        members[t.field] = t.member;
+    }
+    for (const geometry::PmiDimension& d : dimensions) {
+        const int index = movement.find_component(d.part);
+        if (index < 0) continue;
+        const model::Role role = movement.components[static_cast<std::size_t>(index)].role;
+        const char* field = nullptr;
+        if (d.kind == "diameter") {
+            if (role == model::Role::Plate || role == model::Role::Bridge) field = "hole_diameter_tol";
+            else if (model::is_rotating_role(role)) field = "pivot_diameter_tol";
+        } else if (d.kind == "length") {
+            if (role == model::Role::Arbor) field = "arbor_length_tol";
+            else if (role == model::Role::Bridge) field = "bridge_gap_tol";
+        }
+        if (!field) continue;
+        const double tol = std::max(d.plus, d.minus);
+        if (tol <= 0) continue;
+        std::ostringstream src;
+        src << d.part << ' ' << d.kind << ' ' << std::fixed << std::setprecision(3) << d.nominal << " +" << d.plus << "/-" << d.minus;
+        auto it = loosest.find(field);
+        if (it == loosest.end() || tol > it->second.first) loosest[field] = {tol, src.str()};
+    }
+    for (const auto& [field, found] : loosest) {
+        config.*members[field] = found.first;
+        applied.push_back({field, found.first, found.second});
+    }
+    return applied;
+}
 
 ToleranceConfig tolerance_from_toml(const std::string& text) {
     toml::table root;
