@@ -253,6 +253,11 @@ Scene::Drawn Scene::draw_list() const {
     const double zc = centre_[2];
 
     Drawn out;
+    std::size_t most = has_field_ ? field_.triangles.size() : 0;  // built every frame: grow the lists once
+    for (const ScenePart& part : parts_) most += part.triangles.size();
+    out.triangles.reserve(most);
+    out.part_index.reserve(most);
+    out.values.reserve(most);
     for (std::size_t i = 0; i < parts_.size(); ++i) {
         const ScenePart& part = parts_[i];
         if (!visible(part.name)) continue;

@@ -143,6 +143,7 @@ void MainWindow::build_ui() {
 
     log_ = new QPlainTextEdit(this);
     log_->setReadOnly(true);
+    log_->setMaximumBlockCount(20000);  // a long session's log would otherwise grow without end
     auto* log_dock = new QDockWidget(tr("Log"), this);
     log_dock->setObjectName("log_dock");
     log_dock->setWidget(log_);
@@ -589,6 +590,9 @@ bool MainWindow::edit_project(const QString& label, const QStringList& args) {
 void MainWindow::refresh_panels() {
     rebuilding_ = true;
     const auto& m = scene_->movement();
+    // One repaint of each view at the end instead of one per inserted row.
+    tree_->setUpdatesEnabled(false);
+    rig_table_->setUpdatesEnabled(false);
 
     tree_->clear();
     std::vector<QTreeWidgetItem*> mobile_items;
@@ -628,6 +632,8 @@ void MainWindow::refresh_panels() {
         if (c.features.teeth > 0) mesh_box_->addItem(QString::fromStdString(c.features.name));
     }
     if (const int keep = mesh_box_->findText(partner); keep >= 0) mesh_box_->setCurrentIndex(keep);
+    tree_->setUpdatesEnabled(true);
+    rig_table_->setUpdatesEnabled(true);
     rebuilding_ = false;
 
     QString s = tr("%1 | %2 parts").arg(QFileInfo(project_).fileName()).arg(m.components.size());
