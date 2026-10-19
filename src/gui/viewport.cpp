@@ -21,12 +21,17 @@ QColor role_colour(model::Role role) {
         case Role::Plate:
         case Role::Bridge: return QColor(184, 178, 158);
         case Role::Arbor:
+        case Role::Stem:
         case Role::Pinion:
         case Role::PalletFork:
         case Role::Screw: return QColor(156, 160, 168);
+        case Role::Lever: return QColor(176, 180, 188);   // bright steel, set off from the screws and arbors
+        case Role::Spring: return QColor(92, 110, 154);   // blued steel
+        case Role::Bearing: return QColor(190, 138, 66);  // a redder brass than the train's
         case Role::Jewel: return QColor(200, 40, 60);
         case Role::Hairspring: return QColor(70, 110, 190);
         case Role::Rotor: return QColor(168, 112, 74);  // copper: apart from the brass train and the plates
+        case Role::DateRing: return QColor(226, 224, 214);  // a white date disc
         default: return QColor(201, 163, 76);
     }
 }

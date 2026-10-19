@@ -50,6 +50,14 @@ std::vector<Triangle> tessellate(const TopoDS_Shape& shape, double deflection, d
     return out;
 }
 
+// The articulation (a stem, lever or spring that moves) of a component, or -1.
+int articulation_of(const kinematics::TrainAnalysis& train, int component) {
+    for (std::size_t i = 0; i < train.articulations.size(); ++i) {
+        if (train.articulations[i].component == component) return static_cast<int>(i);
+    }
+    return -1;
+}
+
 }  // namespace
 
 Scene Scene::load(const std::filesystem::path& project, const std::filesystem::path& step_override,
@@ -79,6 +87,7 @@ Scene Scene::load(const std::filesystem::path& project, const std::filesystem::p
         part.name = comp.features.name;
         part.role = comp.role;
         part.mobile = s.movement_.mobile_of(static_cast<int>(c));
+        part.articulation = articulation_of(s.train_, static_cast<int>(c));
         if (part.mobile >= 0) {
             part.pivot_x = s.movement_.mobiles[part.mobile].center.x;
             part.pivot_y = s.movement_.mobiles[part.mobile].center.y;
@@ -133,6 +142,7 @@ bool Scene::reload_rig(const std::filesystem::path& project, double beat_rate_vp
         }
         part.role = movement_.components[c].role;
         part.mobile = mobile;
+        part.articulation = articulation_of(train_, static_cast<int>(c));
         part.pivot_x = px;
         part.pivot_y = py;
     }
@@ -251,7 +261,11 @@ std::vector<Scene::Trail> Scene::trails(int samples) const {
 
 Scene::Drawn Scene::draw_list() const {
     std::vector<double> angles(movement_.mobiles.size(), 0.0);
-    if (can_animate()) angles = kinematics::mobile_angles(train_, time_, {stepped_, 0.2});
+    std::vector<double> part_angles(train_.articulations.size(), 0.0);
+    if (can_animate()) {
+        angles = kinematics::mobile_angles(train_, time_, {stepped_, 0.2});
+        part_angles = kinematics::articulation_angles(train_, angles);
+    }
     const double zc = centre_[2];
 
     Drawn out;
@@ -266,7 +280,21 @@ Scene::Drawn Scene::draw_list() const {
         const double angle = part.mobile >= 0 && part.mobile < static_cast<int>(angles.size()) ? angles[part.mobile] : 0.0;
         const double ca = std::cos(angle), sa = std::sin(angle);
         const double lift = explode_ * ((part.z_min + part.z_max) / 2 - zc) * 2.0;
+        // A stem, lever or spring turns about a line of its own: Rodrigues' rotation of the point about it.
+        const kinematics::Articulation* art =
+            part.articulation >= 0 ? &train_.articulations[static_cast<std::size_t>(part.articulation)] : nullptr;
+        const double turn = art ? part_angles[static_cast<std::size_t>(part.articulation)] : 0.0;
+        const double ct = std::cos(turn), st = std::sin(turn);
         auto place = [&](const Point3& p) -> Point3 {
+            if (art) {
+                const double v[3] = {p[0] - art->point[0], p[1] - art->point[1], p[2] - art->point[2]};
+                const double* k = art->axis;
+                const double dot = k[0] * v[0] + k[1] * v[1] + k[2] * v[2];
+                const double cross[3] = {k[1] * v[2] - k[2] * v[1], k[2] * v[0] - k[0] * v[2], k[0] * v[1] - k[1] * v[0]};
+                double q[3];
+                for (int i = 0; i < 3; ++i) q[i] = art->point[i] + v[i] * ct + cross[i] * st + k[i] * dot * (1.0 - ct);
+                return {q[0], q[1], q[2] + lift};
+            }
             return {part.pivot_x + ca * p[0] - sa * p[1], part.pivot_y + sa * p[0] + ca * p[1], p[2] + lift};
         };
         const bool on_field = has_field_ && field_.part == part.name;

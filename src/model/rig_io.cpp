@@ -23,6 +23,11 @@ toml::table component_to_table(const Component& c) {
     t.insert("role_source", c.role_source);
     t.insert("teeth", f.teeth);
     t.insert("tooth_confidence", f.tooth_confidence);
+    if (f.inner_teeth > 0) {
+        t.insert("inner_teeth", f.inner_teeth);
+        t.insert("inner_tip_radius", f.inner_tip_radius);
+        t.insert("inner_root_radius", f.inner_root_radius);
+    }
     t.insert("center", toml::array{f.center.x, f.center.y});
     t.insert("z", toml::array{f.z_min, f.z_max});
     t.insert("extent", toml::array{f.extent_x, f.extent_y});
@@ -37,6 +42,15 @@ toml::table component_to_table(const Component& c) {
         t.insert("flank_cycloid_rolling_radius", f.flank_cycloid_rolling_radius);
     }
     t.insert("volume", f.volume);
+    if (f.length > 0) {
+        t.insert("axis", toml::array{f.axis[0], f.axis[1], f.axis[2]});
+        t.insert("size", toml::array{f.length, f.width, f.height});
+    }
+    if (!f.holes.empty()) {
+        toml::array holes;
+        for (const Hole& h : f.holes) holes.push_back(toml::array{h.x, h.y, h.radius});
+        t.insert("holes", std::move(holes));
+    }
     // TOML integers are signed 64-bit, so store the fingerprint as hex text.
     std::ostringstream fp;
     fp << std::hex << f.fingerprint;
@@ -80,6 +94,9 @@ Component component_from_table(const toml::table& t) {
     c.role_source = t["role_source"].value_or(std::string{"user"});
     f.teeth = t["teeth"].value_or(0);
     f.tooth_confidence = number(t, "tooth_confidence");
+    f.inner_teeth = t["inner_teeth"].value_or(0);
+    f.inner_tip_radius = number(t, "inner_tip_radius");
+    f.inner_root_radius = number(t, "inner_root_radius");
     f.center = pair(t, "center");
     const Vec2 z = pair(t, "z");
     f.z_min = z.x;
@@ -96,6 +113,20 @@ Component component_from_table(const toml::table& t) {
     f.flank_cycloid_pitch_radius = number(t, "flank_cycloid_pitch_radius");
     f.flank_cycloid_rolling_radius = number(t, "flank_cycloid_rolling_radius");
     f.volume = number(t, "volume");
+    if (const toml::array* a = t["axis"].as_array(); a && a->size() == 3) {
+        for (std::size_t i = 0; i < 3; ++i) f.axis[i] = a->get(i)->value_or(0.0);
+    }
+    if (const toml::array* a = t["size"].as_array(); a && a->size() == 3) {
+        f.length = a->get(0)->value_or(0.0);
+        f.width = a->get(1)->value_or(0.0);
+        f.height = a->get(2)->value_or(0.0);
+    }
+    if (const toml::array* hs = t["holes"].as_array()) {
+        for (const toml::node& n : *hs) {
+            const toml::array* h = n.as_array();
+            if (h && h->size() == 3) f.holes.push_back({h->get(0)->value_or(0.0), h->get(1)->value_or(0.0), h->get(2)->value_or(0.0)});
+        }
+    }
     const std::string fp = t["fingerprint"].value_or(std::string{"0"});
     f.fingerprint = std::stoull(fp, nullptr, 16);
     if (const toml::table* gt = t["gear"].as_table()) {

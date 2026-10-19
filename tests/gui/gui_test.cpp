@@ -43,6 +43,8 @@
 #include "mesh/tetmesh.hpp"
 #include "gui/main_window.hpp"
 #include "gui/theme.hpp"
+#include "geometry/step_io.hpp"
+#include "keyless_parts.hpp"
 
 namespace fs = std::filesystem;
 
@@ -963,6 +965,26 @@ TEST_CASE("gui: the right-click menu of the model tree and rig list shows and hi
         CHECK(tree_ticked(p.name));
     }
     CHECK_FALSE(w.set_role_visible("no such role", false));
+
+    // Show only hides every role but the one picked; Show all unhides everything.
+    menu.reset(w.visibility_menu());
+    QAction* show_all = nullptr;
+    QMenu* show_only = nullptr;
+    for (QAction* a : menu->actions()) {
+        if (a->text() == "Show all") show_all = a;
+        if (a->menu() && a->text() == "Show only") show_only = a->menu();
+    }
+    REQUIRE(show_all);
+    REQUIRE(show_only);
+    CHECK(show_only->actions().size() == static_cast<int>(expected.size()));
+    for (QAction* a : show_only->actions()) {
+        if (a->text() != "plate") continue;
+        a->trigger();
+        break;
+    }
+    for (const auto& p : scene->parts()) CHECK((scene->visible(p.name) == (role_of(p) == "plate") && tree_ticked(p.name) == scene->visible(p.name)));
+    show_all->trigger();
+    for (const auto& p : scene->parts()) CHECK((scene->visible(p.name) && tree_ticked(p.name)));
 }
 
 TEST_CASE("gui: the menus open projects on a worker thread and the window keeps running", "[gui]") {
@@ -1004,6 +1026,64 @@ TEST_CASE("gui: the menus open projects on a worker thread and the window keeps 
     wait_loaded();
     CHECK(w.log_console()->toPlainText().contains("Cannot open"));
     CHECK(w.project() == QDir(dir).filePath("demo.hsproj"));
+}
+
+TEST_CASE("gui: the stem turns, a click rides up a tooth of the barrel and a spring bends with it", "[gui][keyless]") {
+    app();
+    const QString dir = fresh_dir("keyless");
+    const QString step = QDir(dir).filePath("keyless.step"), project = QDir(dir).filePath("keyless.hsproj");
+    ohs::geometry::export_step(ohs::test::train_with_keyless_work(), step.toStdString());
+    REQUIRE(ohs::cli::run_captured({"import", step.toStdString(), "-o", project.toStdString(), "--beat-rate", "28800"}).exit_code == 0);
+    ohs::gui::Scene scene = ohs::gui::Scene::load(project.toStdString());
+    REQUIRE(scene.can_animate());
+    REQUIRE(scene.train().articulations.size() == 3);
+
+    // Where the vertices of one part are drawn at a time, one entry per triangle corner.
+    const auto drawn = [&scene](const std::string& name, double seconds) {
+        scene.set_time(seconds);
+        const auto list = scene.draw_list();
+        std::vector<std::array<double, 3>> out;
+        for (std::size_t i = 0; i < list.triangles.size(); ++i) {
+            if (scene.parts()[static_cast<std::size_t>(list.part_index[i])].name != name) continue;
+            for (const auto* p : {&list.triangles[i].a, &list.triangles[i].b, &list.triangles[i].c}) out.push_back({(*p)[0], (*p)[1], (*p)[2]});
+        }
+        return out;
+    };
+    const auto largest_move = [&](const std::string& name, double seconds) {
+        const auto before = drawn(name, 0.0), after = drawn(name, seconds);
+        REQUIRE(before.size() == after.size());
+        double most = 0;
+        for (std::size_t i = 0; i < before.size(); ++i) {
+            most = std::max(most, std::hypot(after[i][0] - before[i][0], std::hypot(after[i][1] - before[i][1], after[i][2] - before[i][2])));
+        }
+        return most;
+    };
+    const double tooth = scene.train().root_period_hours * 3600.0 / 80;  // seconds for one tooth of the barrel to pass
+
+    // The stem: an hour on, it has turned about its own axis (the rod's centre does not move, its surface does).
+    CHECK(largest_move("part_a", 3600.0) > 0.5);
+    const auto stem0 = drawn("part_a", 0.0), stem1 = drawn("part_a", 3600.0);
+    double c0 = 0, c1 = 0;
+    for (std::size_t i = 0; i < stem0.size(); ++i) {
+        c0 += stem0[i][1] / stem0.size();
+        c1 += stem1[i][1] / stem1.size();
+    }
+    CHECK(c1 == Catch::Approx(c0).margin(0.1));  // the mean of the corners drifts a little as they go round
+    // The click: at 70 % of a tooth it is up, its tip moved by about the tooth depth, and at the end of the tooth
+    // it is back; its pivot hardly moves.
+    const double up = largest_move("part_b", 0.7 * tooth);
+    CHECK(up > 0.15);
+    CHECK(up < 0.5);
+    CHECK(largest_move("part_b", tooth) < 1e-6);
+    // The spring bends the same way, about its fixed end, which stays put.
+    const double bend = largest_move("part_c", 0.7 * tooth);
+    CHECK(bend > 0.05);
+    const auto spring0 = drawn("part_c", 0.0), spring1 = drawn("part_c", 0.7 * tooth);
+    double fixed_end_move = 1e9;
+    for (std::size_t i = 0; i < spring0.size(); ++i) {
+        if (spring0[i][0] > 6.99) fixed_end_move = std::min(fixed_end_move, std::hypot(spring1[i][0] - spring0[i][0], spring1[i][1] - spring0[i][1]));
+    }
+    CHECK(fixed_end_move < 0.02);  // its corners, 0.4 mm off the pivot, move by that much times the small angle
 }
 
 // Hidden (run with `ohs_gui_tests "[bench]"`): where the time goes on the demonstration movement.

@@ -65,6 +65,9 @@ int material_index(model::Role role) {
         case model::Role::Bridge: return 2;
         case model::Role::Arbor:
         case model::Role::PalletFork:
+        case model::Role::Stem:
+        case model::Role::Spring:
+        case model::Role::Lever:
         case model::Role::Screw: return 1;
         default: return 0;
     }
@@ -109,6 +112,16 @@ AnimationStats write_animated_glb(const model::Movement& m, const std::vector<ge
             quats[i][4 * k + 3] = static_cast<float>(std::cos(kf.angles[i][k] / 2));
         }
     }
+    // A stem, lever or spring turns about an axis of its own: a quaternion about that axis.
+    std::vector<std::vector<float>> part_quats(train.articulations.size(), std::vector<float>(frames * 4, 0.f));
+    for (std::size_t i = 0; i < part_quats.size(); ++i) {
+        const auto& axis = train.articulations[i].axis;
+        for (std::size_t k = 0; k < frames; ++k) {
+            const double half = kf.part_angles[i][k] / 2;
+            for (int c = 0; c < 3; ++c) part_quats[i][4 * k + static_cast<std::size_t>(c)] = static_cast<float>(axis[c] * std::sin(half));
+            part_quats[i][4 * k + 3] = static_cast<float>(std::cos(half));
+        }
+    }
     const double max_step = kf.max_step;
 
     std::map<std::string, const geometry::ImportedPart*> by_name;
@@ -143,6 +156,14 @@ AnimationStats write_animated_glb(const model::Movement& m, const std::vector<ge
         sampler_of_mobile[i] = static_cast<int>(samplers.size()) - 1;
     }
 
+    std::vector<int> sampler_of_part(train.articulations.size(), -1);
+    for (std::size_t i = 0; i < part_quats.size(); ++i) {
+        const int view = bin.add(part_quats[i].data(), part_quats[i].size() * sizeof(float), views);
+        const int acc = add_accessor(accessors, view, frames, "VEC4");
+        samplers.push_back({{"input", time_acc}, {"output", acc}, {"interpolation", "LINEAR"}});
+        sampler_of_part[i] = static_cast<int>(samplers.size()) - 1;
+    }
+
     AnimationStats stats;
     stats.keyframes = frames;
     stats.max_degrees_per_keyframe = max_step * 180.0 / std::numbers::pi;
@@ -152,10 +173,21 @@ AnimationStats write_animated_glb(const model::Movement& m, const std::vector<ge
         if (found == by_name.end()) throw Error("no imported part named '" + comp.features.name + "'; was the right STEP file given?");
 
         const int mobile = m.mobile_of(static_cast<int>(c));
-        const double px = mobile >= 0 ? m.mobiles[mobile].center.x : 0.0;
-        const double py = mobile >= 0 ? m.mobiles[mobile].center.y : 0.0;
+        double px = mobile >= 0 ? m.mobiles[mobile].center.x : 0.0;
+        double py = mobile >= 0 ? m.mobiles[mobile].center.y : 0.0;
+        double pz = 0.0;
+        int art = -1;
+        for (std::size_t i = 0; i < train.articulations.size(); ++i) {
+            if (train.articulations[i].component == static_cast<int>(c)) art = static_cast<int>(i);
+        }
+        if (art >= 0) {
+            const auto& pt = train.articulations[static_cast<std::size_t>(art)].point;
+            px = pt[0];
+            py = pt[1];
+            pz = pt[2];
+        }
         const TopoDS_Shape shape = geometry::orient_dial_axis_to_z(found->second->shape, dial_axis);
-        const MeshData mesh = tessellate(shape, o.linear_deflection, px, py);
+        const MeshData mesh = tessellate(shape, o.linear_deflection, px, py, pz);
         if (mesh.positions.empty()) continue;
         stats.triangles += mesh.positions.size() / 3;
 
@@ -171,9 +203,13 @@ AnimationStats write_animated_glb(const model::Movement& m, const std::vector<ge
         meshes.push_back({{"name", comp.features.name},
                           {"primitives", json::array({{{"attributes", {{"POSITION", pa}, {"NORMAL", na}}}, {"material", material_index(comp.role)}}})}});
 
-        nodes.push_back({{"name", comp.features.name}, {"mesh", meshes.size() - 1}, {"translation", {px, py, 0.0}}});
+        nodes.push_back({{"name", comp.features.name}, {"mesh", meshes.size() - 1}, {"translation", {px, py, pz}}});
         const int node = static_cast<int>(nodes.size()) - 1;
         nodes[0]["children"].push_back(node);
+        if (art >= 0) {
+            channels.push_back({{"sampler", sampler_of_part[static_cast<std::size_t>(art)]}, {"target", {{"node", node}, {"path", "rotation"}}}});
+            ++stats.animated_nodes;
+        }
         if (mobile >= 0 && sampler_of_mobile[mobile] >= 0) {
             channels.push_back({{"sampler", sampler_of_mobile[mobile]}, {"target", {{"node", node}, {"path", "rotation"}}}});
             ++stats.animated_nodes;

@@ -9,6 +9,23 @@ Semantic Versioning, with the Python API and the plugin ABI versioned as describ
 Found by running the plan's gates on the real OM10 file.
 
 ### Added
+- Four roles for parts that had no type: `stem` (the winding stem), `spring` (click, jumper and setting springs,
+  of wire or plate), `lever` (clicks, pawls, jumpers, setting levers, yokes) and `bearing` (brass tubes and
+  bushes in plates). They are recognised by name ("winding stem", "click spring", "setting lever", "bush", ...;
+  a bare "lever" is now a lever, "pallet lever" still the pallet fork) or, for unnamed CAD parts, by shape and
+  by what they touch: a long round rod in the plane of the movement, a short hollow cylinder, a thin
+  perforated plate whose far end rests on the teeth of a wheel or a date ring, a strip or bent wire pressing on
+  one. Part features now record the oriented bounding box (`axis`, `size`) and the round holes of a part
+  (`holes`), and the rig file stores them.
+- The stem, levers and springs are animated, in the viewport and in the glTF and USD exports (about an axis of
+  their own, which for the stem lies in the plane of the movement): the stem turns with the winding of the
+  barrel, a lever goes over each tooth of the wheel it rides on, and a spring bends with the lever it presses.
+  `ohs kinematics` lists them, and `ohs explain` says what each does.
+- A `date_ring` role for the calendar ring (date wheel): recognised by name ("date wheel", "date ring",
+  "quantième", ...) or by internal teeth with none outside, found from the section of the part
+  (`PartFeatures::inner_teeth`, `inner_tip_radius`, `inner_root_radius`). It is a mobile of its own even when
+  concentric with the train and animates as a stepped ring: one tooth for each turn of the 24-hour wheel (or
+  24 h of clock time). The Fusion 360 / SolidWorks add-ins and their docs know the role.
 - A beam finite-element model of a flat hairspring (`dynamics/hairspring.hpp`): torque and side force against
   collet angle, geometrically nonlinear; a library model, not yet wired into the oscillator.
 - `ohs fea --solver mfem`: MFEM solves the shock case's linear system; natural frequencies run on Netgen meshes.

@@ -45,6 +45,32 @@ know where to be careful.
   by name or because it spans the movement with its mass to one side, but it is not animated and the
   winding chain is not simulated. The geometric guess can mistake a wide bridge over one side of the
   movement for a rotor; it is marked with confidence 0.5, so check it in the rig list.
+- **The date ring is indexed, not simulated.** The calendar ring (`date_ring` role) is always a mobile of its
+  own and steps one tooth for each turn of the wheel that turns once in 24 h (found from the train's speeds,
+  within 3 %), or for each 24 h of clock time with a warning when there is none. Its internal teeth are
+  counted from the part (31 is assumed when none are found). The step is a fixed 15 % of the day (3.6 h)
+  eased in and out; the finger, the jumper and their contact are not modelled, so there is no jumper
+  overshoot, no instantaneous-change mechanism and no date-change torque. A part named "date wheel jumper",
+  "finger" or "driving ..." is not taken for the ring. It has no pivots, so the tolerance study leaves it out.
+- **The stem, levers, springs and bearings are posed, not simulated.** Four roles cover the small parts of
+  the keyless work and the date: `stem` (a long round rod lying in the plane of the movement), `lever`
+  (a click, pawl, jumper, setting lever or yoke), `spring` (a click, jumper or setting spring, bent wire or
+  cut from plate) and `bearing` (a brass tube or bush in a plate). Names say which, as in `winding stem` or
+  `click spring`; an unnamed part is guessed from its shape (confidence 0.4 to 0.6), so check them in the rig list.
+  - The stem turns about its own axis, 6 turns for each turn of the barrel and the other way, as it would
+    wind it. The ratio is typical, not read from the model, and nothing models the clutch, the winding
+    wheels, pulling the stem out or setting the hands.
+  - A lever swings about the hole that puts its far end on the teeth of a wheel, a ratchet or a date ring it
+    overlaps in height (the pivot and the far end are estimated from the part's hole and bounding box), and
+    goes over one tooth at a time: up the face over 70 % of the pitch, back down over the rest, through the
+    tooth depth over its length. A spring is fixed at one end and its other end follows the lever it presses
+    on (or the teeth, if it presses on them) as a rigid link turned about the fixed end, not a bent beam, so it
+    has no stiffness, force or fatigue. A lever or spring that rests on no toothed part, or whose pivot the
+    estimate gets wrong, is drawn at rest. The pawls of the automatic winding do not move, as the rotor
+    does not. The ratchet of a running movement does not turn (the click holds it), but a ratchet on the
+    barrel mobile is drawn turning with it, so its click rides the teeth as if the movement were being wound.
+  - A bearing is fixed. It is told from a jewel by name or by being a tube longer than it is wide, not a
+    thin washer, and the tolerance study does not count it as a pivot hole.
 - **No mainspring coil contact or hairspring coil model.** The mainspring is a torque curve and the
   hairspring a stiffness from `E b h^3 / 12 L`.
 - **Windows and macOS** builds and installers are configured (CMake presets, CPack, CI workflow)

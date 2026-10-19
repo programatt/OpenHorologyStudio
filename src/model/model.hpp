@@ -33,10 +33,26 @@ enum class Role {
     /// The oscillating weight of an automatic movement. It turns about the movement's centre, but its
     /// winding is not modelled yet, so it is not a rotating role: it joins no mobile and is drawn still.
     Rotor,
+    /// A calendar ring (date wheel) with internal teeth. It turns about the movement's centre on the
+    /// mainplate, held by its edge or by guides rather than by an arbor, and a finger on the 24-hour
+    /// wheel pushes it round one tooth a day. It is always a mobile of its own, however its centre
+    /// lines up with the going train, and it is not geared to the train, so it has no meshes.
+    DateRing,
+    /// The winding stem: a long rod on an axis in the plane of the movement (the crown's), which turns about
+    /// its own axis. It is not a mobile of the train: it is posed as turning with the winding of the barrel.
+    Stem,
+    /// A spring that is not the mainspring or the hairspring: a click, jumper, setting or detent spring, of
+    /// bent wire or cut from plate. It is fixed at one end and bends at the other as what it presses on moves.
+    Spring,
+    /// A plate that swings about a pivot, such as a click, a pawl, a jumper, a setting or clutch lever or a
+    /// yoke. It is not a mobile of the train: it swings as the toothed wheel it rides on turns.
+    Lever,
+    /// A brass tube or bush pressed into a plate or bridge, which an arbor or pinion runs in. It is fixed.
+    Bearing,
 };
 
 /// The last role, for going through every role (`Role::Unknown` is the first).
-inline constexpr Role kLastRole = Role::Rotor;
+inline constexpr Role kLastRole = Role::Bearing;
 
 std::string_view to_string(Role role);
 std::optional<Role> role_from_string(std::string_view text);
@@ -45,6 +61,13 @@ std::optional<Role> role_from_string(std::string_view text);
 bool is_toothed_role(Role role);
 /// True for roles that rotate with a mobile.
 bool is_rotating_role(Role role);
+
+/// A round hole through a part along the dial axis.
+struct Hole {
+    double x{};
+    double y{};
+    double radius{};
+};
 
 /// Geometric facts extracted from one B-rep part. The dial axis is Z.
 struct PartFeatures {
@@ -64,8 +87,19 @@ struct PartFeatures {
     double flank_cycloid_pitch_radius{};   ///< pitch circle of that fit, mm
     double flank_cycloid_rolling_radius{}; ///< rolling circle of that fit, mm
     int teeth{};            ///< 0 when no toothing was detected
+    int inner_teeth{};      ///< teeth on the inside of a ring (a date wheel); 0 when it has none
+    double inner_tip_radius{};   ///< smallest radius of the internal teeth, the tips (0 when none)
+    double inner_root_radius{};  ///< largest radius of the internal teeth, the roots (0 when none)
     double tooth_confidence{};
     std::uint64_t fingerprint{};
+    /// The oriented bounding box: the direction of its longest side (a unit vector, dial axis Z) and its
+    /// three sides, longest first. All 0 for a rig written before they were recorded.
+    double axis[3]{};
+    double length{};
+    double width{};
+    double height{};
+    /// Round holes along the dial axis, largest first (at most 8): where a lever pivots or a screw passes.
+    std::vector<Hole> holes;
 
     double thickness() const { return z_max - z_min; }
 };

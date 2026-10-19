@@ -6,7 +6,10 @@ export STEP together with a **role preset**, so OHS does not have to guess what 
 Give a part the custom property `OHS_ROLE` (for Fusion 360, an attribute in group `OHS` named
 `role`) with one of `plate`, `bridge`, `barrel`, `mainspring`, `arbor`, `wheel`, `pinion`,
 `escape_wheel`, `pallet_fork`, `balance`, `hairspring`, `roller`, `jewel`, `screw`, `rotor` (the
-oscillating weight of an automatic). Parts without it
+oscillating weight of an automatic), `date_ring` (the calendar ring or date wheel, with internal
+teeth, which sits on the mainplate without an arbor), `stem` (the winding stem), `spring` (a click,
+jumper or setting spring, of wire or plate), `lever` (a click, pawl, jumper, setting lever or yoke) and
+`bearing` (a brass tube or bush in a plate). Parts without it
 are classified from their names. Then:
 
 ```

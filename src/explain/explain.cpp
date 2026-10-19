@@ -39,6 +39,11 @@ std::string_view summary_for(Role role) {
         case Role::Jewel: return "A jewel is a low-friction bearing for a pivot.";
         case Role::Screw: return "A screw fixes a plate or bridge.";
         case Role::Rotor: return "The rotor (oscillating weight) winds the mainspring of an automatic movement: it swings about the movement's centre as the wrist moves, and the reverser and reduction wheels turn that into winding of the barrel. Its winding is not simulated yet, so it is drawn but does not move.";
+        case Role::DateRing: return "The date ring (date wheel) shows the day of the month. Its teeth are on the inside; a finger on the 24-hour wheel pushes it one tooth a day around midnight and a jumper (a sprung click) snaps it onto the next tooth and holds it there. It sits on the mainplate without an arbor.";
+        case Role::Stem: return "The winding stem carries the crown to the keyless work. Turned in the winding position it drives the winding pinion, crown wheel and ratchet wheel, which wind the mainspring; pulled out, it sets the hands or the date. It is drawn turning as it would to wind the barrel.";
+        case Role::Spring: return "A spring (of bent wire or cut from plate) is fixed at one end and bends at the other. In the keyless work and around the date it holds a click, a jumper or a lever against what it rides on and brings it back after each tooth. It is drawn bending as the tooth it presses on goes past.";
+        case Role::Lever: return "A lever is a plate that swings about a pivot: a click holds the ratchet wheel, a jumper holds the date ring, and the setting lever and yoke move the clutch. The tip rides up each tooth of the wheel it rests on and drops into the next gap; a spring brings it back.";
+        case Role::Bearing: return "A bearing here is a brass tube or bush pressed into a plate or bridge: the arbor or pinion pivot runs in its bore. It is fixed and does not move.";
         case Role::Unknown: break;
     }
     return "This part has not been classified; set its role with `ohs rig set`.";
@@ -59,6 +64,10 @@ PartExplanation explain_part(const Movement& m, const kinematics::TrainAnalysis&
 
     fact("role " + out.role + " (" + c.role_source + ", confidence " + num(c.role_confidence, 2) + ")");
     if (c.features.teeth > 0) fact(std::to_string(c.features.teeth) + " teeth");
+    if (c.features.inner_teeth > 0) {
+        fact(std::to_string(c.features.inner_teeth) + " internal teeth, tips at radius " + num(c.features.inner_tip_radius) +
+             " mm, roots at " + num(c.features.inner_root_radius) + " mm");
+    }
     if (c.gear) {
         const model::GearFit& g = *c.gear;
         fact("module " + num(g.module) + " mm (" + g.module_source + "), pitch diameter " +
@@ -81,15 +90,50 @@ PartExplanation explain_part(const Movement& m, const kinematics::TrainAnalysis&
         }
         fact("belongs to mobile " + m.mobiles[mob].name + (peers.empty() ? "" : ", turning with " + peers));
         const kinematics::MobileMotion& mm = train.mobiles[mob];
-        if (mm.reached) {
+        if (mm.reached && mm.index_teeth > 0) {
+            const std::string driver = mm.index_driver >= 0 ? "a turn of mobile " + m.mobiles[mm.index_driver].name
+                                                           : "each 24 h of clock time";
+            fact("indexed, not geared: it advances one of its " + std::to_string(mm.index_teeth) + " teeth (" +
+                 num(360.0 / mm.index_teeth) + " deg) on " + driver + ", in a step near the end of it and still the rest of the time");
+        } else if (mm.reached) {
             fact("turns " + num(std::abs(mm.ratio)) + " x the root speed, " +
                  (mm.ratio < 0 ? "opposite" : "same") + " direction as the root");
             if (mm.revs_per_hour > 0) {
                 fact(num(mm.revs_per_hour) + " rev/h = " + num(mm.revs_per_hour / 60.0) + " rpm");
             }
         }
-    } else if (!model::is_rotating_role(c.role)) {
-        fact("fixed relative to the plate");
+    } else {
+        const kinematics::Articulation* art = nullptr;
+        for (const kinematics::Articulation& a : train.articulations) {
+            if (a.component == idx) art = &a;
+        }
+        if (art && art->kind == kinematics::Articulation::Kind::Spin) {
+            fact("turns about its own axis, " + num(std::abs(art->gain)) + " turns for each turn of the barrel, as the stem turns to wind it");
+        } else if (art) {
+            const std::string driver = m.mobiles[static_cast<std::size_t>(art->driver)].name;
+            const bool spring = c.role == Role::Spring;
+            fact(std::string(spring ? "bends about its fixed end near (" : "swings about a pivot at (") + num(art->point[0]) + ", " + num(art->point[1]) +
+                 ") mm, once for each of the " + std::to_string(art->teeth) + " teeth of mobile " + driver + " that goes past");
+            fact(std::string(spring ? "its free end moves through " : "it swings through ") + num(std::abs(art->amplitude) * 180.0 / 3.14159265358979323846, 2) +
+                 " deg at the most, up the face of a tooth and back down");
+        } else if (c.role == Role::Lever || c.role == Role::Spring) {
+            fact("rests on no toothed part that the rig knows of, so it is drawn at rest");
+        } else if (c.role == Role::Bearing) {
+            const double bore = c.features.holes.empty() ? c.features.bore_radius : c.features.holes.back().radius;
+            fact("fixed in the plate: outside diameter " + num(2 * c.features.outer_radius) + " mm, bore " + num(2 * bore) + " mm, " +
+                 num(c.features.thickness()) + " mm long");
+            for (std::size_t j = 0; j < m.components.size(); ++j) {
+                const model::Component& other = m.components[j];
+                if (static_cast<int>(j) == idx || !model::is_rotating_role(other.role)) continue;
+                const double dx = other.features.center.x - c.features.center.x, dy = other.features.center.y - c.features.center.y;
+                if (dx * dx + dy * dy < 0.15 * 0.15 && other.features.z_min < c.features.z_max && other.features.z_max > c.features.z_min) {
+                    fact("on the axis of " + other.features.name + ", which runs in it");
+                    break;
+                }
+            }
+        } else if (!model::is_rotating_role(c.role)) {
+            fact("fixed relative to the plate");
+        }
     }
 
     for (const model::MeshJoint& j : m.meshes) {

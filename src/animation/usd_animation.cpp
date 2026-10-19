@@ -32,8 +32,12 @@ Colour colour_of(model::Role role) {
         case model::Role::Bridge: return {0.72, 0.70, 0.62};
         case model::Role::Arbor:
         case model::Role::PalletFork:
+        case model::Role::Stem:
+        case model::Role::Spring:
+        case model::Role::Lever:
         case model::Role::Screw: return {0.62, 0.64, 0.67};
         case model::Role::Rotor: return {0.66, 0.44, 0.29};  // the viewport's copper
+        case model::Role::DateRing: return {0.89, 0.88, 0.84};  // the viewport's white
         default: return {0.79, 0.64, 0.30};
     }
 }
@@ -65,16 +69,41 @@ AnimationStats write_animated_usd(const model::Movement& m, const std::vector<ge
         if (found == by_name.end()) throw Error("no imported part named '" + comp.features.name + "'; was the right STEP file given?");
 
         const int mobile = m.mobile_of(static_cast<int>(c));
-        const double px = mobile >= 0 ? m.mobiles[mobile].center.x : 0.0;
-        const double py = mobile >= 0 ? m.mobiles[mobile].center.y : 0.0;
-        const MeshData mesh = tessellate(geometry::orient_dial_axis_to_z(found->second->shape, dial_axis), o.linear_deflection, px, py);
+        double px = mobile >= 0 ? m.mobiles[mobile].center.x : 0.0;
+        double py = mobile >= 0 ? m.mobiles[mobile].center.y : 0.0;
+        double pz = 0.0;
+        // A stem, lever or spring turns about an axis of its own, which may lie in the plane of the movement.
+        const kinematics::Articulation* art = nullptr;
+        std::size_t art_index = 0;
+        for (std::size_t i = 0; i < train.articulations.size(); ++i) {
+            if (train.articulations[i].component == static_cast<int>(c)) {
+                art = &train.articulations[i];
+                art_index = i;
+            }
+        }
+        if (art) {
+            px = art->point[0];
+            py = art->point[1];
+            pz = art->point[2];
+        }
+        const MeshData mesh = tessellate(geometry::orient_dial_axis_to_z(found->second->shape, dial_axis), o.linear_deflection, px, py, pz);
         if (mesh.positions.empty()) continue;
         stats.triangles += mesh.positions.size() / 3;
-        const bool animated = mobile >= 0 && train.mobiles[static_cast<std::size_t>(mobile)].reached;
+        const bool animated = art || (mobile >= 0 && train.mobiles[static_cast<std::size_t>(mobile)].reached);
 
         out << "    def Xform \"" << prim_name(comp.features.name, c) << "\" (\n        doc = \"" << comp.features.name << "\"\n    )\n    {\n"
-            << "        double3 xformOp:translate = (" << px << ", " << py << ", 0)\n";
-        if (animated) {
+            << "        double3 xformOp:translate = (" << px << ", " << py << ", " << pz << ")\n";
+        if (art) {
+            out << "        quatd xformOp:orient.timeSamples = {\n";
+            for (std::size_t k = 0; k < kf.times.size(); ++k) {
+                const double half = kf.part_angles[art_index][k] / 2;
+                const double s = std::sin(half);
+                out << "            " << kf.times[k] << ": (" << std::cos(half) << ", " << art->axis[0] * s << ", " << art->axis[1] * s
+                    << ", " << art->axis[2] * s << "),\n";
+            }
+            out << "        }\n        uniform token[] xformOpOrder = [\"xformOp:translate\", \"xformOp:orient\"]\n";
+            ++stats.animated_nodes;
+        } else if (animated) {
             out << "        double xformOp:rotateZ.timeSamples = {\n";
             for (std::size_t k = 0; k < kf.times.size(); ++k) {
                 out << "            " << kf.times[k] << ": " << kf.angles[static_cast<std::size_t>(mobile)][k] * to_deg << ",\n";

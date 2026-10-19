@@ -37,6 +37,7 @@ add_executable(ohs_tests
   unit/model_test.cpp
   unit/profile_test.cpp
   unit/rigging_test.cpp
+  unit/keyless_test.cpp
   unit/geometry_test.cpp
   unit/cad_io_test.cpp
   unit/cycloidal_fit_test.cpp
@@ -45,6 +46,7 @@ add_executable(ohs_tests
   unit/hairspring_test.cpp
   integration/pipeline_test.cpp
   integration/animation_test.cpp
+  integration/keyless_animation_test.cpp
   integration/cli_test.cpp)
 target_include_directories(ohs_tests PRIVATE ${PROJECT_SOURCE_DIR}/src ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(ohs_tests PRIVATE ohs_app ohs_kinematics ohs_dynamics ohs_mesh ohs_fea ohs_gear ohs_cases ohs_report ohs_manufacturing ohs_reports ohs_lessons ohs_plugins
@@ -88,6 +90,7 @@ endif()
 if(OHS_BUILD_GUI)
   add_executable(ohs_gui_tests gui/gui_test.cpp)
   target_link_libraries(ohs_gui_tests PRIVATE ohs_gui Catch2::Catch2WithMain)
+  target_include_directories(ohs_gui_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME gui_scripted_flow COMMAND ohs_gui_tests)
   set_tests_properties(gui_scripted_flow PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp")
 endif()

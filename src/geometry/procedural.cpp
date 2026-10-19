@@ -120,6 +120,15 @@ TopoDS_Shape make_involute_gear(int teeth, double module, double z0, double thic
     return BRepAlgoAPI_Cut(body, bore).Shape();
 }
 
+TopoDS_Shape make_ring_gear(int teeth, double module, double z0, double thickness, double outer_radius) {
+    const double root = (teeth + 2) * module / 2.0;  // the hole is the outline of an external gear of these teeth
+    if (outer_radius <= root) throw Error("the ring's outer radius must be larger than the roots of its teeth");
+    const TopoDS_Shape hole = make_gear(teeth, module, z0 - 1.0, thickness + 2.0, 0.0);
+    const TopoDS_Shape disc =
+        BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, z0), gp_Dir(0, 0, 1)), outer_radius, thickness).Shape();
+    return BRepAlgoAPI_Cut(disc, hole).Shape();
+}
+
 TopoDS_Shape make_arbor(double radius, double z0, double z1) {
     return BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, z0), gp_Dir(0, 0, 1)), radius, z1 - z0).Shape();
 }

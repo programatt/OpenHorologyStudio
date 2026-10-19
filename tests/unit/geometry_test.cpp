@@ -99,3 +99,18 @@ TEST_CASE("unreadable STEP input fails cleanly") {
     CHECK_THROWS_AS(geometry::import_step(path), Error);
     std::filesystem::remove(path);
 }
+
+TEST_CASE("the teeth on the inside of a ring are counted, and a gear's outside is left alone") {
+    const double module = 0.8;
+    const geometry::ImportedPart ring{"date", geometry::make_ring_gear(31, module, 0.0, 0.4, 15.0)};
+    const auto f = geometry::extract_features(ring);
+    CHECK(f.inner_teeth == 31);
+    CHECK(f.teeth == 0);  // the outside is a plain circle
+    CHECK(f.inner_tip_radius == Approx((31 - 2.5) * module / 2).epsilon(0.01));
+    CHECK(f.inner_root_radius == Approx((31 + 2) * module / 2).epsilon(0.01));
+    CHECK(f.outer_radius == Approx(15.0).epsilon(0.002));
+
+    // A gear with a bore, a plain disc and a solid plate have no internal teeth.
+    CHECK(geometry::extract_features({"gear", geometry::make_gear(40, 0.15, 0, 0.8, 0.1)}).inner_teeth == 0);
+    CHECK(geometry::extract_features({"plate", geometry::make_plate(0, 0, 30, -1, -0.5)}).inner_teeth == 0);
+}

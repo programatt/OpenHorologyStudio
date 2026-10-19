@@ -1045,8 +1045,28 @@ bool MainWindow::set_role_visible(const QString& role, bool visible) {
 
 QMenu* MainWindow::visibility_menu(QWidget* parent) {
     auto* menu = new QMenu(parent);
-    menu->addSection(tr("Show parts by role"));
     if (!scene_) return menu;
+    // Show all unhides everything; Show only hides every role but the one picked.
+    QStringList present;
+    for (int r = static_cast<int>(model::Role::Unknown); r <= static_cast<int>(model::kLastRole); ++r) {
+        const QString name = QString::fromUtf8(model::to_string(static_cast<model::Role>(r)).data());
+        for (const ScenePart& part : scene_->parts()) {
+            if (part.role == static_cast<model::Role>(r)) {
+                present << name;
+                break;
+            }
+        }
+    }
+    connect(menu->addAction(tr("Show all")), &QAction::triggered, this, [this, present] {
+        for (const QString& role : present) set_role_visible(role, true);
+    });
+    QMenu* only = menu->addMenu(tr("Show only"));
+    for (const QString& name : present) {
+        connect(only->addAction(name), &QAction::triggered, this, [this, present, name] {
+            for (const QString& role : present) set_role_visible(role, role == name);
+        });
+    }
+    menu->addSection(tr("Show parts by role"));
     for (int r = static_cast<int>(model::Role::Unknown); r <= static_cast<int>(model::kLastRole); ++r) {
         const auto role = static_cast<model::Role>(r);
         int count = 0, shown = 0;

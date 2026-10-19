@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <random>
 
 #include <catch2/catch_approx.hpp>
@@ -105,4 +107,87 @@ TEST_CASE("gear loops with inconsistent ratios are flagged") {
     m.meshes.push_back({0, 12, 1, 1, 1});  // barrel -> escape wheel directly
     const auto t = kinematics::analyze_train(m, 25200);
     CHECK_FALSE(t.warnings.empty());
+}
+
+namespace {
+// The synthetic train plus a 31-tooth date ring concentric with the barrel.
+model::Movement train_with_date_ring() {
+    auto parts = test::synthetic_train();
+    auto ring = test::arbor("date wheel", 0, 0, 0.2, 0.6);
+    ring.outer_radius = 14.0;
+    ring.inner_teeth = 31;
+    parts.push_back(ring);
+    return rigging::auto_rig("train", parts, {});
+}
+constexpr double kDay = 86400.0;
+}  // namespace
+
+TEST_CASE("a date ring steps one tooth a day, driven by the wheel that turns once in 24 h") {
+    const auto m = train_with_date_ring();
+    const int ring = m.mobile_of(static_cast<int>(m.components.size()) - 1);
+    REQUIRE(ring >= 0);
+    // At 8,400 vph the barrel turns once in 24 h, so it is the 24-hour wheel.
+    const auto t = kinematics::analyze_train(m, 8400);
+    REQUIRE(t.root_period_hours == Approx(24.0));
+    CHECK(t.mobiles[ring].reached);
+    CHECK(t.mobiles[ring].index_teeth == 31);
+    CHECK(t.mobiles[ring].index_driver == t.root);
+    CHECK(t.mobiles[ring].ratio == Approx(1.0 / 31.0));
+    CHECK(t.mobiles[ring].revs_per_hour == Approx(1.0 / (24.0 * 31.0)));
+    for (const auto& w : t.warnings) CHECK(w.find("date ring") == std::string::npos);
+
+    const double tooth = 2.0 * std::numbers::pi / 31.0;
+    for (bool stepped : {false, true}) {
+        const auto angle = [&](double seconds) { return kinematics::mobile_angles(t, seconds, {stepped})[ring]; };
+        CHECK(angle(0) == Approx(0.0).margin(1e-9));
+        CHECK(angle(0.5 * kDay) == Approx(0.0).margin(1e-9));      // at rest most of the day
+        CHECK(angle(0.8 * kDay) == Approx(0.0).margin(1e-9));
+        CHECK(angle((1.0 - 0.075) * kDay) == Approx(0.5 * tooth).margin(1e-3 * tooth));  // half way through the step
+        CHECK(angle(kDay + 1.0) == Approx(tooth).margin(1e-3 * tooth));
+        CHECK(angle(1.5 * kDay) == Approx(tooth).margin(1e-9));
+        CHECK(angle(10.0 * kDay + 1.0) == Approx(10.0 * tooth).margin(1e-3 * tooth));
+        // A step never goes backwards.
+        double previous = -1.0;
+        for (double s = 0; s < 3 * kDay; s += 600) {
+            const double a = angle(s);
+            CHECK(a >= previous - 1e-12);
+            previous = a;
+        }
+    }
+    // The train itself is not disturbed.
+    const auto a = kinematics::mobile_angles(t, 3600.0);
+    CHECK(a[t.root] == Approx(2.0 * std::numbers::pi / 24.0));
+}
+
+TEST_CASE("without a 24-hour wheel a date ring steps on clock time, with a warning") {
+    const auto m = train_with_date_ring();
+    const int ring = m.mobile_of(static_cast<int>(m.components.size()) - 1);
+    const auto t = kinematics::analyze_train(m, 25200);  // no mobile turns once a day at this rate
+    CHECK(t.mobiles[ring].index_driver == -1);
+    CHECK(t.mobiles[ring].index_teeth == 31);
+    CHECK(std::any_of(t.warnings.begin(), t.warnings.end(), [](const std::string& w) {
+        return w.find("date ring") != std::string::npos;
+    }));
+    const double tooth = 2.0 * std::numbers::pi / 31.0;
+    CHECK(kinematics::mobile_angles(t, 0.5 * kDay)[ring] == Approx(0.0).margin(1e-9));
+    CHECK(kinematics::mobile_angles(t, 2.0 * kDay + 1.0)[ring] == Approx(2.0 * tooth).margin(1e-3 * tooth));
+}
+
+TEST_CASE("a date ring is not reported as unconnected, and without a beat rate it is left out") {
+    const auto m = train_with_date_ring();
+    const int ring = m.mobile_of(static_cast<int>(m.components.size()) - 1);
+    const auto t = kinematics::analyze_train(m, 0.0);
+    CHECK_FALSE(t.mobiles[ring].reached);
+    for (const auto& w : t.warnings) CHECK(w.find("not connected") == std::string::npos);
+}
+
+TEST_CASE("a date ring with no teeth found assumes 31 and says so") {
+    auto parts = test::synthetic_train();
+    parts.push_back(test::arbor("date wheel", 0, 0, 0.2, 0.6));
+    const auto m = rigging::auto_rig("train", parts, {});
+    const auto t = kinematics::analyze_train(m, 8400);
+    CHECK(t.mobiles[m.mobile_of(static_cast<int>(parts.size()) - 1)].index_teeth == 31);
+    CHECK(std::any_of(t.warnings.begin(), t.warnings.end(), [](const std::string& w) {
+        return w.find("assuming 31") != std::string::npos;
+    }));
 }

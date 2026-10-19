@@ -7,7 +7,7 @@
 namespace ohs::model {
 
 namespace {
-constexpr std::array<std::pair<Role, std::string_view>, 16> kRoleNames{{
+constexpr std::array<std::pair<Role, std::string_view>, 21> kRoleNames{{
     {Role::Unknown, "unknown"},
     {Role::Plate, "plate"},
     {Role::Bridge, "bridge"},
@@ -24,6 +24,11 @@ constexpr std::array<std::pair<Role, std::string_view>, 16> kRoleNames{{
     {Role::Jewel, "jewel"},
     {Role::Screw, "screw"},
     {Role::Rotor, "rotor"},
+    {Role::DateRing, "date_ring"},
+    {Role::Stem, "stem"},
+    {Role::Spring, "spring"},
+    {Role::Lever, "lever"},
+    {Role::Bearing, "bearing"},
 }};
 }  // namespace
 
@@ -48,7 +53,7 @@ bool is_toothed_role(Role role) {
 
 bool is_rotating_role(Role role) {
     return is_toothed_role(role) || role == Role::Arbor || role == Role::Balance ||
-           role == Role::Roller;
+           role == Role::Roller || role == Role::DateRing;
 }
 
 int Movement::mobile_of(int component) const {

@@ -13,6 +13,7 @@ namespace ohs::animation {
 struct Keyframes {
     std::vector<double> times;                 ///< animation seconds
     std::vector<std::vector<double>> angles;   ///< [mobile][keyframe]
+    std::vector<std::vector<double>> part_angles;  ///< [articulation of the train][keyframe]: stem, levers, springs
     double max_step{};                         ///< largest turn of any mobile between two keyframes, radians
 };
 
@@ -26,11 +27,11 @@ struct Vec3f {
 };
 
 /// Flat-shaded triangles (three vertices each, so sharp tooth edges stay sharp) of a part, with its
-/// pivot moved to the origin in x and y.
+/// pivot moved to the origin in x and y (and in z, when `pivot_z` is given).
 struct MeshData {
     std::vector<Vec3f> positions;
     std::vector<Vec3f> normals;
 };
-MeshData tessellate(const TopoDS_Shape& shape, double deflection, double pivot_x, double pivot_y);
+MeshData tessellate(const TopoDS_Shape& shape, double deflection, double pivot_x, double pivot_y, double pivot_z = 0.0);
 
 }  // namespace ohs::animation

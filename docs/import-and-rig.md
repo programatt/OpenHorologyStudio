@@ -37,7 +37,12 @@ What `import` does, in order:
 
 1. **Classify** each solid. Names and colours in the STEP file are hints; the geometry decides the
    rest: a periodic outline gives a tooth count (Fourier fundamental of the mid-height section),
-   a small cylinder with a hole is a jewel candidate, a wide thin part a plate.
+   a short hollow cylinder is a `bearing` (a brass tube or bush), a long round rod lying in the plane
+   of the movement the `stem`, a wide thin part a plate. A thin perforated plate whose far end rests
+   on the teeth of a wheel, ratchet or date ring is a `lever` (a click or jumper), and a strip or a
+   bent wire pressing on one a `spring`; these guesses carry a confidence of 0.5 or less. The stem,
+   levers and springs move on axes of their own, not as mobiles of the train (see
+   [Limitations](limitations.md)).
 2. **Group mobiles** by coaxiality.
 3. **Infer meshes**: two toothed parts whose pitch circles are tangent within tolerance, with
    plausible addendum and dedendum for the module taken from the centre distance.

@@ -11,8 +11,18 @@ using namespace ohs;
 
 TEST_CASE("role names round-trip") {
     for (auto role : {model::Role::Unknown, model::Role::Plate, model::Role::Barrel, model::Role::EscapeWheel,
-                      model::Role::PalletFork, model::Role::Screw, model::Role::Rotor}) {
+                      model::Role::PalletFork, model::Role::Screw, model::Role::Rotor, model::Role::DateRing,
+                      model::Role::Stem, model::Role::Spring, model::Role::Lever, model::Role::Bearing}) {
         REQUIRE(model::role_from_string(model::to_string(role)) == role);
+    }
+    // Every role from the first to the last has its own name, and none of the four new ones moves with a mobile.
+    for (int r = static_cast<int>(model::Role::Unknown); r <= static_cast<int>(model::kLastRole); ++r) {
+        const auto role = static_cast<model::Role>(r);
+        CHECK((model::to_string(role) != "unknown" || role == model::Role::Unknown));
+    }
+    for (auto role : {model::Role::Stem, model::Role::Spring, model::Role::Lever, model::Role::Bearing}) {
+        CHECK_FALSE(model::is_rotating_role(role));
+        CHECK_FALSE(model::is_toothed_role(role));
     }
     REQUIRE_FALSE(model::role_from_string("sprocket").has_value());
 }

@@ -16,12 +16,13 @@ from typing import Dict, Iterable, List, Optional
 ROLES = (
     "plate", "bridge", "barrel", "mainspring", "arbor", "wheel", "pinion", "escape_wheel",
     "pallet_fork", "balance", "hairspring", "roller", "jewel", "screw", "rotor",
+    "date_ring", "stem", "spring", "lever", "bearing",
 )
 
 # Name fragments, checked in this order (the first hit wins), the same hints OHS's own classifier uses.
 _NAME_RULES = (
     (r"escape", "escape_wheel"),
-    (r"pallet|lever|fork", "pallet_fork"),
+    (r"pallet|fork", "pallet_fork"),
     (r"hairspring|balance[_ ]?spring", "hairspring"),
     (r"balance", "balance"),
     (r"roller|impulse", "roller"),
@@ -32,7 +33,13 @@ _NAME_RULES = (
     (r"arbor|staff|axle|shaft", "arbor"),
     (r"pinion", "pinion"),
     (r"bridge|cock", "bridge"),
+    # The keyless work, after the springs of the train and the bridges ("spring screw", "bearing bridge").
+    (r"\bstem\b", "stem"),
+    (r"spring", "spring"),
+    (r"lever|yoke|click|pawl|jumper", "lever"),
+    (r"bearing|bush|sleeve|tube", "bearing"),
     (r"rotor|oscillating", "rotor"),
+    (r"date[_ -]?(wheel|ring|disc|disk|indicator)|calendar[_ -]?ring|quanti[eè]me", "date_ring"),
     (r"plate|mainplate|base", "plate"),
     (r"wheel|gear", "wheel"),
 )
@@ -43,10 +50,16 @@ def escape_regex(text: str) -> str:
     return re.escape(text)
 
 
+# "date wheel jumper" and "date wheel finger" hold or push the ring; they are not it.
+_DATE_HELPER = re.compile(r"jumper|finger|driv|click")
+
+
 def guess_role(name: str) -> Optional[str]:
     """The role a part's name suggests, or None."""
     lowered = name.lower()
     for pattern, role in _NAME_RULES:
+        if role == "date_ring" and _DATE_HELPER.search(lowered):
+            continue
         if re.search(pattern, lowered):
             return role
     return None

@@ -319,6 +319,10 @@ ToleranceResult run_tolerance(const model::Movement& m, const ToleranceConfig& c
     }
 
     for (int i = 0; i < nm; ++i) {
+        // A date ring rides on the mainplate, with no pivots to stack up.
+        bool pivoted = false;
+        for (int c : m.mobiles[i].components) pivoted |= m.components[c].role != model::Role::DateRing;
+        if (!pivoted) continue;
         MobileTolerance mt;
         mt.mobile = m.mobiles[i].name;
         std::vector<double> end(static_cast<std::size_t>(n)), side(static_cast<std::size_t>(n));

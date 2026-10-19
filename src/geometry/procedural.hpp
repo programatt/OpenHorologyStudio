@@ -18,6 +18,11 @@ TopoDS_Shape make_gear(int teeth, double module, double z0, double thickness, do
 TopoDS_Shape make_involute_gear(int teeth, double module, double z0, double thickness, double bore_radius,
                                 double pressure_angle_deg = 20.0);
 
+/// A ring with straight-flank teeth on the inside, like a date wheel, centred on the Z axis and spanning
+/// z0..z0+thickness. The teeth point inwards: their tips are at (teeth - 2.5) * module / 2 and the roots
+/// 2.25 modules further out, at (teeth + 2) * module / 2. The outside is a plain circle of `outer_radius`, which must clear the roots.
+TopoDS_Shape make_ring_gear(int teeth, double module, double z0, double thickness, double outer_radius);
+
 /// Solid cylinder on the Z axis spanning z0..z1.
 TopoDS_Shape make_arbor(double radius, double z0, double z1);
 

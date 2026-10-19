@@ -21,10 +21,17 @@ class RoleLogic(unittest.TestCase):
             "balance staff": "balance", "pallet fork": "pallet_fork", "Hairspring": "hairspring", "ruby jewel 2.0": "jewel",
             "train bridge": "bridge", "center wheel": "wheel", "M1.2 screw": "screw", "fourth arbor": "arbor",
             "Oscillating Weight": "rotor", "rotor": "rotor", "rotor screw": "screw", "rotor bridge": "bridge",
+            "Date Wheel": "date_ring", "date_ring": "date_ring", "Quantième": "date_ring", "calendar ring": "date_ring",
+            "date wheel screw": "screw", "date driving wheel": "wheel", "date wheel jumper": "lever",
+            "winding stem": "stem", "stem": "stem", "system plate": "plate", "click spring": "spring", "jumper spring": "spring",
+            "setting lever": "lever", "yoke": "lever", "ratchet click": "lever", "pawl": "lever", "pallet lever": "pallet_fork",
+            "brass bearing": "bearing", "bush 0.6": "bearing", "tube": "bearing", "spring screw": "screw",
+            "bearing bridge": "bridge", "mainspring": "mainspring", "balance spring": "hairspring",
         }
         for name, role in cases.items():
             self.assertEqual(ohs_preset.guess_role(name), role, name)
         self.assertIsNone(ohs_preset.guess_role("Body1"))
+        self.assertIsNone(ohs_preset.guess_role("date finger"))
 
     def test_explicit_role_wins_and_is_validated(self):
         self.assertEqual(ohs_preset.role_of({"name": "Body1", "role": "Escape-Wheel"}), "escape_wheel")

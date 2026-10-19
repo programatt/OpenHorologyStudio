@@ -8,6 +8,7 @@
 #include <regex>
 
 #include "core/error.hpp"
+#include "model/followers.hpp"
 
 namespace ohs::rigging {
 
@@ -35,21 +36,70 @@ constexpr NameHint kNameHints[] = {
     {"staff", Role::Arbor},            {"axle", Role::Arbor},
     {"escape", Role::EscapeWheel},
     {"pallet", Role::PalletFork},      {"fork", Role::PalletFork},
-    {"lever", Role::PalletFork},       {"hairspring", Role::Hairspring},
+    {"hairspring", Role::Hairspring},
     {"balance spring", Role::Hairspring}, {"balance", Role::Balance},
     {"barrel", Role::Barrel},          {"mainspring", Role::Mainspring},
     {"roller", Role::Roller},          {"jewel", Role::Jewel},
     {"ruby", Role::Jewel},             {"screw", Role::Screw},
     {"bridge", Role::Bridge},
+    // The keyless work and its small parts. After pallet, escape, barrel and the springs of the train
+    // ("mainspring", "hairspring"), so those keep their roles, and after screw ("spring screw") and bridge
+    // ("bearing bridge"); a bare "lever" is a lever of the keyless work, not the pallet lever.
+    {"stem", Role::Stem},
+    {"spring", Role::Spring},          {"lever", Role::Lever},
+    {"yoke", Role::Lever},             {"click", Role::Lever},
+    {"pawl", Role::Lever},             {"jumper", Role::Lever},
+    {"bearing", Role::Bearing},        {"bush", Role::Bearing},
+    {"sleeve", Role::Bearing},         {"tube", Role::Bearing},
     // After screw and bridge ("rotor screw", "rotor bridge"), before plate ("rotor plate").
     {"rotor", Role::Rotor},            {"oscillating", Role::Rotor},
+    // The calendar ring, by its names in English and French. The driving wheel, finger and jumper are
+    // other parts (see is_date_helper), so only a "wheel", "ring" or "disc" of the date is the ring.
+    {"date wheel", Role::DateRing},    {"date ring", Role::DateRing},
+    {"date disc", Role::DateRing},     {"date disk", Role::DateRing},
+    {"date indicator", Role::DateRing}, {"calendar ring", Role::DateRing},
+    {"quantieme", Role::DateRing},     {"quantième", Role::DateRing},
     {"plate", Role::Plate},
     {"wheel", Role::Wheel},
 };
 
 bool is_toothed(const PartFeatures& p, const RigOptions& o) { return p.teeth >= o.min_teeth; }
 
+// "date wheel jumper" and "date wheel finger" hold or push the ring; they are not it.
+bool is_date_helper(const std::string& name) {
+    return name.find("jumper") != std::string::npos || name.find("finger") != std::string::npos ||
+           name.find("driv") != std::string::npos || name.find("click") != std::string::npos;
+}
+
+// "stem" as a word, so that "system" and "stemmed" are not stems.
+bool has_word(const std::string& text, std::string_view word) {
+    for (std::size_t at = text.find(word); at != std::string::npos; at = text.find(word, at + 1)) {
+        const bool before = at == 0 || !std::isalpha(static_cast<unsigned char>(text[at - 1]));
+        const std::size_t end = at + word.size();
+        const bool after = end >= text.size() || !std::isalpha(static_cast<unsigned char>(text[end]));
+        if (before && after) return true;
+    }
+    return false;
+}
+
 double distance(model::Vec2 a, model::Vec2 b) { return std::hypot(a.x - b.x, a.y - b.y); }
+
+// A long round rod lying in the plane of the movement: the winding stem.
+bool is_stem_shape(const PartFeatures& p) {
+    return p.length >= 8.0 && p.length >= 8.0 * p.width && p.height >= 0.6 * p.width && std::abs(p.axis[2]) <= 0.5;
+}
+
+// A short hollow cylinder, about as long as it is wide or longer, that is not a thin washer: a bush or tube.
+bool is_tube_shape(const PartFeatures& p) {
+    return p.outer_radius > 0.0 && p.outer_radius <= 2.5 && p.bore_radius >= 0.25 * p.outer_radius &&
+           p.thickness() >= 1.2 * p.outer_radius && p.thickness() <= 12.0 * p.outer_radius &&
+           (p.length <= 0.0 || p.length <= 6.0 * p.outer_radius);  // not a wide hollow disc whose centre of mass is a hub
+}
+
+// A thin flat part with a hole to turn on, the size of a lever or a spring.
+bool is_flat_small(const PartFeatures& p) {
+    return p.length >= 2.5 && p.length <= 12.0 && p.height <= 0.6 && p.height <= 0.4 * p.width;
+}
 
 }  // namespace
 
@@ -65,8 +115,13 @@ Classification classify(const PartFeatures& part, const RigOptions& options) {
     }
 
     const std::string name = lower(part.name);
+    // The date hints are several words, which CAD names often join with "_" or "-".
+    std::string spaced = name;
+    std::replace_if(spaced.begin(), spaced.end(), [](char c) { return c == '_' || c == '-'; }, ' ');
     for (const NameHint& hint : kNameHints) {
-        if (name.find(hint.needle) == std::string::npos) continue;
+        if ((hint.role == Role::DateRing ? spaced : name).find(hint.needle) == std::string::npos) continue;
+        if (hint.role == Role::DateRing && is_date_helper(name)) continue;
+        if (hint.role == Role::Stem && !has_word(name, hint.needle)) continue;
         double conf = 0.9;
         // A part called a wheel with no teeth, or a plate with teeth, is suspicious.
         if (model::is_toothed_role(hint.role) && !is_toothed(part, options)) conf = 0.5;
@@ -74,6 +129,8 @@ Classification classify(const PartFeatures& part, const RigOptions& options) {
             hint.role != Role::Balance && hint.role != Role::Roller) {
             conf = 0.5;
         }
+        // A date ring has its teeth on the inside, or outside on a few designs; with neither found it is a guess.
+        if (hint.role == Role::DateRing && part.inner_teeth < options.min_teeth && !is_toothed(part, options)) conf = 0.7;
         return {hint.role, conf, "name"};
     }
 
@@ -81,11 +138,15 @@ Classification classify(const PartFeatures& part, const RigOptions& options) {
         const Role role = part.teeth <= 16 ? Role::Pinion : Role::Wheel;
         return {role, 0.5 + 0.4 * std::clamp(part.tooth_confidence, 0.0, 1.0), "geometry"};
     }
+    // A ring with teeth on the inside and none outside: the calendar ring.
+    if (part.inner_teeth >= options.min_teeth) return {Role::DateRing, 0.7, "geometry"};
+    if (is_stem_shape(part)) return {Role::Stem, 0.6, "geometry"};
     const double extent = std::max(part.extent_x, part.extent_y);
     if (extent >= 10.0 && extent >= 4.0 * part.thickness()) return {Role::Plate, 0.6, "geometry"};
     if (part.outer_radius > 0 && part.outer_radius < 0.5 && part.thickness() > 3.0 * part.outer_radius) {
         return {Role::Arbor, 0.6, "geometry"};
     }
+    if (is_tube_shape(part)) return {Role::Bearing, 0.6, "geometry"};
     return {Role::Unknown, 0.0, "geometry"};
 }
 
@@ -178,8 +239,10 @@ void infer_structure(Movement& m, const RigOptions& options) {
     for (int i = 0; i < n; ++i) {
         if (!model::is_rotating_role(m.components[i].role)) continue;
         if (group[i] < 0) group[i] = groups++;
+        // A date ring is concentric with the motion work but turns on its own, so it joins nothing.
+        if (m.components[i].role == Role::DateRing) continue;
         for (int j = i + 1; j < n; ++j) {
-            if (!model::is_rotating_role(m.components[j].role)) continue;
+            if (!model::is_rotating_role(m.components[j].role) || m.components[j].role == Role::DateRing) continue;
             if (distance(m.components[i].features.center, m.components[j].features.center) >
                 options.coaxial_tolerance) {
                 continue;
@@ -303,6 +366,35 @@ void spot_rotors(std::vector<Component>& components) {
     }
 }
 
+void spot_small_parts(std::vector<Component>& components) {
+    // The parts of the keyless work and of the small works around the train have part numbers for names, so
+    // only their shape and what they touch say what they are. A lever turns on a hole, and its far end rests on
+    // the teeth of a ratchet, a wheel or a date ring: that is checked first, as a spring is found by pressing on a
+    // lever or on teeth. A bent wire is a spring on its shape alone: little metal for its length, no holes.
+    // All are suggestions (confidence 0.5 or less) to check.
+    const auto unknown = [](const Component& c) { return c.role == Role::Unknown && c.role_source == "geometry"; };
+    for (std::size_t i = 0; i < components.size(); ++i) {
+        Component& c = components[i];
+        if (!unknown(c) || !is_flat_small(c.features) || c.features.holes.empty()) continue;
+        if (model::lever_contact(components, static_cast<int>(i))) {
+            c.role = Role::Lever;
+            c.role_confidence = 0.5;
+        }
+    }
+    for (std::size_t i = 0; i < components.size(); ++i) {
+        Component& c = components[i];
+        if (!unknown(c)) continue;
+        const PartFeatures& f = c.features;
+        const bool wire = f.length >= 2.5 && f.volume >= 0.3 && f.volume <= 4.0 && f.volume <= 0.9 * f.length &&
+                          f.holes.empty() && f.volume <= 0.5 * f.length * f.width * f.height;
+        const bool strip = is_flat_small(f) && f.length >= 3.5 * f.width && model::spring_flex(components, static_cast<int>(i));
+        if (wire || strip) {
+            c.role = Role::Spring;
+            c.role_confidence = wire ? 0.4 : 0.5;
+        }
+    }
+}
+
 Movement auto_rig(std::string movement_name, std::vector<PartFeatures> parts, const RigOptions& options) {
     Movement m;
     m.name = std::move(movement_name);
@@ -312,6 +404,7 @@ Movement auto_rig(std::string movement_name, std::vector<PartFeatures> parts, co
         m.components.push_back({std::move(p), std::nullopt, c.role, c.confidence, c.source});
     }
     spot_rotors(m.components);
+    spot_small_parts(m.components);
     infer_structure(m, options);
     return m;
 }
@@ -348,6 +441,22 @@ std::vector<Issue> check_rig(const Movement& m, double low_confidence) {
         }
     }
     if (m.meshes.empty()) add(Severity::Error, "no gear meshes were inferred");
+    for (const Component& c : m.components) {
+        if (c.role == Role::DateRing && c.features.inner_teeth <= 0 && c.features.teeth <= 0) {
+            add(Severity::Warning, "date ring '" + c.features.name + "' shows no teeth, so its step is assumed to be 1/31 of a turn");
+        }
+    }
+    for (std::size_t i = 0; i < m.components.size(); ++i) {
+        const Component& c = m.components[i];
+        const int index = static_cast<int>(i);
+        if (c.role == Role::Lever && !model::lever_contact(m.components, index)) {
+            add(Severity::Info, "lever '" + c.features.name + "' rests on no toothed part, so it is drawn at rest");
+        } else if (c.role == Role::Spring && !model::spring_flex(m.components, index)) {
+            add(Severity::Info, "spring '" + c.features.name + "' presses on no lever or toothed part, so it is drawn at rest");
+        } else if (c.role == Role::Stem && c.features.length <= 0.0) {
+            add(Severity::Info, "stem '" + c.features.name + "' has no recorded axis (re-import the file), so it is drawn at rest");
+        }
+    }
     for (std::size_t i = 0; i < m.components.size(); ++i) {
         const Component& c = m.components[i];
         if (!model::is_toothed_role(c.role) || meshed[i]) continue;

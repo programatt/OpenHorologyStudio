@@ -22,22 +22,29 @@ namespace OpenHorologyStudio
     public static class OhsExport
     {
         static readonly string[] Roles = { "plate", "bridge", "barrel", "mainspring", "arbor", "wheel", "pinion", "escape_wheel",
-                                           "pallet_fork", "balance", "hairspring", "roller", "jewel", "screw", "rotor" };
+                                           "pallet_fork", "balance", "hairspring", "roller", "jewel", "screw", "rotor", "date_ring",
+                                           "stem", "spring", "lever", "bearing" };
 
         // Name fragments in the order the OHS classifier uses; the first hit wins.
         static readonly (string Pattern, string Role)[] NameRules =
         {
-            ("escape", "escape_wheel"), ("pallet|lever|fork", "pallet_fork"), ("hairspring|balance[_ ]?spring", "hairspring"),
+            ("escape", "escape_wheel"), ("pallet|fork", "pallet_fork"), ("hairspring|balance[_ ]?spring", "hairspring"),
             ("balance", "balance"), ("roller|impulse", "roller"), ("main[_ ]?spring", "mainspring"), ("barrel", "barrel"),
             ("jewel|ruby|sapphire", "jewel"), ("screw|bolt", "screw"), ("arbor|staff|axle|shaft", "arbor"), ("pinion", "pinion"),
-            ("bridge|cock", "bridge"), ("rotor|oscillating", "rotor"), ("plate|mainplate|base", "plate"), ("wheel|gear", "wheel"),
+            ("bridge|cock", "bridge"),
+            // The keyless work, after the springs of the train and the bridges ("spring screw", "bearing bridge").
+            ("\\bstem\\b", "stem"), ("spring", "spring"), ("lever|yoke|click|pawl|jumper", "lever"), ("bearing|bush|sleeve|tube", "bearing"),
+            ("rotor|oscillating", "rotor"),
+            ("date[_ -]?(wheel|ring|disc|disk|indicator)|calendar[_ -]?ring|quanti[eè]me", "date_ring"), ("plate|mainplate|base", "plate"), ("wheel|gear", "wheel"),
         };
 
         public static string GuessRole(string name)
         {
             var lowered = name.ToLowerInvariant();
+            // "date wheel jumper" and "date wheel finger" hold or push the ring; they are not it.
+            var dateHelper = Regex.IsMatch(lowered, "jumper|finger|driv|click");
             foreach (var (pattern, role) in NameRules)
-                if (Regex.IsMatch(lowered, pattern)) return role;
+                if (!(role == "date_ring" && dateHelper) && Regex.IsMatch(lowered, pattern)) return role;
             return null;
         }
 

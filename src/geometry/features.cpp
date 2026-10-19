@@ -8,7 +8,13 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAlgoAPI_Section.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
+#include <Bnd_OBB.hxx>
+#include <GeomAbs_SurfaceType.hxx>
+#include <TopoDS_Face.hxx>
+#include <gp_Cylinder.hxx>
 #include <BRepGProp.hxx>
 #include <Bnd_Box.hxx>
 #include <GProp_GProps.hxx>
@@ -54,6 +60,7 @@ std::uint64_t fingerprint(double volume, const double (&box)[6]) {
 struct Outline {
     std::vector<PolarPoint> points;
     std::vector<double> outer;  ///< max radius per angular bin, gaps filled
+    std::vector<double> inner;  ///< min radius per angular bin, gaps filled (the inside of a ring)
     double min_radius{};        ///< smallest radius of any sampled point (bore if present)
     bool ok{false};
 };
@@ -65,6 +72,7 @@ Outline sample_outline(const TopoDS_Shape& shape, double z, double cx, double cy
 
     const int n = o.angular_bins;
     std::vector<double> bins(n, -1.0);
+    std::vector<double> lows(n, -1.0);
     double min_r = 1e300;
     auto add = [&](const gp_Pnt& p) {
         const double dx = p.X() - cx;
@@ -73,6 +81,7 @@ Outline sample_outline(const TopoDS_Shape& shape, double z, double cx, double cy
         const double a = std::atan2(dy, dx) + std::numbers::pi;
         const int bin = std::min(n - 1, static_cast<int>(a / (2 * std::numbers::pi) * n));
         bins[bin] = std::max(bins[bin], r);
+        lows[bin] = lows[bin] < 0 ? r : std::min(lows[bin], r);
         min_r = std::min(min_r, r);
         out.points.push_back({r, a});
     };
@@ -98,21 +107,76 @@ Outline sample_outline(const TopoDS_Shape& shape, double z, double cx, double cy
     // Fill empty bins from the nearest filled neighbours (circular, linear in index).
     const int filled = static_cast<int>(std::count_if(bins.begin(), bins.end(), [](double r) { return r >= 0; }));
     if (filled < n / 2) return out;
-    std::vector<double> full = bins;
-    for (int i = 0; i < n; ++i) {
-        if (bins[i] >= 0) continue;
-        int lo = 1;
-        while (bins[(i - lo + n) % n] < 0) ++lo;
-        int hi = 1;
-        while (bins[(i + hi) % n] < 0) ++hi;
-        const double a = bins[(i - lo + n) % n];
-        const double b = bins[(i + hi) % n];
-        full[i] = a + (b - a) * lo / (lo + hi);
-    }
-    out.outer = std::move(full);
+    auto fill = [n](const std::vector<double>& sparse) {
+        std::vector<double> full = sparse;
+        for (int i = 0; i < n; ++i) {
+            if (sparse[i] >= 0) continue;
+            int lo = 1;
+            while (sparse[(i - lo + n) % n] < 0) ++lo;
+            int hi = 1;
+            while (sparse[(i + hi) % n] < 0) ++hi;
+            const double a = sparse[(i - lo + n) % n];
+            const double b = sparse[(i + hi) % n];
+            full[i] = a + (b - a) * lo / (lo + hi);
+        }
+        return full;
+    };
+    out.outer = fill(bins);
+    out.inner = fill(lows);
     out.min_radius = min_r;
     out.ok = true;
     return out;
+}
+
+// The oriented bounding box: the direction of its longest side and the three sides, longest first.
+void fit_box(const TopoDS_Shape& shape, model::PartFeatures& f) {
+    Bnd_OBB obb;
+    BRepBndLib::AddOBB(shape, obb, true, false, false);
+    if (obb.IsVoid()) return;
+    const gp_Dir dirs[3] = {obb.XDirection(), obb.YDirection(), obb.ZDirection()};
+    const double sides[3] = {2 * obb.XHSize(), 2 * obb.YHSize(), 2 * obb.ZHSize()};
+    int order[3] = {0, 1, 2};
+    std::sort(order, order + 3, [&](int a, int b) { return sides[a] > sides[b]; });
+    const gp_Dir& d = dirs[order[0]];
+    // Either way along the axis is the same line: point it towards +X (then +Y) so a rig is reproducible.
+    const double sign = d.X() > 1e-9 ? 1.0 : d.X() < -1e-9 ? -1.0 : (d.Y() >= 0 ? 1.0 : -1.0);
+    f.axis[0] = sign * d.X();
+    f.axis[1] = sign * d.Y();
+    f.axis[2] = sign * d.Z();
+    f.length = sides[order[0]];
+    f.width = sides[order[1]];
+    f.height = sides[order[2]];
+}
+
+// Round holes along Z: the cylindrical faces whose material is on the outside, merged where a hole is
+// split over several faces or runs through a stack of them.
+void find_holes(const TopoDS_Shape& shape, model::PartFeatures& f) {
+    constexpr double kMerge = 1e-4;
+    for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next()) {
+        const TopoDS_Face face = TopoDS::Face(ex.Current());
+        BRepAdaptor_Surface surface(face);
+        if (surface.GetType() != GeomAbs_Cylinder) continue;
+        const gp_Cylinder cyl = surface.Cylinder();
+        if (std::abs(cyl.Axis().Direction().Z()) < 0.9999) continue;
+        const double r = cyl.Radius();
+        const gp_Pnt a = cyl.Location();
+        // A point of the face and one a little towards the axis: a hole has no material there.
+        const gp_Pnt p = surface.Value(0.5 * (surface.FirstUParameter() + surface.LastUParameter()),
+                                       0.5 * (surface.FirstVParameter() + surface.LastVParameter()));
+        const gp_Vec radial(gp_Pnt(a.X(), a.Y(), p.Z()), p);
+        if (radial.Magnitude() < 1e-12) continue;
+        const gp_Pnt inside = p.Translated(-0.2 * r * radial.Normalized());
+        BRepClass3d_SolidClassifier classifier(shape, inside, 1e-7);
+        if (classifier.State() != TopAbs_OUT) continue;
+        bool known = false;
+        for (const model::Hole& h : f.holes) {
+            known |= std::hypot(h.x - a.X(), h.y - a.Y()) < kMerge && std::abs(h.radius - r) < kMerge;
+        }
+        if (!known) f.holes.push_back({a.X(), a.Y(), r});
+    }
+    std::sort(f.holes.begin(), f.holes.end(),
+              [](const model::Hole& a, const model::Hole& b) { return a.radius > b.radius; });
+    if (f.holes.size() > 8) f.holes.resize(8);
 }
 
 }  // namespace
@@ -139,6 +203,8 @@ model::PartFeatures extract_features(const ImportedPart& part, const FeatureOpti
     f.extent_x = b[3] - b[0];
     f.extent_y = b[4] - b[1];
     f.fingerprint = fingerprint(f.volume, b);
+    fit_box(shape, f);
+    find_holes(shape, f);
 
     const Outline outline = sample_outline(shape, 0.5 * (f.z_min + f.z_max), c.X(), c.Y(), options);
     if (!outline.ok) return f;
@@ -167,6 +233,18 @@ model::PartFeatures extract_features(const ImportedPart& part, const FeatureOpti
                 f.flank_cycloid_pitch_radius = cyc.pitch_radius;
                 f.flank_cycloid_rolling_radius = cyc.rolling_radius;
             }
+        }
+    }
+
+    // A ring (a date wheel) has its teeth on the inside: the smallest radius per angle, wherever the
+    // inner loop is. Only parts that are mostly hole are looked at, so a wheel's spokes and
+    // crossings do not pass for teeth.
+    if (outline.min_radius > 0.5 * f.outer_radius) {
+        const ToothResult inner = detect_teeth(outline.inner, options.min_teeth);
+        if (inner.teeth > 0) {
+            f.inner_teeth = inner.teeth;
+            f.inner_tip_radius = *std::min_element(outline.inner.begin(), outline.inner.end());
+            f.inner_root_radius = *std::max_element(outline.inner.begin(), outline.inner.end());
         }
     }
     return f;

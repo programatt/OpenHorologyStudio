@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <numbers>
 #include <string>
 #include <vector>
 
@@ -210,6 +212,21 @@ int cmd_kinematics(const Options& o) {
             j["mobiles"].push_back({{"name", mm.name}, {"reached", mm.reached}, {"ratio", mm.ratio},
                                     {"rph", mm.revs_per_hour}, {"rpm", mm.revs_per_hour / 60.0}});
         }
+        j["parts"] = json::array();
+        for (const auto& a : t.articulations) {
+            const bool spin = a.kind == ohs::kinematics::Articulation::Kind::Spin;
+            json part = {{"part", m.components[static_cast<std::size_t>(a.component)].features.name},
+                         {"role", std::string(ohs::model::to_string(m.components[static_cast<std::size_t>(a.component)].role))},
+                         {"motion", spin ? "spin" : "follow"}, {"point", {a.point[0], a.point[1], a.point[2]}}, {"axis", {a.axis[0], a.axis[1], a.axis[2]}}};
+            if (spin) {
+                part["turns_per_root_turn"] = a.gain;
+            } else {
+                part["driver"] = m.mobiles[static_cast<std::size_t>(a.driver)].name;
+                part["teeth"] = a.teeth;
+                part["swing_deg"] = a.amplitude * 180.0 / std::numbers::pi;
+            }
+            j["parts"].push_back(std::move(part));
+        }
         j["warnings"] = t.warnings;
         j["expectations"] = expectations;
         std::cout << j.dump(2) << '\n';
@@ -225,6 +242,16 @@ int cmd_kinematics(const Options& o) {
                 std::cout << (k ? ", " : "") << m.components[m.mobiles[i].components[k]].features.name;
             }
             std::cout << "]\n";
+        }
+        for (const auto& a : t.articulations) {
+            const auto& c = m.components[static_cast<std::size_t>(a.component)];
+            std::cout << std::left << std::setw(6) << to_string(c.role) << ' ' << c.features.name;
+            if (a.kind == ohs::kinematics::Articulation::Kind::Spin) {
+                std::cout << " spins about its own axis, " << -a.gain << " turns per turn of the root\n";
+            } else {
+                std::cout << " swings " << std::abs(a.amplitude) * 180.0 / std::numbers::pi << " deg about (" << a.point[0] << ", "
+                          << a.point[1] << ") for each of the " << a.teeth << " teeth of " << m.mobiles[static_cast<std::size_t>(a.driver)].name << '\n';
+            }
         }
         for (const auto& w : t.warnings) std::cout << "warning: " << w << '\n';
         for (const auto& e : expectations) {

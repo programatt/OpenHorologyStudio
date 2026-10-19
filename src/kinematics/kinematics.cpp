@@ -7,6 +7,7 @@
 #include <queue>
 
 #include "core/error.hpp"
+#include "model/followers.hpp"
 
 namespace ohs::kinematics {
 
@@ -19,6 +20,76 @@ const MobileMotion* TrainAnalysis::find(const std::string& mobile_name) const {
     }
     return nullptr;
 }
+
+namespace {
+
+// A lever or spring that turns more than this on one tooth is not one the part features can place: its pivot or
+// its free end is a poor estimate (radians, about 17 degrees).
+constexpr double kMaxSwing = 0.3;
+
+void build_articulations(const Movement& m, TrainAnalysis& train) {
+    const auto mid_height = [](const model::PartFeatures& f) { return 0.5 * (f.z_min + f.z_max); };
+    for (std::size_t i = 0; i < m.components.size(); ++i) {
+        const model::Component& c = m.components[i];
+        const model::PartFeatures& f = c.features;
+        Articulation a;
+        a.component = static_cast<int>(i);
+        // The mobile of a toothed part, if the train reaches it.
+        const auto driver_mobile = [&](int component) {
+            const int mobile = m.mobile_of(component);
+            return mobile >= 0 && train.mobiles[static_cast<std::size_t>(mobile)].reached ? mobile : -1;
+        };
+        const auto teeth_of = [&](int component) {
+            const model::PartFeatures& d = m.components[static_cast<std::size_t>(component)].features;
+            return d.inner_teeth >= 6 ? d.inner_teeth : d.teeth;
+        };
+        const model::Usable reached = [&](int component) { return driver_mobile(component) >= 0; };
+        switch (c.role) {
+            case Role::Stem: {
+                const double along = std::hypot(f.axis[0], std::hypot(f.axis[1], f.axis[2]));
+                if (f.length <= 0.0 || along <= 0.0) continue;
+                a.kind = Articulation::Kind::Spin;
+                a.point[0] = f.center.x;
+                a.point[1] = f.center.y;
+                a.point[2] = mid_height(f);
+                for (int k = 0; k < 3; ++k) a.axis[k] = f.axis[k] / along;
+                a.gain = -kWindingRatio;
+                break;
+            }
+            case Role::Lever: {
+                const auto contact = model::lever_contact(m.components, static_cast<int>(i), reached);
+                if (!contact) continue;
+                a.driver = driver_mobile(contact->driver);
+                if (a.driver < 0) continue;
+                a.kind = Articulation::Kind::Follow;
+                a.teeth = teeth_of(contact->driver);
+                a.point[0] = contact->pivot.x;
+                a.point[1] = contact->pivot.y;
+                a.point[2] = mid_height(f);
+                a.amplitude = model::lever_swing(m.components, *contact);
+                break;
+            }
+            case Role::Spring: {
+                const auto flex = model::spring_flex(m.components, static_cast<int>(i), reached);
+                if (!flex) continue;
+                a.driver = driver_mobile(flex->driver);
+                if (a.driver < 0) continue;
+                a.kind = Articulation::Kind::Follow;
+                a.teeth = teeth_of(flex->driver);
+                a.point[0] = flex->fixed.x;
+                a.point[1] = flex->fixed.y;
+                a.point[2] = mid_height(f);
+                a.amplitude = flex->swing;
+                break;
+            }
+            default: continue;
+        }
+        if (a.kind == Articulation::Kind::Follow && (a.teeth < 6 || std::abs(a.amplitude) < 1e-4 || std::abs(a.amplitude) > kMaxSwing)) continue;
+        train.articulations.push_back(a);
+    }
+}
+
+}  // namespace
 
 TrainAnalysis analyze_train(const Movement& m, double beat_rate_vph, int root) {
     TrainAnalysis out;
@@ -101,8 +172,17 @@ TrainAnalysis analyze_train(const Movement& m, double beat_rate_vph, int root) {
             }
         }
     }
-    for (const MobileMotion& mm : out.mobiles) {
-        if (!mm.reached) out.warnings.push_back("mobile " + mm.name + " is not connected to the train");
+    auto is_date_ring = [&m](int mobile) {
+        for (int c : m.mobiles[mobile].components) {
+            if (m.components[c].role == Role::DateRing) return true;
+        }
+        return false;
+    };
+    for (int i = 0; i < nm; ++i) {
+        // A date ring is stepped by a wheel of the train, not geared to it: see below.
+        if (!out.mobiles[i].reached && !is_date_ring(i)) {
+            out.warnings.push_back("mobile " + out.mobiles[i].name + " is not connected to the train");
+        }
     }
 
     for (int i = 0; i < nm; ++i) {
@@ -124,6 +204,57 @@ TrainAnalysis analyze_train(const Movement& m, double beat_rate_vph, int root) {
     } else {
         out.warnings.push_back("the escape wheel is missing or not connected to the train");
     }
+
+    // Date rings. Their speed needs absolute speeds to find the 24-hour wheel, so a train analysed for
+    // ratios only leaves them out.
+    if (out.root_period_hours > 0) {
+        constexpr double day_rev_per_hour = 1.0 / 24.0;
+        // The driver is the wheel of the train that turns once a day; the hour wheel, once in 12 h, gives the
+        // direction when there is none.
+        auto nearest = [&](int skip, double revs_per_hour) {
+            int best = -1;
+            double error = 0.03;
+            for (int i = 0; i < nm; ++i) {
+                if (i == skip || !out.mobiles[i].reached || out.mobiles[i].index_teeth > 0) continue;
+                const double e = std::abs(out.mobiles[i].revs_per_hour / revs_per_hour - 1.0);
+                if (e < error) {
+                    error = e;
+                    best = i;
+                }
+            }
+            return best;
+        };
+        for (int i = 0; i < nm; ++i) {
+            if (!is_date_ring(i)) continue;
+            int teeth = 0;
+            for (int c : m.mobiles[i].components) {
+                if (m.components[c].role != Role::DateRing) continue;
+                const model::PartFeatures& f = m.components[c].features;
+                teeth = f.inner_teeth > 0 ? f.inner_teeth : f.teeth;
+            }
+            if (teeth <= 0) {
+                teeth = 31;
+                out.warnings.push_back("date ring " + out.mobiles[i].name + " shows no teeth: assuming 31, one for each day of the longest month");
+            }
+            MobileMotion& ring = out.mobiles[i];
+            ring.reached = true;
+            ring.index_teeth = teeth;
+            ring.index_driver = nearest(i, day_rev_per_hour);
+            double driver_ratio;  // the root turns this many times for each turn of the driver, with sign
+            if (ring.index_driver >= 0) {
+                driver_ratio = out.mobiles[ring.index_driver].ratio;
+            } else {
+                const int hour = nearest(i, 2.0 * day_rev_per_hour);
+                const double sense = hour >= 0 && out.mobiles[hour].ratio < 0 ? -1.0 : 1.0;
+                driver_ratio = sense * out.root_period_hours / 24.0;
+                out.warnings.push_back("no wheel of the train turns once in 24 h: date ring " + ring.name +
+                                       " advances one tooth for each 24 h of clock time");
+            }
+            ring.ratio = driver_ratio / teeth;
+            ring.revs_per_hour = std::abs(ring.ratio) / out.root_period_hours;
+        }
+    }
+    build_articulations(m, out);
     return out;
 }
 
@@ -146,9 +277,46 @@ std::vector<double> mobile_angles(const TrainAnalysis& train, double seconds, co
     }
     std::vector<double> angles(train.mobiles.size(), 0.0);
     for (std::size_t i = 0; i < angles.size(); ++i) {
-        if (train.mobiles[i].reached) angles[i] = two_pi * root_revs * train.mobiles[i].ratio;
+        const MobileMotion& mm = train.mobiles[i];
+        if (!mm.reached) continue;
+        if (mm.index_teeth > 0) {
+            // One tooth per turn of the driver, however the train itself is being posed; the driver
+            // turns this many times in `seconds`, whole turns of it being whole days.
+            const double driver_ratio = mm.ratio * mm.index_teeth;
+            const double turns = seconds / 3600.0 / train.root_period_hours * std::abs(driver_ratio);
+            const double whole = std::floor(turns);
+            const double w = std::clamp(options.date_engage_fraction, 1e-3, 1.0);
+            const double x = std::clamp((turns - whole - (1.0 - w)) / w, 0.0, 1.0);
+            const double eased = x * x * (3.0 - 2.0 * x);
+            angles[i] = (driver_ratio < 0 ? -1.0 : 1.0) * two_pi / mm.index_teeth * (whole + eased);
+            continue;
+        }
+        angles[i] = two_pi * root_revs * mm.ratio;
     }
     return angles;
+}
+
+std::vector<double> articulation_angles(const TrainAnalysis& train, const std::vector<double>& mobile_angles) {
+    constexpr double two_pi = 2.0 * std::numbers::pi;
+    std::vector<double> out(train.articulations.size(), 0.0);
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        const Articulation& a = train.articulations[i];
+        if (a.kind == Articulation::Kind::Spin) {
+            const auto root = static_cast<std::size_t>(train.root);
+            out[i] = root < mobile_angles.size() ? a.gain * mobile_angles[root] : 0.0;
+            continue;
+        }
+        const auto driver = static_cast<std::size_t>(a.driver);
+        if (driver >= mobile_angles.size()) continue;
+        // Teeth gone past, whichever way the part turns; the part is at rest at the start of a tooth.
+        const double teeth_gone = a.teeth * std::abs(mobile_angles[driver]) / two_pi;
+        const double f = teeth_gone - std::floor(teeth_gone);
+        const auto smooth = [](double x) { return x * x * (3.0 - 2.0 * x); };
+        // Up the face of the tooth over 70 % of the pitch, back down over the rest.
+        constexpr double up = 0.7;
+        out[i] = a.amplitude * (f < up ? smooth(f / up) : 1.0 - smooth((f - up) / (1.0 - up)));
+    }
+    return out;
 }
 
 }  // namespace ohs::kinematics

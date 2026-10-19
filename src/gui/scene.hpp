@@ -21,6 +21,7 @@ struct ScenePart {
     model::Role role{model::Role::Unknown};
     int mobile{-1};           ///< index into Movement::mobiles, or -1 for fixed parts
     double pivot_x{}, pivot_y{};
+    int articulation{-1};     ///< index into TrainAnalysis::articulations for a stem, lever or spring that moves, else -1
     double z_min{}, z_max{};
     bool closed{false};       ///< made only of solids, with outward faces: its back faces are hidden by its front ones
     std::vector<Triangle> triangles;

@@ -9,7 +9,7 @@ function(ohs_library name)
   target_link_libraries(${name} PUBLIC ohs_options)
 endfunction()
 
-ohs_library(ohs_model model/model.cpp model/rig_io.cpp)
+ohs_library(ohs_model model/model.cpp model/followers.cpp model/rig_io.cpp)
 target_link_libraries(ohs_model PRIVATE tomlplusplus::tomlplusplus)
 
 ohs_library(ohs_rigging rigging/rigging.cpp)

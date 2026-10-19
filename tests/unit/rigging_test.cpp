@@ -158,3 +158,60 @@ TEST_CASE("check_rig reports what a user should confirm") {
     CHECK(std::any_of(empty.begin(), empty.end(),
                       [](const rigging::Issue& i) { return i.severity == rigging::Severity::Error; }));
 }
+
+TEST_CASE("a date wheel is a ring of its own, by name or by its internal teeth") {
+    rigging::RigOptions o;
+    CHECK(rigging::classify(named("Date Wheel"), o).role == Role::DateRing);
+    CHECK(rigging::classify(named("date_ring"), o).role == Role::DateRing);
+    CHECK(rigging::classify(named("Quantieme disc"), o).role == Role::DateRing);
+    CHECK(rigging::classify(named("Date indicator"), o).role == Role::DateRing);
+    // Its fixings and what drives it keep their own roles.
+    CHECK(rigging::classify(named("date wheel screw"), o).role == Role::Screw);
+    CHECK(rigging::classify(named("date wheel bridge"), o).role == Role::Bridge);
+    CHECK(rigging::classify(named("date driving wheel", 24), o).role == Role::Wheel);
+    CHECK(rigging::classify(named("date wheel jumper"), o).role != Role::DateRing);
+    CHECK(rigging::classify(named("date finger"), o).role != Role::DateRing);
+
+    // Named, but no teeth found anywhere: a guess. With internal teeth it is surer.
+    CHECK(rigging::classify(named("date wheel"), o).confidence < 0.8);
+    auto ring = named("date wheel");
+    ring.inner_teeth = 31;
+    CHECK(rigging::classify(ring, o).confidence == Catch::Approx(0.9));
+
+    // Unnamed: internal teeth and none outside make a date ring, not a plate.
+    auto bare = named("Body9");
+    bare.extent_x = bare.extent_y = 30;
+    bare.inner_teeth = 31;
+    const auto c = rigging::classify(bare, o);
+    CHECK(c.role == Role::DateRing);
+    CHECK(c.source == "geometry");
+}
+
+TEST_CASE("a date ring is a mobile of its own even when it shares an axis with the train") {
+    auto parts = test::synthetic_train();
+    const std::size_t barrel_mobiles = rigging::auto_rig("train", parts, {}).mobiles.size();
+    auto ring = test::arbor("date wheel", 0, 0, 0.2, 0.6);  // concentric with the barrel and its arbor
+    ring.outer_radius = 14.0;
+    ring.inner_teeth = 31;
+    parts.push_back(ring);
+    const auto m = rigging::auto_rig("train", parts, {});
+    const int idx = static_cast<int>(parts.size()) - 1;
+    REQUIRE(m.components[idx].role == Role::DateRing);
+    CHECK(m.mobiles.size() == barrel_mobiles + 1);
+    const int mobile = m.mobile_of(idx);
+    REQUIRE(mobile >= 0);
+    CHECK(m.mobiles[mobile].components == std::vector<int>{idx});
+    CHECK(m.mobile_of(0) != mobile);   // the barrel
+    CHECK(m.meshes.size() == rigging::auto_rig("train", test::synthetic_train(), {}).meshes.size());  // not geared to anything
+}
+
+TEST_CASE("a date ring with no teeth found is flagged") {
+    auto parts = test::synthetic_train();
+    auto ring = test::arbor("date wheel", 0, 0, 0.2, 0.6);
+    parts.push_back(ring);
+    const auto m = rigging::auto_rig("train", parts, {});
+    const auto issues = rigging::check_rig(m);
+    CHECK(std::any_of(issues.begin(), issues.end(), [](const rigging::Issue& i) {
+        return i.message.find("date ring 'date wheel'") != std::string::npos;
+    }));
+}
