@@ -8,6 +8,8 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
+#include <QElapsedTimer>
+#include <QEventLoop>
 #include <QFile>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -21,6 +23,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include "gui/job_queue.hpp"
 #include "gui/main_window.hpp"
 
 namespace fs = std::filesystem;
@@ -288,6 +291,130 @@ TEST_CASE("gui: role changes can be undone and redone", "[gui]") {
     // The same role again is not a change.
     REQUIRE(w.change_role(part, QString::fromUtf8(ohs::model::to_string(original).data())));
     CHECK(w.undo_stack()->count() == 1);
+}
+
+TEST_CASE("job queue: jobs run in worker processes, failures and bad programs are reported", "[gui][jobs]") {
+    app();
+    ohs::gui::JobQueue q("/bin/sh");
+    const int ok = q.submit("echo", {"-c", "echo hello; echo oops >&2; echo $$"});
+    const int bad = q.submit("exit 3", {"-c", "exit 3"});
+    q.wait();
+    const auto& jobs = q.jobs();
+    CHECK(jobs[ok].state == ohs::gui::JobQueue::State::Done);
+    CHECK(jobs[ok].out.startsWith("hello\n"));
+    CHECK(jobs[ok].err == "oops\n");
+    CHECK(jobs[ok].out.trimmed().split('\n').last().toLongLong() != QCoreApplication::applicationPid());  // another process
+    CHECK(jobs[bad].state == ohs::gui::JobQueue::State::Failed);
+    CHECK(jobs[bad].exit_code == 3);
+
+    ohs::gui::JobQueue missing("/nonexistent/ohs");
+    const int m = missing.submit("nothing to run", {"--version"});
+    missing.wait();
+    CHECK(missing.jobs()[m].state == ohs::gui::JobQueue::State::Failed);
+    CHECK(missing.jobs()[m].err.contains("cannot start"));
+}
+
+TEST_CASE("job queue: a running job can be cancelled, and the queue carries on", "[gui][jobs]") {
+    app();
+    ohs::gui::JobQueue q("/bin/sh");
+    const int slow = q.submit("slow", {"-c", "sleep 60"});
+    const int next = q.submit("next", {"-c", "echo after"});
+    const int never = q.submit("never", {"-c", "echo skipped"});
+    REQUIRE(q.jobs()[slow].state == ohs::gui::JobQueue::State::Running);
+    CHECK(q.cancel(never));  // still queued
+    QElapsedTimer clock;
+    clock.start();
+    CHECK(q.cancel(slow));  // running: the worker is killed
+    q.wait();
+    CHECK(clock.elapsed() < 10000);
+    CHECK(q.jobs()[slow].state == ohs::gui::JobQueue::State::Cancelled);
+    CHECK(q.jobs()[next].state == ohs::gui::JobQueue::State::Done);
+    CHECK(q.jobs()[next].out == "after\n");
+    CHECK(q.jobs()[never].state == ohs::gui::JobQueue::State::Cancelled);
+    CHECK_FALSE(q.cancel(next));  // finished jobs cannot be cancelled
+}
+
+TEST_CASE("job queue: unfinished jobs survive a restart and finished ones keep their results", "[gui][jobs]") {
+    app();
+    const QString dir = fresh_dir("job-journal");
+    const QString journal = QDir(dir).filePath("jobs.json");
+    const QString marker = QDir(dir).filePath("started-once");
+    // The first run leaves a marker and then hangs; a second run finds the marker and finishes.
+    const QString script = QString("if [ -e '%1' ]; then echo second run; else touch '%1'; sleep 60; fi").arg(marker);
+    {
+        ohs::gui::JobQueue first("/bin/sh");
+        REQUIRE(first.load(journal) == 0);
+        first.submit("quick", {"-c", "echo before"});
+        const int hung = first.submit("hangs once", {"-c", script});
+        first.submit("waits", {"-c", "echo queued behind"});
+        QElapsedTimer t;
+        t.start();
+        while (!QFile::exists(marker) && t.elapsed() < 10000) QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        REQUIRE(QFile::exists(marker));
+        REQUIRE(first.jobs()[0].state == ohs::gui::JobQueue::State::Done);
+        REQUIRE(first.jobs()[hung].state == ohs::gui::JobQueue::State::Running);
+    }  // the application ends here: the worker is killed with a job running and one queued
+
+    ohs::gui::JobQueue second("/bin/sh");
+    CHECK(second.load(journal) == 2);
+    REQUIRE(second.jobs().size() == 3);
+    CHECK(second.jobs()[0].state == ohs::gui::JobQueue::State::Done);
+    CHECK(second.jobs()[0].out == "before\n");  // a finished job keeps its result
+    CHECK(second.jobs()[1].state == ohs::gui::JobQueue::State::Queued);  // was running
+    CHECK(second.jobs()[1].attempts == 1);
+    CHECK(second.jobs()[2].state == ohs::gui::JobQueue::State::Queued);
+    second.resume();
+    second.wait();
+    CHECK(second.jobs()[1].state == ohs::gui::JobQueue::State::Done);
+    CHECK(second.jobs()[1].attempts == 2);
+    CHECK(second.jobs()[1].out == "second run\n");
+    CHECK(second.jobs()[2].out == "queued behind\n");
+
+    ohs::gui::JobQueue third("/bin/sh");
+    CHECK(third.load(journal) == 0);  // nothing left to resume
+    CHECK(third.jobs()[2].out == "queued behind\n");
+}
+
+TEST_CASE("gui: jobs run in worker processes and resume when the project is opened again", "[gui][jobs]") {
+    app();
+    const QString dir = fresh_dir("window-jobs");
+    const QString marker = QDir(dir).filePath("started-once");
+    const QString script = QString("if [ -e '%1' ]; then echo second run; else touch '%1'; sleep 60; fi").arg(marker);
+    qputenv("OHS_EXE", "/bin/sh");  // stand in for the ohs worker, so the job's behaviour is ours
+    QString project;
+    {
+        ohs::gui::MainWindow w;
+        w.show();
+        REQUIRE(w.open_demo(dir));
+        project = w.project();
+        w.submit("hangs once", {"-c", script});
+        QElapsedTimer t;
+        t.start();
+        while (!QFile::exists(marker) && t.elapsed() < 10000) QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+        REQUIRE(QFile::exists(marker));
+        CHECK(w.job_list()->item(0)->text().startsWith("running"));
+        CHECK(QFile::exists(project + ".jobs.json"));
+    }  // the window closes with the job running
+
+    ohs::gui::MainWindow w2;
+    w2.show();
+    REQUIRE(w2.open_project(project));
+    REQUIRE(w2.job_list()->count() == 1);
+    w2.wait_for_jobs();
+    CHECK(w2.job_list()->item(0)->text().startsWith("done"));
+    CHECK(w2.job_queue()->jobs()[0].attempts == 2);
+    CHECK(w2.log_console()->toPlainText().contains("Resuming 1 job"));
+    w2.job_list()->setCurrentRow(-1);
+    w2.job_list()->setCurrentRow(0);  // selecting a finished job shows its output
+    CHECK(w2.results()->toPlainText().contains("second run"));
+
+    // A job of the running window can be cancelled while it runs.
+    w2.submit("slow", {"-c", "sleep 60"});
+    REQUIRE(w2.job_list()->item(1)->text().startsWith("running"));
+    CHECK(w2.cancel_job(1));
+    w2.wait_for_jobs();
+    CHECK(w2.job_list()->item(1)->text().startsWith("cancelled"));
+    qunsetenv("OHS_EXE");
 }
 
 TEST_CASE("gui: every project edit is undoable and undo restores the file exactly", "[gui]") {

@@ -25,9 +25,13 @@ ohs-gui movement.hsproj
 - **Simulate, Analyse, Manufacture, Report.** One button per analysis: torque chain, timekeeping,
   virtual timegrapher, cross-check of the models, tooth bending and shock of the selected part,
   design for manufacture, collisions, tolerance stack-up, and the HTML and PDF report. Each runs as
-  a job on a worker thread, so the window stays responsive; jobs run one at a time and the Jobs dock
-  lists them (double-click a queued job to cancel it). Results show in the Results dock, with a plot
-  of rate against amplitude after Timekeeping, and the commands and their messages in the Log dock.
+  a job in a worker process (the `ohs` program), so the window stays responsive and a crashing
+  solver cannot take it down; jobs run one at a time and the Jobs dock lists them. Double-click a
+  queued job to cancel it, or the running one to kill its worker. The queue is kept in a journal
+  beside the project (`<project>.jobs.json`): close the window mid-run and the unfinished jobs run
+  again when you open the project, and a finished job's output shows again when you select it. Results
+  show in the Results dock, with a plot of rate against amplitude after Timekeeping, and the commands
+  and their messages in the Log dock.
 - **Edit, Undo and Redo** step through every change to the project made in the window: *Set role of
   the selected part* and *Declare that the selected part meshes with this one*. Undo puts the project
   file back exactly as it was (the history is snapshots of the file), and the Edit history dock lists
@@ -39,7 +43,6 @@ ohs-gui movement.hsproj
 
 The viewport draws with Qt's own painter, so it needs no GPU and runs anywhere, but it does not
 have the OpenCASCADE OpenGL viewer, PBR materials, motion trails or force arrows, and there is no
-MP4 export. Jobs run on a thread of the window's process, not in separate worker processes, so a
-running job cannot be cancelled and a crashing solver would take the window with it; the job list
-does not survive a restart. The only plot is rate against amplitude, and only role changes can be
-undone. Use `ohs animate` for glTF, and `ohs report` for the report. See [Limitations](limitations.md).
+MP4 export. A job that was running when the window closed starts again from the beginning rather than
+carrying on (the solvers do not checkpoint). The only plot is rate against amplitude, and views
+cannot be undone, only edits of the project. Use `ohs animate` for glTF, and `ohs report` for the report. See [Limitations](limitations.md).

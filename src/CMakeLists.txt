@@ -104,13 +104,17 @@ target_link_libraries(ohs_perf PRIVATE ohs_lessons ohs_reports ohs_manufacturing
 
 # ---- Qt desktop application (optional) --------------------------------------------------------------
 if(OHS_BUILD_GUI)
-  find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets Concurrent)
+  find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets)
   set(CMAKE_AUTOMOC ON)
   # The scene is Qt-free (tessellated parts, pose, exploded view, section) and tested without a display.
   ohs_library(ohs_gui_scene gui/scene.cpp)
   target_link_libraries(ohs_gui_scene PUBLIC ohs_geometry ohs_kinematics ohs_model)
-  ohs_library(ohs_gui gui/viewport.cpp gui/plot.cpp gui/main_window.cpp)
-  target_link_libraries(ohs_gui PUBLIC ohs_gui_scene ohs_cli Qt6::Widgets Qt6::Concurrent)
+  ohs_library(ohs_gui gui/viewport.cpp gui/plot.cpp gui/job_queue.cpp gui/main_window.cpp)
+  target_link_libraries(ohs_gui PUBLIC ohs_gui_scene ohs_cli Qt6::Widgets)
+  # Analyses run as worker processes of the command line tool, found next to the GUI when installed and
+  # in the build tree otherwise.
+  add_dependencies(ohs_gui ohs)
+  target_compile_definitions(ohs_gui PRIVATE OHS_CLI_EXECUTABLE="$<TARGET_FILE:ohs>")
   add_executable(ohs-gui gui/gui_main.cpp)
   target_link_libraries(ohs-gui PRIVATE ohs_gui)
   install(TARGETS ohs-gui RUNTIME DESTINATION bin)

@@ -13,7 +13,6 @@
 #include <QUndoCommand>
 #include <QUndoStack>
 #include <QUndoView>
-#include <QtConcurrent/QtConcurrentRun>
 #include <QRegularExpression>
 #include <QTreeWidgetItemIterator>
 #include <QCheckBox>
@@ -151,8 +150,16 @@ void MainWindow::build_ui() {
     jobs_dock->setObjectName("jobs_dock");
     jobs_dock->setWidget(jobs_);
     addDockWidget(Qt::BottomDockWidgetArea, jobs_dock);
-    connect(&watcher_, &QFutureWatcher<cli::Captured>::finished, this, &MainWindow::on_job_finished);
+    queue_ = new JobQueue(worker_program(), this);
+    connect(queue_, &JobQueue::changed, this, &MainWindow::on_job_changed);
+    connect(queue_, &JobQueue::finished, this, &MainWindow::on_job_finished);
     connect(jobs_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem*) { cancel_job(jobs_->currentRow()); });
+    connect(jobs_, &QListWidget::currentRowChanged, this, [this](int row) {
+        // Selecting a job shows its output again, which also works for jobs finished before a restart.
+        if (row < 0 || row >= static_cast<int>(queue_->jobs().size())) return;
+        const auto& job = queue_->jobs()[static_cast<std::size_t>(row)];
+        if (job.state == JobQueue::State::Done || job.state == JobQueue::State::Failed) show_result(job.args, job.out, job.exit_code);
+    });
 
     undo_ = new QUndoStack(this);
     auto* history_dock = new QDockWidget(tr("Edit history"), this);
@@ -352,8 +359,10 @@ bool MainWindow::load_project(const QString& project, const QString& step) {
         statusBar()->showMessage(tr("Cannot open the project; see the log"), 5000);
         return false;
     }
+    const bool new_project = project != project_;
     project_ = project;
     step_ = step;
+    if (new_project) attach_job_journal();
     timeline_->setValue(0);
     time_ = 0;
     viewport_->set_scene(scene_);
@@ -384,6 +393,15 @@ bool MainWindow::set_role(const QString& part, const QString& role) {
     if (project_.isEmpty()) return false;
     if (run_command({"rig", "set", project_, part, "--role", role}) != 0) return false;
     return load_project(project_, step_);
+}
+
+void MainWindow::attach_job_journal() {
+    jobs_->clear();
+    const int resumed = queue_->load(project_ + ".jobs.json");
+    if (resumed > 0) {
+        append_log(tr("Resuming %1 job(s) that were unfinished when the application last ended").arg(resumed));
+        queue_->resume();
+    }
 }
 
 bool MainWindow::restore_project(const QByteArray& text) {
@@ -589,57 +607,47 @@ void MainWindow::on_apply_role() {
     change_role(QString::fromStdString(viewport_->selected()), role_box_->currentText());
 }
 
-int MainWindow::unfinished_jobs() const {
-    int n = 0;
-    for (const Job& j : job_log_)
-        if (j.state == Job::State::Queued || j.state == Job::State::Running) ++n;
-    return n;
+QString MainWindow::worker_program() {
+    const QString env = qEnvironmentVariable("OHS_EXE");
+    if (!env.isEmpty()) return env;
+    const QString beside = QCoreApplication::applicationDirPath() + "/ohs";  // an installed layout
+    if (QFileInfo::exists(beside)) return beside;
+#ifdef OHS_CLI_EXECUTABLE
+    return QString::fromUtf8(OHS_CLI_EXECUTABLE);  // the build tree
+#else
+    return "ohs";
+#endif
 }
 
-void MainWindow::submit(const QString& label, const QStringList& args) {
-    job_log_.push_back({label, args, Job::State::Queued});
-    jobs_->addItem(tr("queued: %1").arg(label));
-    start_next_job();
-}
+int MainWindow::unfinished_jobs() const { return queue_->unfinished(); }
 
-bool MainWindow::cancel_job(int index) {
-    if (index < 0 || index >= static_cast<int>(job_log_.size()) || job_log_[index].state != Job::State::Queued) return false;
-    job_log_[index].state = Job::State::Cancelled;
-    jobs_->item(index)->setText(tr("cancelled: %1").arg(job_log_[index].label));
-    return true;
-}
+void MainWindow::submit(const QString& label, const QStringList& args) { queue_->submit(label, args); }
 
-void MainWindow::start_next_job() {
-    if (running_job_ >= 0) return;
-    for (std::size_t i = 0; i < job_log_.size(); ++i) {
-        if (job_log_[i].state != Job::State::Queued) continue;
-        job_log_[i].state = Job::State::Running;
-        running_job_ = static_cast<int>(i);
-        jobs_->item(running_job_)->setText(tr("running: %1").arg(job_log_[i].label));
-        std::vector<std::string> a;
-        for (const QString& s : job_log_[i].args) a.push_back(s.toStdString());
-        watcher_.setFuture(QtConcurrent::run([a] { return cli::run_captured(a); }));
-        return;
+bool MainWindow::cancel_job(int index) { return queue_->cancel(index); }
+
+void MainWindow::on_job_changed(int index) {
+    const auto& job = queue_->jobs()[static_cast<std::size_t>(index)];
+    while (jobs_->count() <= index) jobs_->addItem(QString());
+    QString text;
+    switch (job.state) {
+        case JobQueue::State::Queued: text = job.attempts > 0 ? tr("queued again after a restart: %1") : tr("queued: %1"); text = text.arg(job.label); break;
+        case JobQueue::State::Running: text = tr("running: %1").arg(job.label); break;
+        case JobQueue::State::Done: text = tr("done: %1").arg(job.label); break;
+        case JobQueue::State::Failed: text = tr("failed (%2): %1").arg(job.label).arg(job.exit_code); break;
+        case JobQueue::State::Cancelled: text = tr("cancelled: %1").arg(job.label); break;
     }
+    jobs_->item(index)->setText(text);
 }
 
-void MainWindow::on_job_finished() {
-    if (running_job_ < 0) return;
-    Job& job = job_log_[running_job_];
-    const cli::Captured captured = watcher_.result();
+void MainWindow::on_job_finished(int index) {
+    const auto& job = queue_->jobs()[static_cast<std::size_t>(index)];
     QStringList quoted;
     for (const QString& s : job.args) quoted << shell_quote(s);
     history_ << "ohs " + quoted.join(' ');
     append_log("$ ohs " + quoted.join(' '));
-    if (!captured.err.empty()) append_log(QString::fromStdString(captured.err).trimmed());
-    append_log(tr("exit code %1").arg(captured.exit_code));
-    job.state = captured.exit_code == 0 ? Job::State::Done : Job::State::Failed;
-    jobs_->item(running_job_)->setText(captured.exit_code == 0 ? tr("done: %1").arg(job.label)
-                                                               : tr("failed (%2): %1").arg(job.label).arg(captured.exit_code));
-    const QStringList args = job.args;
-    running_job_ = -1;
-    show_result(args, QString::fromStdString(captured.out), captured.exit_code);
-    start_next_job();
+    if (!job.err.isEmpty()) append_log(job.err.trimmed());
+    append_log(tr("exit code %1").arg(job.exit_code));
+    show_result(job.args, job.out, job.exit_code);
 }
 
 void MainWindow::show_result(const QStringList& args, const QString& out, int code) {
@@ -660,12 +668,7 @@ void MainWindow::show_result(const QStringList& args, const QString& out, int co
     results_->setPlainText(out + (code == 0 ? QString() : tr("\n(exit code %1: see the log)").arg(code)));
 }
 
-void MainWindow::wait_for_jobs() {
-    while (unfinished_jobs() > 0) {
-        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
-        QThread::msleep(5);
-    }
-}
+void MainWindow::wait_for_jobs() { queue_->wait(); }
 
 void MainWindow::on_open() {
     const QString path = QFileDialog::getOpenFileName(this, tr("Open project"), {}, tr("OHS projects (*.hsproj *.toml)"));

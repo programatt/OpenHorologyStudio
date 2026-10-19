@@ -10,8 +10,9 @@ know where to be careful.
   every analysis. It is not the plan's full UI: the viewport is drawn with Qt's painter, not the
   OpenCASCADE OpenGL viewer or VTK, so there are no PBR materials, motion trails, force arrows,
   field plots or mode-shape viewport and no MP4 export; there is one plot (rate against amplitude);
-  undo covers edits of the project file (role changes and declared meshes), not views; and jobs run on a thread of the window's process, in a queue that
-  does not survive a restart, instead of in worker processes. It is built
+  undo covers edits of the project file (role changes and declared meshes), not views; and a job that was running when the window closed starts
+  again from the beginning on the next open (jobs run in worker processes and are journalled, but the
+  solvers do not checkpoint). It is built
   only with `-DOHS_BUILD_GUI=ON`, and has been exercised on Linux only (offscreen scripted test).
 - **Chrono is optional and covers the escapement only; no MFEM or Netgen.** The detailed
   timekeeping model can run on Project Chrono (`-DOHS_WITH_CHRONO=ON`, `--engine chrono`), but as

@@ -6,12 +6,12 @@
 #include <string>
 #include <vector>
 
-#include <QFutureWatcher>
 #include <QMainWindow>
 #include <QString>
 #include <QStringList>
 
 #include "cli/cli_run.hpp"
+#include "gui/job_queue.hpp"
 #include "gui/plot.hpp"
 #include "gui/scene.hpp"
 #include "gui/viewport.hpp"
@@ -63,10 +63,15 @@ public:
     QUndoStack* undo_stack() const { return undo_; }
     QComboBox* mesh_partner_box() const { return mesh_box_; }
 
-    /// Queues `ohs <args>` to run on a worker thread so the window stays responsive. Jobs run one at
-    /// a time in order; a job that has not started yet can be cancelled.
+    /// Queues `ohs <args>` to run in a worker process so the window stays responsive. Jobs run one at a
+    /// time in order. A queued job, or the running one (its process is killed), can be cancelled. The
+    /// queue is journalled beside the project (`<project>.jobs.json`): after a restart the jobs that
+    /// were unfinished run again and the finished ones keep their results (select one to see them).
     void submit(const QString& label, const QStringList& args);
     bool cancel_job(int index);
+    JobQueue* job_queue() const { return queue_; }
+    /// The `ohs` program the worker processes run.
+    static QString worker_program();
     /// Blocks (keeping the window alive) until every queued job has finished.
     void wait_for_jobs();
     int unfinished_jobs() const;
@@ -103,7 +108,6 @@ private slots:
     void on_tree_changed();
     void on_tree_selected();
     void on_run_analysis();
-    void on_job_finished();
     void on_apply_role();
     void on_declare_mesh();
 
@@ -113,17 +117,13 @@ private:
     QWidget* build_animate_page();
     QWidget* build_analysis_page(const QString& title, const std::vector<std::pair<QString, QStringList>>& commands);
     bool load_project(const QString& project, const QString& step);
+    void attach_job_journal();
     void refresh_panels();
     QStringList with_project(QStringList args) const;
     void append_log(const QString& text);
-    void start_next_job();
+    void on_job_changed(int index);
+    void on_job_finished(int index);
     void show_result(const QStringList& args, const QString& out, int code);
-
-    struct Job {
-        QString label;
-        QStringList args;
-        enum class State { Queued, Running, Done, Failed, Cancelled } state{State::Queued};
-    };
 
     Viewport* viewport_{};
     QTabWidget* workspaces_{};
@@ -146,9 +146,7 @@ private:
     PlotWidget* plot_{};
     QComboBox* role_box_{};
     QComboBox* mesh_box_{};
-    std::vector<Job> job_log_;                       ///< every job, in submission order (the list shows these)
-    QFutureWatcher<cli::Captured> watcher_;
-    int running_job_{-1};
+    JobQueue* queue_{};                               ///< every job, in submission order (the list shows these)
 
     std::shared_ptr<Scene> scene_;
     QString project_;
