@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// ohs-gui [project.hsproj] [--snapshot out.png] [--view top|iso|side] [--explode 0..1] [--time seconds]
+// ohs-gui [project.hsproj] [--snapshot out.png] [--view top|bottom|iso|side] [--explode 0..1] [--time seconds]
 //         [--video out.mp4 [--video-seconds 10] [--movement-seconds 60] [--fps 30] [--size 1280x720]]
 // With --snapshot the window opens the project, renders the viewport to the file and exits (0 when it
 // worked, 1 when the project could not be opened), which also serves scripted checks. --video does the
@@ -18,7 +18,7 @@ int main(int argc, char** argv) {
     parser.addHelpOption();
     parser.addPositionalArgument("project", "Project file to open (optional)");
     QCommandLineOption snapshot("snapshot", "Render the viewport to this PNG and exit", "file");
-    QCommandLineOption view("view", "top, iso or side (with --snapshot)", "name", "iso");
+    QCommandLineOption view("view", "top, bottom, iso or side (with --snapshot)", "name", "iso");
     QCommandLineOption explode("explode", "Exploded view 0..1 (with --snapshot)", "factor", "0");
     QCommandLineOption time("time", "Movement time in seconds (with --snapshot)", "seconds", "0");
     QCommandLineOption step("step", "STEP file (default: next to the project)", "file");
@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
     if (parser.isSet(snapshot)) {
         if (args.isEmpty() || !window.open_project(args.first(), parser.value(step))) return 1;
         const QString v = parser.value(view);
-        window.viewport()->set_view(v == "top" ? 0 : v == "side" ? 0 : 35, v == "top" ? 0 : v == "side" ? -90 : -55);
+        window.viewport()->set_view(v == "top" || v == "side" || v == "bottom" ? 0 : 35, v == "top" ? 0 : v == "side" ? -90 : v == "bottom" ? -180 : -55);
         if (auto* scene = window.viewport()->scene()) {
             scene->set_explode(parser.value(explode).toDouble());
             scene->set_time(parser.value(time).toDouble());
@@ -63,7 +63,7 @@ int main(int argc, char** argv) {
     if (parser.isSet(video)) {
         if (args.isEmpty() || !window.open_project(args.first(), parser.value(step))) return 1;
         const QString v = parser.value(view);
-        window.viewport()->set_view(v == "top" ? 0 : v == "side" ? 0 : 35, v == "top" ? 0 : v == "side" ? -90 : -55);
+        window.viewport()->set_view(v == "top" || v == "side" || v == "bottom" ? 0 : 35, v == "top" ? 0 : v == "side" ? -90 : v == "bottom" ? -180 : -55);
         if (auto* scene = window.viewport()->scene()) scene->set_explode(parser.value(explode).toDouble());
         if (parser.isSet(field)) {
             const QStringList f = parser.value(field).split(',');

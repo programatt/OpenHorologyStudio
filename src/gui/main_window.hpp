@@ -29,6 +29,7 @@ class QSlider;
 class QTableWidget;
 class QTabWidget;
 class QTimer;
+class QThread;
 class QTreeWidget;
 
 namespace ohs::gui {
@@ -40,6 +41,7 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
     explicit MainWindow(QWidget* parent = nullptr);
+    ~MainWindow() override;
 
     /// Loads a project and its geometry. Returns false and logs the reason on failure.
     bool open_project(const QString& project, const QString& step = {});
@@ -130,6 +132,11 @@ private:
     QWidget* build_animate_page();
     QWidget* build_analysis_page(const QString& title, const std::vector<std::pair<QString, QStringList>>& commands);
     bool load_project(const QString& project, const QString& step);
+    /// Re-reads the rig from the project file, keeping the geometry, view, visibility and selection.
+    bool reload_rig();
+    bool install_scene(const QString& project, const QString& step, std::shared_ptr<Scene> scene);
+    /// Runs `ohs import` and loads the result on a worker thread; the window stays responsive.
+    void import_step_async(const QString& step, const QString& project, double beat_rate_vph);
     void attach_job_journal();
     void refresh_panels();
     QStringList with_project(QStringList args) const;
@@ -172,6 +179,8 @@ private:
     QStringList history_;
     double time_{0};
     bool rebuilding_{false};
+    bool importing_{false};
+    QThread* import_thread_{};  ///< the running import, if any; the destructor waits for it
 };
 
 }  // namespace ohs::gui

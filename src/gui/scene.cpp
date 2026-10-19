@@ -98,6 +98,46 @@ Scene Scene::load(const std::filesystem::path& project, const std::filesystem::p
     return s;
 }
 
+bool Scene::reload_rig(const std::filesystem::path& project, double beat_rate_vph) {
+    model::Movement m = model::load_rig(project);
+    if (m.dial_axis != movement_.dial_axis || m.components.size() != parts_.size()) return false;
+    for (std::size_t c = 0; c < m.components.size(); ++c) {
+        if (m.components[c].features.name != parts_[c].name) return false;
+    }
+    movement_ = std::move(m);
+    const double vph = beat_rate_vph > 0 ? beat_rate_vph : movement_.beat_rate_vph;
+    train_ = {};
+    train_error_.clear();
+    try {
+        train_ = kinematics::analyze_train(movement_, vph);
+    } catch (const Error& e) {
+        train_error_ = e.what();
+    }
+    // The triangles are stored relative to the part's pivot, so a part whose mobile moved is shifted, not re-meshed.
+    for (std::size_t c = 0; c < parts_.size(); ++c) {
+        ScenePart& part = parts_[c];
+        const int mobile = movement_.mobile_of(static_cast<int>(c));
+        const double px = mobile >= 0 ? movement_.mobiles[static_cast<std::size_t>(mobile)].center.x : 0.0;
+        const double py = mobile >= 0 ? movement_.mobiles[static_cast<std::size_t>(mobile)].center.y : 0.0;
+        const double dx = part.pivot_x - px, dy = part.pivot_y - py;
+        if (dx != 0.0 || dy != 0.0) {
+            for (auto& t : part.triangles) {
+                for (Point3* p : {&t.a, &t.b, &t.c}) {
+                    (*p)[0] += dx;
+                    (*p)[1] += dy;
+                }
+            }
+        }
+        part.role = movement_.components[c].role;
+        part.mobile = mobile;
+        part.pivot_x = px;
+        part.pivot_y = py;
+    }
+    forces_.clear();
+    if (has_field_) clear_field();
+    return true;
+}
+
 void Scene::set_visible(const std::string& part, bool visible) {
     const auto it = std::find(hidden_.begin(), hidden_.end(), part);
     if (visible && it != hidden_.end()) hidden_.erase(it);

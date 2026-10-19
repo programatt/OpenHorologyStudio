@@ -197,6 +197,7 @@ void MainWindow::build_ui() {
     view->addAction(tr("Top (dial side)"), this, [this] { viewport_->set_view(0, 0); });
     view->addAction(tr("Isometric"), this, [this] { viewport_->set_view(35, -55); });
     view->addAction(tr("Side"), this, [this] { viewport_->set_view(0, -90); });
+    view->addAction(tr("Bottom (movement back)"), this, [this] { viewport_->set_view(0, -180); });
     view->addAction(tr("Fit"), this, [this] { viewport_->fit(); });
 
     timer_ = new QTimer(this);
@@ -352,6 +353,10 @@ QWidget* MainWindow::build_analysis_page(const QString& title, const std::vector
     return page;
 }
 
+MainWindow::~MainWindow() {
+    if (import_thread_) import_thread_->wait();  // a running import cannot be abandoned mid-write
+}
+
 void MainWindow::append_log(const QString& text) {
     log_->appendPlainText(text);
 }
@@ -391,12 +396,39 @@ bool MainWindow::open_project(const QString& project, const QString& step) {
 
 bool MainWindow::load_project(const QString& project, const QString& step) {
     try {
-        scene_ = std::make_shared<Scene>(Scene::load(project.toStdString(), step.toStdString()));
+        return install_scene(project, step, std::make_shared<Scene>(Scene::load(project.toStdString(), step.toStdString())));
     } catch (const std::exception& e) {
         append_log(tr("Cannot open %1: %2").arg(project, e.what()));
         statusBar()->showMessage(tr("Cannot open the project; see the log"), 5000);
         return false;
     }
+}
+
+bool MainWindow::reload_rig() {
+    if (!scene_) return false;
+    const QString selected = QString::fromStdString(viewport_->selected());
+    bool reused = false;
+    try {
+        reused = scene_->reload_rig(project_.toStdString());  // metadata only: the geometry is kept
+    } catch (const std::exception& e) {
+        append_log(tr("Cannot open %1: %2").arg(project_, e.what()));
+        return false;
+    }
+    if (!reused) return load_project(project_, step_);
+    refresh_panels();
+    for (QTreeWidgetItemIterator it(tree_); *it; ++it) {
+        if ((*it)->parent()) {
+            const QSignalBlocker block(tree_);
+            (*it)->setCheckState(0, scene_->visible((*it)->text(0).toStdString()) ? Qt::Checked : Qt::Unchecked);
+        }
+    }
+    if (!selected.isEmpty()) select_part(selected);  // the part that was changed stays selected in every view
+    viewport_->update();
+    return true;
+}
+
+bool MainWindow::install_scene(const QString& project, const QString& step, std::shared_ptr<Scene> scene) {
+    scene_ = std::move(scene);
     const bool new_project = project != project_;
     project_ = project;
     step_ = step;
@@ -411,6 +443,62 @@ bool MainWindow::load_project(const QString& project, const QString& step) {
                    .arg(scene_->movement().mobiles.size())
                    .arg(scene_->movement().meshes.size()));
     return true;
+}
+
+void MainWindow::import_step_async(const QString& step, const QString& project, double beat_rate_vph) {
+    if (importing_) {
+        statusBar()->showMessage(tr("An import is already running"), 5000);
+        return;
+    }
+    QStringList args{"import", step, "-o", project};
+    if (beat_rate_vph > 0) args << "--beat-rate" << QString::number(beat_rate_vph);
+    QStringList quoted;
+    for (const QString& a : args) quoted << shell_quote(a);
+    const QString line = "ohs " + quoted.join(' ');
+    history_ << line;
+    append_log("$ " + line);
+    importing_ = true;
+    statusBar()->showMessage(tr("Importing %1...").arg(QFileInfo(step).fileName()));
+
+    // The import and the tessellation run off the UI thread; the window only installs the result.
+    struct Result {
+        cli::Captured captured;
+        std::shared_ptr<Scene> scene;
+        QString error;
+    };
+    auto result = std::make_shared<Result>();
+    std::vector<std::string> cli_args;
+    for (const QString& a : args) cli_args.push_back(a.toStdString());
+    QThread* thread = QThread::create([result, cli_args, project, step] {
+        result->captured = cli::run_captured(cli_args);
+        if (result->captured.exit_code != 0) return;
+        try {
+            result->scene = std::make_shared<Scene>(Scene::load(project.toStdString(), step.toStdString()));
+        } catch (const std::exception& e) {
+            result->error = QString::fromUtf8(e.what());
+        }
+    });
+    connect(thread, &QThread::finished, this, [this, thread, result, step, project] {
+        thread->deleteLater();
+        import_thread_ = nullptr;
+        importing_ = false;
+        if (!result->captured.err.empty()) append_log(QString::fromStdString(result->captured.err).trimmed());
+        append_log(tr("exit code %1").arg(result->captured.exit_code));
+        if (result->captured.exit_code != 0) {
+            statusBar()->showMessage(tr("Import failed; see the log"), 8000);
+            return;
+        }
+        if (!result->scene) {
+            append_log(tr("Cannot open %1: %2").arg(project, result->error));
+            statusBar()->showMessage(tr("Cannot open the project; see the log"), 5000);
+            return;
+        }
+        undo_->clear();
+        install_scene(project, step, result->scene);
+        statusBar()->showMessage(tr("Imported %1").arg(QFileInfo(step).fileName()), 5000);
+    });
+    import_thread_ = thread;
+    thread->start();
 }
 
 bool MainWindow::import_step(const QString& step, const QString& project, double beat_rate_vph) {
@@ -430,7 +518,8 @@ bool MainWindow::open_demo(const QString& dir) {
 bool MainWindow::set_role(const QString& part, const QString& role) {
     if (project_.isEmpty()) return false;
     if (run_command({"rig", "set", project_, part, "--role", role}) != 0) return false;
-    return load_project(project_, step_);
+    viewport_->select(part.toStdString());
+    return reload_rig();
 }
 
 void MainWindow::attach_job_journal() {
@@ -452,7 +541,7 @@ bool MainWindow::restore_project(const QByteArray& text) {
     f.write(text);
     f.close();
     history_ << "# the project file was restored by undo or redo";
-    return load_project(project_, step_);
+    return reload_rig();
 }
 
 bool MainWindow::edit_project(const QString& label, const QStringList& args) {
@@ -460,7 +549,7 @@ bool MainWindow::edit_project(const QString& label, const QStringList& args) {
     const QByteArray before = read_file(project_);
     if (run_command(args) != 0) return false;
     const QByteArray after = read_file(project_);
-    if (!load_project(project_, step_)) {
+    if (!reload_rig()) {
         restore_project(before);
         return false;
     }
@@ -583,6 +672,14 @@ void MainWindow::select_part(const QString& name) {
     rebuilding_ = true;
     for (QTreeWidgetItemIterator it(tree_); *it; ++it) {
         if ((*it)->text(0) == name) tree_->setCurrentItem(*it);
+    }
+    for (int row = 0; row < rig_table_->rowCount(); ++row) {
+        const auto* item = rig_table_->item(row, 0);
+        if (item && item->text() == name) {
+            rig_table_->selectRow(row);
+            rig_table_->scrollToItem(item);
+            break;
+        }
     }
     rebuilding_ = false;
 }
@@ -788,7 +885,7 @@ void MainWindow::on_open() {
 void MainWindow::on_import() {
     const QString step = QFileDialog::getOpenFileName(this, tr("Import CAD file"), {}, tr("CAD files (*.step *.stp *.iges *.igs *.dxf);;STEP (*.step *.stp);;IGES (*.iges *.igs);;DXF (*.dxf)"));
     if (step.isEmpty()) return;
-    import_step(step, QFileInfo(step).dir().filePath(QFileInfo(step).completeBaseName() + ".hsproj"), 0);
+    import_step_async(step, QFileInfo(step).dir().filePath(QFileInfo(step).completeBaseName() + ".hsproj"), 0);
 }
 
 void MainWindow::on_demo() {

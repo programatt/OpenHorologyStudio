@@ -40,6 +40,11 @@ public:
     static Scene load(const std::filesystem::path& project, const std::filesystem::path& step_override = {},
                       double beat_rate_vph = 0.0);
 
+    /// Re-reads the rig (roles, mobiles, meshes) from the project file and keeps the tessellated geometry, so a
+    /// rig edit does not re-import the STEP file. Returns false when the parts themselves changed (a different
+    /// part list or dial axis); then the scene is left as it was and a full load() is needed.
+    bool reload_rig(const std::filesystem::path& project, double beat_rate_vph = 0.0);
+
     const model::Movement& movement() const { return movement_; }
     const kinematics::TrainAnalysis& train() const { return train_; }
     const std::vector<ScenePart>& parts() const { return parts_; }
