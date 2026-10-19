@@ -18,9 +18,9 @@ target_link_libraries(ohs_rigging PUBLIC ohs_model)
 ohs_library(ohs_kinematics kinematics/kinematics.cpp)
 target_link_libraries(ohs_kinematics PUBLIC ohs_model)
 
-ohs_library(ohs_dynamics dynamics/calibre.cpp dynamics/torque_chain.cpp dynamics/oscillator.cpp dynamics/detailed.cpp dynamics/chrono_adapter.cpp
+ohs_library(ohs_dynamics dynamics/calibre.cpp dynamics/hairspring.cpp dynamics/torque_chain.cpp dynamics/oscillator.cpp dynamics/detailed.cpp dynamics/chrono_adapter.cpp
             dynamics/timekeeping.cpp dynamics/timegrapher.cpp dynamics/bench.cpp dynamics/study.cpp)
-target_link_libraries(ohs_dynamics PUBLIC ohs_kinematics PRIVATE tomlplusplus::tomlplusplus)
+target_link_libraries(ohs_dynamics PUBLIC ohs_kinematics PRIVATE tomlplusplus::tomlplusplus Eigen3::Eigen)
 if(OHS_WITH_CHRONO)
   target_compile_definitions(ohs_dynamics PUBLIC OHS_WITH_CHRONO)
   # Chrono's config file exports variables, not targets. Only chrono_adapter.cpp includes Chrono

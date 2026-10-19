@@ -42,6 +42,7 @@ add_executable(ohs_tests
   unit/cycloidal_fit_test.cpp
   unit/netgen_test.cpp
   unit/pmi_test.cpp
+  unit/hairspring_test.cpp
   integration/pipeline_test.cpp
   integration/animation_test.cpp
   integration/cli_test.cpp)

@@ -361,7 +361,7 @@ Six milestones to 1.0, each usable on its own and closed by a gate you check.
 - [x] STEP PMI dimensional tolerances (`ohs tolerance --pmi`; tested on OCCT-written AP242, not on CAD-system files)
 - [x] Cycloidal gear profiles (generated, fitted, meshing-checked; Lewis and contact-ratio formulas stay involute)
 - [x] Spring detent (chronometer) escapement in the reduced model (calibre `escapement = "detent"`)
-- [ ] Escapements other than the Swiss lever and the detent (co-axial, Robin, cylinder, verge), and a contact model of the detent; coil-contact mainspring and hairspring models
+- [ ] Escapements other than the Swiss lever and the detent (co-axial, Robin, cylinder, verge), and a contact model of the detent; coil-contact mainspring and hairspring models (a beam-FE hairspring without contact exists as a library, `dynamics/hairspring.hpp`)
 - [ ] Windows and macOS builds, installers and CI run (configured only); Fusion 360 and SolidWorks add-in runs
 - [x] TSan (clean under `setarch -R`), coverage and static-analysis CI jobs (TSan run locally; coverage and clang-tidy jobs are configured, not run here)
 - [x] Superbuild of Chrono and MFEM at pinned commits (CMake ExternalProject, built on Linux; Netgen optional; not vcpkg, not run on Windows/macOS)

@@ -56,6 +56,16 @@ Each change gets a sentence with the relation behind it and, for frequency chang
 and simulated rate shifts side by side. `--verify` also checks both designs with the detailed
 model. Parameters are the field names of the calibre file.
 
+## Hairspring model
+
+`dynamics/hairspring.hpp` is a library model, not yet a command or a calibre option: a geometrically
+nonlinear beam finite-element model of a flat Archimedean hairspring (stud clamped, collet turned
+about the staff). It gives the torque against collet angle and the sideways force on the staff. Checked:
+the small-angle stiffness is E I / L to 1 % (the polygon is a little short of the arc), stiffness goes
+as thickness cubed and as 1 / length, the torque is symmetric and within 1 % of linear out to 4 rad. It
+does not model coil contact, a terminal curve or the effect of the spring's weight, and the oscillator
+still uses the linear E b h^3 / 12 L stiffness.
+
 ## Escapements
 
 The calibre's `escapement` is `swiss_lever` (the default) or `detent`, a spring detent as in a marine
