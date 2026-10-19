@@ -701,6 +701,47 @@ TEST_CASE("gui: every project edit is undoable and undo restores the file exactl
     CHECK(w.undo_stack()->count() == 0);
 }
 
+TEST_CASE("gui: the menus open projects on a worker thread and the window keeps running", "[gui]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    const QString dir = fresh_dir("async-open");
+    auto wait_loaded = [&] {
+        QElapsedTimer t;
+        t.start();
+        while (w.is_loading() && t.elapsed() < 300000) QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+    };
+
+    w.open_demo_async(dir);
+    CHECK(w.is_loading());  // returned at once: the import runs in the background
+    CHECK(w.project().isEmpty());
+    CHECK(w.run_command({"materials"}) == 2);  // refused rather than queued behind the import
+    wait_loaded();
+    REQUIRE_FALSE(w.is_loading());
+    CHECK(w.project() == QDir(dir).filePath("demo.hsproj"));
+    REQUIRE(w.viewport()->scene());
+    CHECK(w.rig_table()->rowCount() > 0);
+    const QStringList h = w.history();
+    REQUIRE(h.size() == 2);
+    CHECK(h[0].startsWith("ohs dev gen-movement"));
+    CHECK(h[1].startsWith("ohs import"));
+
+    // Opening again replaces the scene with a fresh one and a fresh edit history.
+    REQUIRE(w.change_role("center_wheel", "plate"));
+    CHECK(w.undo_stack()->count() == 1);
+    const auto* before = w.viewport()->scene();
+    w.open_project_async(w.project());
+    wait_loaded();
+    CHECK(w.viewport()->scene() != before);
+    CHECK(w.undo_stack()->count() == 0);
+
+    // A file that cannot be read is reported, and the window carries on with what it had.
+    w.open_project_async(QDir(dir).filePath("none.hsproj"));
+    wait_loaded();
+    CHECK(w.log_console()->toPlainText().contains("Cannot open"));
+    CHECK(w.project() == QDir(dir).filePath("demo.hsproj"));
+}
+
 // Hidden (run with `ohs_gui_tests "[bench]"`): where the time goes on the demonstration movement.
 TEST_CASE("bench: scene load, frame and pick times of the demonstration movement", "[.][bench]") {
     app();

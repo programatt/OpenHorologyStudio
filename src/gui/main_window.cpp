@@ -363,6 +363,10 @@ void MainWindow::append_log(const QString& text) {
 }
 
 int MainWindow::run_command(const QStringList& args, QString* out) {
+    if (importing_) {
+        statusBar()->showMessage(tr("Wait for the project to finish opening"), 4000);
+        return 2;
+    }
     wait_for_jobs();  // the command line runs one command at a time
     std::vector<std::string> a;
     for (const QString& s : args) a.push_back(s.toStdString());
@@ -447,56 +451,80 @@ bool MainWindow::install_scene(const QString& project, const QString& step, std:
 }
 
 void MainWindow::import_step_async(const QString& step, const QString& project, double beat_rate_vph) {
-    if (importing_) {
-        statusBar()->showMessage(tr("An import is already running"), 5000);
-        return;
-    }
     QStringList args{"import", step, "-o", project};
     if (beat_rate_vph > 0) args << "--beat-rate" << QString::number(beat_rate_vph);
-    QStringList quoted;
-    for (const QString& a : args) quoted << shell_quote(a);
-    const QString line = "ohs " + quoted.join(' ');
-    history_ << line;
-    append_log("$ " + line);
-    importing_ = true;
-    statusBar()->showMessage(tr("Importing %1...").arg(QFileInfo(step).fileName()));
+    load_async(tr("Importing %1...").arg(QFileInfo(step).fileName()), {args}, project, step);
+}
 
-    // The import and the tessellation run off the UI thread; the window only installs the result.
+void MainWindow::open_project_async(const QString& project) {
+    load_async(tr("Opening %1...").arg(QFileInfo(project).fileName()), {}, project, {});
+}
+
+void MainWindow::open_demo_async(const QString& dir) {
+    QDir().mkpath(dir);
+    const QString step = QDir(dir).filePath("demo.step"), project = QDir(dir).filePath("demo.hsproj");
+    load_async(tr("Building the demonstration movement..."),
+               {{"dev", "gen-movement", "-o", step}, {"import", step, "-o", project, "--beat-rate", "28800"}}, project, step);
+}
+
+void MainWindow::load_async(const QString& message, const std::vector<QStringList>& commands, const QString& project,
+                            const QString& step) {
+    if (importing_) {
+        statusBar()->showMessage(tr("A project is already being opened"), 5000);
+        return;
+    }
+    importing_ = true;
+    statusBar()->showMessage(message);
+
+    // The commands, the STEP read and the tessellation run off the UI thread; the window only installs the result.
     struct Result {
-        cli::Captured captured;
+        std::vector<cli::Captured> captured;  ///< one per command run, stopping at the first that fails
         std::shared_ptr<Scene> scene;
         QString error;
     };
     auto result = std::make_shared<Result>();
-    std::vector<std::string> cli_args;
-    for (const QString& a : args) cli_args.push_back(a.toStdString());
+    std::vector<std::vector<std::string>> cli_args;
+    for (const QStringList& args : commands) {
+        cli_args.emplace_back();
+        for (const QString& a : args) cli_args.back().push_back(a.toStdString());
+    }
     QThread* thread = QThread::create([result, cli_args, project, step] {
-        result->captured = cli::run_captured(cli_args);
-        if (result->captured.exit_code != 0) return;
+        for (const auto& args : cli_args) {
+            result->captured.push_back(cli::run_captured(args));
+            if (result->captured.back().exit_code != 0) return;
+        }
         try {
             result->scene = std::make_shared<Scene>(Scene::load(project.toStdString(), step.toStdString()));
         } catch (const std::exception& e) {
             result->error = QString::fromUtf8(e.what());
         }
     });
-    connect(thread, &QThread::finished, this, [this, thread, result, step, project] {
+    connect(thread, &QThread::finished, this, [this, thread, result, commands, step, project] {
         thread->deleteLater();
         import_thread_ = nullptr;
         importing_ = false;
-        if (!result->captured.err.empty()) append_log(QString::fromStdString(result->captured.err).trimmed());
-        append_log(tr("exit code %1").arg(result->captured.exit_code));
-        if (result->captured.exit_code != 0) {
-            statusBar()->showMessage(tr("Import failed; see the log"), 8000);
-            return;
+        for (std::size_t i = 0; i < result->captured.size(); ++i) {
+            QStringList quoted;
+            for (const QString& a : commands[i]) quoted << shell_quote(a);
+            const QString line = "ohs " + quoted.join(' ');
+            history_ << line;
+            append_log("$ " + line);
+            const auto& captured = result->captured[i];
+            if (!captured.err.empty()) append_log(QString::fromStdString(captured.err).trimmed());
+            append_log(tr("exit code %1").arg(captured.exit_code));
+            if (captured.exit_code != 0) {
+                statusBar()->showMessage(tr("%1 failed; see the log").arg(commands[i].value(0)), 8000);
+                return;
+            }
         }
         if (!result->scene) {
             append_log(tr("Cannot open %1: %2").arg(project, result->error));
             statusBar()->showMessage(tr("Cannot open the project; see the log"), 5000);
             return;
         }
-        undo_->clear();
+        undo_->clear();  // the history belongs to one project
         install_scene(project, step, result->scene);
-        statusBar()->showMessage(tr("Imported %1").arg(QFileInfo(step).fileName()), 5000);
+        statusBar()->showMessage(tr("Opened %1").arg(QFileInfo(project).fileName()), 5000);
     });
     import_thread_ = thread;
     thread->start();
@@ -887,7 +915,7 @@ void MainWindow::wait_for_jobs() { queue_->wait(); }
 
 void MainWindow::on_open() {
     const QString path = QFileDialog::getOpenFileName(this, tr("Open project"), {}, tr("OHS projects (*.hsproj *.toml)"));
-    if (!path.isEmpty()) open_project(path);
+    if (!path.isEmpty()) open_project_async(path);
 }
 
 void MainWindow::on_import() {
@@ -897,7 +925,7 @@ void MainWindow::on_import() {
 }
 
 void MainWindow::on_demo() {
-    open_demo(QDir::temp().filePath("ohs-demo"));
+    open_demo_async(QDir::temp().filePath("ohs-demo"));
 }
 
 }  // namespace ohs::gui

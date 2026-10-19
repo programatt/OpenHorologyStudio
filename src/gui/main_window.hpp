@@ -49,7 +49,16 @@ public:
     bool import_step(const QString& step, const QString& project, double beat_rate_vph);
     /// Writes the procedural demonstration movement into `dir` and opens it.
     bool open_demo(const QString& dir);
-    /// Runs `ohs <args>` in-process; logs the command and its output. Returns the exit code.
+    /// What the menus and buttons use: the same as import_step, open_project and open_demo, but run on a
+    /// worker thread (through load_async) so the window stays responsive while the STEP file is read and meshed.
+    /// is_loading() is true until the scene is installed (or the failure logged).
+    void import_step_async(const QString& step, const QString& project, double beat_rate_vph);
+    void open_project_async(const QString& project);
+    void open_demo_async(const QString& dir);
+    bool is_loading() const { return importing_; }
+    /// Runs `ohs <args>` in-process; logs the command and its output. Returns the exit code. Refused (exit
+    /// code 2) while a project is being opened in the background: the project is about to be replaced, and
+    /// the command line runs one command at a time, so it would block the window until the load ends.
     int run_command(const QStringList& args, QString* out = nullptr);
     /// Changes a part's role through `ohs rig set` and reloads. Not undoable; see change_role.
     bool set_role(const QString& part, const QString& role);
@@ -135,8 +144,10 @@ private:
     /// Re-reads the rig from the project file, keeping the geometry, view, visibility and selection.
     bool reload_rig();
     bool install_scene(const QString& project, const QString& step, std::shared_ptr<Scene> scene);
-    /// Runs `ohs import` and loads the result on a worker thread; the window stays responsive.
-    void import_step_async(const QString& step, const QString& project, double beat_rate_vph);
+    /// Runs `ohs <commands>` in order, then loads `project`, on a worker thread, and installs the scene when
+    /// done. One at a time; `message` shows in the status bar meanwhile.
+    void load_async(const QString& message, const std::vector<QStringList>& commands, const QString& project,
+                    const QString& step);
     void attach_job_journal();
     void refresh_panels();
     QStringList with_project(QStringList args) const;
@@ -180,7 +191,7 @@ private:
     double time_{0};
     bool rebuilding_{false};
     bool importing_{false};
-    QThread* import_thread_{};  ///< the running import, if any; the destructor waits for it
+    QThread* import_thread_{};  ///< the running load_async, if any; the destructor waits for it
 };
 
 }  // namespace ohs::gui
