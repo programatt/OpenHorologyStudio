@@ -31,6 +31,12 @@ von Mises stress, safety factor against the material's strength, and the lowest 
 frequencies. `--vtu` writes a file for ParaView; `--hdf5` writes the mesh and every field to an HDF5 file
 for Python (`h5py`) or MATLAB (needs a build with libhdf5; the Linux packages have it).
 
+`--mfem` re-solves the shock case with MFEM, an independent finite element code, built from the same
+mesh and loads but with its own elements, assembly and conjugate-gradient solver, and prints the
+largest displacement difference. The two codes use the same discretisation, so they agree to solver
+tolerance (about 1e-8 on the test blocks); a larger difference means a bug in one of them. It needs a
+build with libmfem (`libmfem-dev`), and `--crosscheck` does the same against CalculiX.
+
 Meshes are limited to 250,000 degrees of freedom: choose a larger `--size` when you hit it.
 
 ## Materials

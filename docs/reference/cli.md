@@ -500,6 +500,7 @@ Options:
   --vtu TEXT                  Write the result for ParaView
   --hdf5 TEXT                 Write mesh and fields to an HDF5 file (needs a build with libhdf5)
   --crosscheck                Compare with CalculiX if it is installed
+  --mfem                      Compare with MFEM, an independent finite element code, if this build has it (shock case)
   --beat-rate FLOAT           Beat rate in vph (default: from project)
 ```
 

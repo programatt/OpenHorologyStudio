@@ -14,6 +14,7 @@
 #include "core/error.hpp"
 #include "fea/calculix.hpp"
 #include "fea/fea.hpp"
+#include "fea/mfem_adapter.hpp"
 #include "fea/results.hpp"
 
 #ifdef OHS_WITH_HDF5
@@ -314,4 +315,54 @@ TEST_CASE("CalculiX input deck and result parser") {
     } else if (cc.available) {
         CHECK(cc.max_displacement_diff < 1e-3);
     }
+}
+
+TEST_CASE("MFEM solves the same problems to solver tolerance, with its own elements and mesh") {
+    // Same discretisation in two independent codes: they must agree far more tightly than two different
+    // element families would, so this checks the element stiffness and the assembly, not the physics.
+    fea::Model model;
+    model.material = brass();
+    model.mesh = mesh::extrude(mesh::structured_rect(0, 0, 4, 1, 4, 2), 0, 1, 2, 2);
+    for (int n : mesh::nodes_where(model.mesh, [](const V3& p) { return p.x < 1e-9; })) {
+        for (int comp = 0; comp < 3; ++comp) model.fixed.push_back({n, comp});
+    }
+    fea::Vec load = fea::Vec::Zero(model.dofs());
+    fea::add_point_load(load, 17, {0.5, -1.0, -3.5});
+    fea::add_gravity(model, load, {0, 0, -9810.0});
+    const fea::StaticResult r = fea::solve_static(model, load);
+
+    const auto check = fea::run_mfem_crosscheck(model, load, r);
+    if (!fea::mfem_available()) {
+        CHECK_FALSE(check.available);
+        CHECK_THAT(check.note, Catch::Matchers::ContainsSubstring("no MFEM support"));
+        return;
+    }
+    REQUIRE(check.available);
+    INFO(check.note);
+    CHECK(check.ohs_max_displacement > 1e-4);
+    CHECK(check.mfem_max_displacement == Approx(check.ohs_max_displacement).epsilon(1e-8));
+    CHECK(check.max_displacement_diff < 1e-8);
+
+    // Linear tetrahedra go through the same path.
+    fea::Model lin = model;
+    lin.mesh = mesh::extrude(mesh::structured_rect(0, 0, 4, 1, 4, 2), 0, 1, 2, 1);
+    lin.fixed.clear();
+    for (int n : mesh::nodes_where(lin.mesh, [](const V3& p) { return p.x < 1e-9; })) {
+        for (int comp = 0; comp < 3; ++comp) lin.fixed.push_back({n, comp});
+    }
+    fea::Vec lin_load = fea::Vec::Zero(lin.dofs());
+    fea::add_gravity(lin, lin_load, {0, 0, -9810.0});
+    const auto lin_check = fea::run_mfem_crosscheck(lin, lin_load, fea::solve_static(lin, lin_load));
+    REQUIRE(lin_check.available);
+    CHECK(lin_check.max_displacement_diff < 1e-8);
+
+    // A wrong answer is noticed: perturb the OHS solution and the difference shows.
+    fea::StaticResult wrong = r;
+    wrong.u *= 1.01;
+    CHECK(fea::run_mfem_crosscheck(model, load, wrong).max_displacement_diff == Approx(0.01 / 1.01).epsilon(1e-3));  // relative to the perturbed maximum
+
+    fea::Model two = model;
+    two.materials = {brass()};
+    two.element_material.assign(model.mesh.elems.size(), 0);
+    CHECK_FALSE(fea::run_mfem_crosscheck(two, load, r).available);
 }

@@ -14,6 +14,7 @@
 #include "dynamics/torque_chain.hpp"
 #include "fea/analysis.hpp"
 #include "fea/calculix.hpp"
+#include "fea/mfem_adapter.hpp"
 #include "fea/results.hpp"
 #include "geometry/features.hpp"
 #include "geometry/cad_io.hpp"
@@ -35,7 +36,7 @@ struct FeaOptions {
     std::string hairspring = "nife_hairspring", balance = "brass_leaded";
     double load_n = 0, wind = 1.0, size = 0.2, size_factor = 0.14, shock_g = 5000, beat_rate = 0;
     int modes = 0;
-    bool in_plane = false, full = false, crosscheck = false;
+    bool in_plane = false, full = false, crosscheck = false, mfem = false;
 };
 
 geometry::Axis axis_of(const std::string& up);
@@ -204,11 +205,17 @@ int cmd_fea(const FeaOptions& o, bool as_json) {
         j["free_openings"] = r.free_openings;
         if (!o.vtu.empty()) fea::write_vtu(o.vtu, r.model.mesh, fea::static_fields(r.solution));
         if (!o.hdf5.empty()) fea::write_hdf5(o.hdf5, r.model.mesh, fea::static_fields(r.solution));
-        if (o.crosscheck) {
+        if (o.crosscheck || o.mfem) {
             fea::Vec load = fea::Vec::Zero(r.model.dofs());
             fea::add_gravity(r.model, load, in.in_plane_shock ? mesh::V3{-o.shock_g * 9810.0, 0, 0} : mesh::V3{0, 0, -o.shock_g * 9810.0});
-            const auto cc = fea::run_calculix_crosscheck(r.model, load, r.solution, fs::temp_directory_path() / "ohs_ccx");
-            j["crosscheck"] = {{"available", cc.available}, {"max_displacement_diff", cc.max_displacement_diff}, {"note", cc.note}};
+            if (o.crosscheck) {
+                const auto cc = fea::run_calculix_crosscheck(r.model, load, r.solution, fs::temp_directory_path() / "ohs_ccx");
+                j["crosscheck"] = {{"available", cc.available}, {"max_displacement_diff", cc.max_displacement_diff}, {"note", cc.note}};
+            }
+            if (o.mfem) {
+                const auto mc = fea::run_mfem_crosscheck(r.model, load, r.solution);
+                j["crosscheck_mfem"] = {{"available", mc.available}, {"max_displacement_diff", mc.max_displacement_diff}, {"note", mc.note}};
+            }
         }
         if (!as_json) {
             std::cout << "shock of " << o.shock_g << " g on " << o.part << " (" << in.material.name << ", " << r.mass_g << " g, " << r.dofs << " dofs; " << r.clamped_holes << " round hole(s) clamped, " << r.free_openings << " opening(s) free)\n"
@@ -216,6 +223,10 @@ int cmd_fea(const FeaOptions& o, bool as_json) {
             if (r.safety_factor > 0) std::cout << ", safety factor " << r.safety_factor;
             std::cout << '\n';
             for (std::size_t k = 0; k < r.frequencies_hz.size(); ++k) std::cout << "mode " << k + 1 << ": " << r.frequencies_hz[k] << " Hz\n";
+            if (j.contains("crosscheck_mfem")) {
+                const auto& mc = j["crosscheck_mfem"];
+                std::cout << "MFEM cross-check: " << (mc["available"].get<bool>() ? "max displacement difference " + std::to_string(mc["max_displacement_diff"].get<double>()) + " (" + mc["note"].get<std::string>() + ")" : mc["note"].get<std::string>()) << '\n';
+            }
             if (j.contains("crosscheck")) {
                 std::cout << "CalculiX cross-check: " << (j["crosscheck"]["available"].get<bool>() ? "max displacement difference " + std::to_string(j["crosscheck"]["max_displacement_diff"].get<double>()) : j["crosscheck"]["note"].get<std::string>()) << '\n';
             }
@@ -281,6 +292,7 @@ void add_fea_commands(CLI::App& app, const bool& json_flag, std::function<int()>
     fea->add_option("--vtu", o->vtu, "Write the result for ParaView");
     fea->add_option("--hdf5", o->hdf5, "Write mesh and fields to an HDF5 file (needs a build with libhdf5)");
     fea->add_flag("--crosscheck", o->crosscheck, "Compare with CalculiX if it is installed");
+    fea->add_flag("--mfem", o->mfem, "Compare with MFEM, an independent finite element code, if this build has it (shock case)");
     fea->add_option("--beat-rate", o->beat_rate, "Beat rate in vph (default: from project)");
     fea->callback(pick(cmd_fea));
 

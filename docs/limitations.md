@@ -14,12 +14,13 @@ know where to be careful.
   again from the beginning on the next open (jobs run in worker processes and are journalled, but the
   solvers do not checkpoint). It is built
   only with `-DOHS_BUILD_GUI=ON`, and has been exercised on Linux only (offscreen scripted test).
-- **Chrono is optional and covers the escapement only; no MFEM or Netgen.** The detailed
+- **Chrono is optional and covers the escapement only; MFEM is a cross-check, no Netgen.** The detailed
   timekeeping model can run on Project Chrono (`-DOHS_WITH_CHRONO=ON`, `--engine chrono`), but as
   two one-degree-of-freedom shafts with the wheel/pallet contact written as a force law, not as
   rigid bodies with collision geometry, and not for the whole train. The finite-element stack and
-  the mesher are OHS's own (ADR 3). An adapter for MFEM and Netgen can sit behind the same
-  interfaces later.
+  the mesher are OHS's own (ADR 3). MFEM (optional, found at configure time) is linked only to
+  re-solve a shock case with its own elements and solver (`ohs fea --mfem`: one material, no ties); it
+  does not replace the solver, and a Netgen adapter does not exist yet.
 - **No general 3D meshing.** Parts are meshed from their mid-height section and extruded; features
   that vary through the thickness are not seen by the mesher or by the DFM rules.
 - **Cycloidal gears** are generated and fitted (one rolling circle for both flanks), but the Lewis

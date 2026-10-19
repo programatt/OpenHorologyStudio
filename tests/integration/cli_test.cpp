@@ -328,6 +328,17 @@ TEST_CASE("ohs structural commands end to end") {
         const auto j2 = nlohmann::json::parse(run("--json fea " + proj + " --part escape_wheel --case shock --size 0.3 --g 2000", dir).output);
         CHECK(j2["max_von_mises_mpa"].get<double>() == Approx(2 * j["max_von_mises_mpa"].get<double>()).epsilon(1e-6));
 
+        // MFEM re-solves the real part (mesh from the section, clamped holes, gravity) with its own elements.
+        const auto m = run("--json fea " + proj + " --part escape_wheel --case shock --size 0.3 --g 1000 --mfem", dir);
+        REQUIRE(m.exit_code == 0);
+        const auto mj = nlohmann::json::parse(m.output);
+        REQUIRE(mj.contains("crosscheck_mfem"));
+        if (mj["crosscheck_mfem"]["available"].get<bool>()) {
+            CHECK(mj["crosscheck_mfem"]["max_displacement_diff"].get<double>() < 1e-6);
+        } else {
+            CHECK(mj["crosscheck_mfem"]["note"].get<std::string>().find("no MFEM support") != std::string::npos);
+        }
+
         CHECK(run("fea " + proj + " --part nope", dir).exit_code == 2);
         CHECK(run("fea " + proj + " --part main_plate", dir).exit_code == 2);                    // no teeth
         CHECK(run("fea " + proj + " --part main_plate --case shock", dir).exit_code == 2);       // too many dofs / no holes
