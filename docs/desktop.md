@@ -37,12 +37,16 @@ ohs-gui movement.hsproj
   file back exactly as it was (the history is snapshots of the file), and the Edit history dock lists
   the steps; click one to return to that state. Opening or importing another project starts a new
   history. Analyses, views and the timeline change no project data and are not part of it.
+- **File, Export video** renders the animation to an MP4 (or WebM or GIF) with ffmpeg, which must be
+  installed (or set `OHS_FFMPEG`): the movement time shown, the length and the frame rate are the
+  options of `ohs-gui project.hsproj --video out.mp4 --movement-seconds 60 --video-seconds 10 --fps 30
+  --size 1280x720` (add `--view`, `--explode`), which renders and exits without opening a window.
 - **File, Save session as script** writes every command you ran as a shell script that repeats it.
 
 ## Not in the window
 
 The viewport draws with Qt's own painter, so it needs no GPU and runs anywhere, but it does not
 have the OpenCASCADE OpenGL viewer, PBR materials, motion trails or force arrows, and there is no
-MP4 export. A job that was running when the window closed starts again from the beginning rather than
+A job that was running when the window closed starts again from the beginning rather than
 carrying on (the solvers do not checkpoint). The only plot is rate against amplitude, and views
 cannot be undone, only edits of the project. Use `ohs animate` for glTF, and `ohs report` for the report. See [Limitations](limitations.md).

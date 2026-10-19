@@ -344,7 +344,8 @@ Six milestones to 1.0, each usable on its own and closed by a gate you check.
 - [x] Project Chrono adapter for the level-3 escapement model (optional build; shafts, not collision bodies)
 - [x] CalculiX cross-check run against a real `ccx` (clamped block, within 1e-3)
 - [x] Chrono half of the M2 gate, on the real OM10 file (0.33 % amplitude, 0.04 s/day)
-- [ ] OpenCASCADE OpenGL / VTK viewport, PBR, motion trails, force arrows, field plots, MP4 export
+- [x] MP4 export (`ohs-gui --video`, via ffmpeg)
+- [ ] OpenCASCADE OpenGL / VTK viewport, PBR, motion trails, force arrows, field plots
 - [x] GUI undo of every project edit (role changes and declared meshes, by file snapshots; views are not undoable)
 - [x] Worker-process job queue that survives restarts and cancels running jobs (journalled; a running job restarts from the beginning, no solver checkpoints)
 - [x] MFEM adapter as an independent cross-check of the static solver (`ohs fea --mfem`)

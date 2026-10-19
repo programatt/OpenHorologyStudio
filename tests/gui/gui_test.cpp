@@ -9,6 +9,9 @@
 #include <QComboBox>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QFileInfo>
+#include <QProcess>
+#include <QStandardPaths>
 #include <QEventLoop>
 #include <QFile>
 #include <QPlainTextEdit>
@@ -373,6 +376,48 @@ TEST_CASE("job queue: unfinished jobs survive a restart and finished ones keep t
     ohs::gui::JobQueue third("/bin/sh");
     CHECK(third.load(journal) == 0);  // nothing left to resume
     CHECK(third.jobs()[2].out == "queued behind\n");
+}
+
+TEST_CASE("gui: the animation is exported as a video whose frames show the train turning", "[gui][video]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_demo(fresh_dir("video")));
+    const QString path = QDir(fresh_dir("video-out")).filePath("train.mp4");
+    ohs::gui::VideoOptions options;
+    options.video_seconds = 1.0;
+    options.fps = 10;
+    options.movement_seconds = 30.0;
+    options.size = QSize(321, 241);  // odd sizes are rounded down to even ones
+    const double time_before = w.viewport()->scene()->time();
+
+    if (ohs::gui::find_ffmpeg().isEmpty()) {
+        CHECK_FALSE(w.export_video(path, options).isEmpty());  // a clear message instead of a crash
+        SKIP("ffmpeg is not available");
+    }
+    const QString error = w.export_video(path, options);
+    REQUIRE(error.isEmpty());
+    CHECK(QFileInfo(path).size() > 1000);
+    CHECK(w.viewport()->scene()->time() == Catch::Approx(time_before));  // the view is left as it was
+
+    // Read the file back: size, and a frame count of the 10 frames asked for.
+    const QString ffprobe = QStandardPaths::findExecutable("ffprobe");
+    if (!ffprobe.isEmpty()) {
+        QProcess probe;
+        probe.start(ffprobe, {"-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries",
+                              "stream=width,height,nb_read_frames,codec_name", "-of", "csv=p=0", path});
+        REQUIRE(probe.waitForFinished(30000));
+        const QString out = QString::fromUtf8(probe.readAllStandardOutput()).trimmed();
+        INFO(out.toStdString());
+        CHECK(out.contains("h264"));
+        CHECK(out.contains("320,240"));
+        CHECK(out.endsWith(",10"));
+    }
+
+    // Unusable requests are reported, not attempted.
+    ohs::gui::VideoOptions bad = options;
+    bad.fps = 0;
+    CHECK_FALSE(w.export_video(QDir(fresh_dir("video-out2")).filePath("x.mp4"), bad).isEmpty());
 }
 
 TEST_CASE("gui: jobs run in worker processes and resume when the project is opened again", "[gui][jobs]") {

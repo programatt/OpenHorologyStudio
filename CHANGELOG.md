@@ -9,6 +9,7 @@ Semantic Versioning, with the Python API and the plugin ABI versioned as describ
 Found by running the plan's gates on the real OM10 file.
 
 ### Added
+- `ohs-gui` exports the animation as a video with ffmpeg (File menu, or `--video out.mp4` on the command line).
 - `ohs fea --case shock --mesher netgen` meshes the whole B-rep with Netgen (out of process, from
   `pip install netgen-mesher`), so features through the thickness are kept; `section` stays the default.
 - `ohs fea --mfem`: the shock case re-solved with MFEM (optional `libmfem`, linked serially) as an

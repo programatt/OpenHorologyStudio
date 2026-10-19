@@ -10,6 +10,7 @@
 #include <QCoreApplication>
 #include <QListWidget>
 #include <QThread>
+#include <QMessageBox>
 #include <QUndoCommand>
 #include <QUndoStack>
 #include <QUndoView>
@@ -182,6 +183,12 @@ void MainWindow::build_ui() {
     file->addAction(tr("&Save session as script..."), this, [this] {
         const QString path = QFileDialog::getSaveFileName(this, tr("Save session"), "session.sh");
         if (!path.isEmpty()) save_script(path);
+    });
+    file->addAction(tr("Export &video (MP4)..."), this, [this] {
+        const QString path = QFileDialog::getSaveFileName(this, tr("Export video"), "movement.mp4", tr("Video (*.mp4 *.webm *.gif)"));
+        if (path.isEmpty()) return;
+        const QString error = export_video(path);
+        if (!error.isEmpty()) QMessageBox::warning(this, tr("Export video"), error);
     });
     file->addSeparator();
     file->addAction(tr("&Quit"), QKeySequence::Quit, this, &QWidget::close);
@@ -480,6 +487,18 @@ void MainWindow::refresh_panels() {
     status_->setText(s);
     timeline_->setEnabled(scene_->can_animate());
     play_->setEnabled(scene_->can_animate());
+}
+
+QString MainWindow::export_video(const QString& path, const VideoOptions& options) {
+    append_log(tr("Exporting %1 (%2 s of video, %3 s of movement time)").arg(path).arg(options.video_seconds).arg(options.movement_seconds));
+    const QString error = gui::export_video(*viewport_, path, options, [this](int frame, int frames) {
+        statusBar()->showMessage(tr("Rendering frame %1 of %2").arg(frame).arg(frames));
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 5);
+        return true;
+    });
+    statusBar()->showMessage(error.isEmpty() ? tr("Wrote %1").arg(path) : error, 8000);
+    append_log(error.isEmpty() ? tr("Wrote %1").arg(path) : tr("Video export failed: %1").arg(error));
+    return error;
 }
 
 void MainWindow::select_part(const QString& name) {

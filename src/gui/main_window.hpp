@@ -13,6 +13,7 @@
 #include "cli/cli_run.hpp"
 #include "gui/job_queue.hpp"
 #include "gui/plot.hpp"
+#include "gui/video.hpp"
 #include "gui/scene.hpp"
 #include "gui/viewport.hpp"
 
@@ -77,6 +78,10 @@ public:
     int unfinished_jobs() const;
     QListWidget* job_list() const { return jobs_; }
     PlotWidget* plot() const { return plot_; }
+
+    /// Renders the animation to a video file with ffmpeg (see export_video in video.hpp). Returns an empty
+    /// string on success, else the reason.
+    QString export_video(const QString& path, const VideoOptions& options = {});
 
     void select_part(const QString& name);
     void set_time(double seconds);
