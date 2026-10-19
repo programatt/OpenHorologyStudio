@@ -15,7 +15,9 @@ The load is the torque of the part's mobile (from the [torque chain](timekeeping
 pitch radius, applied at the tip of one tooth. The model is a sector of three teeth clamped at the
 rim. The output puts the FE root stress next to the **Lewis hand calculation**; the FE value is
 higher by the stress concentration of the root fillet (about 1.5 to 2.2 for a 0.38 module fillet).
-The tooth is an idealised involute with a circular fillet, not the form of your cutter.
+The tooth is an idealised involute (or cycloid, for a wheel fitted as cycloidal) with a circular fillet,
+not the form of your cutter. The Lewis hand calculation uses the involute form factor, so for a
+cycloidal wheel it is only a rough guide.
 
 ## Shock and vibration of a part
 

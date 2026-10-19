@@ -149,6 +149,11 @@ void fit_gears(Movement& m, const RigOptions& o) {
         } else {
             g.profile = "unknown";
         }
+        if (g.profile == "unknown" && f.flank_cycloid_rms >= 0.0 && f.flank_cycloid_rms <= o.cycloid_rms_modules * g.module &&
+            std::abs(f.flank_cycloid_pitch_radius - pitch_radius) <= o.cycloid_pitch_tolerance * pitch_radius) {
+            g.profile = "cycloidal";
+            g.rolling_radius = f.flank_cycloid_rolling_radius / g.module;
+        }
         c.gear = g;
     }
 }

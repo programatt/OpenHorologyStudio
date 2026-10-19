@@ -368,7 +368,17 @@ std::vector<Finding> run_dfm(const ProcessRules& p, const PartGeometry& g) {
                 out.push_back(make(p, g, "min_teeth", Severity::Info, std::to_string(g.teeth) + " teeth", "", g.teeth, limit));
             }
         }
-        if (has("undercut")) {
+        if (has("undercut") && g.rolling_radius > 0) {
+            // A hypocycloid dedendum undercuts when its rolling circle is larger than half the pitch radius.
+            const double zmin = 4.0 * g.rolling_radius;
+            if (g.teeth < zmin) {
+                out.push_back(make(p, g, "undercut", Severity::Warning,
+                                   std::to_string(g.teeth) + " cycloidal teeth undercut at the root below " + num(std::ceil(zmin), 0) + " teeth for a rolling circle of " + num(g.rolling_radius, 2) + " modules",
+                                   "use a smaller rolling circle (the meshing wheel must match), raise the tooth count, or accept the weaker root", g.teeth, zmin));
+            } else {
+                out.push_back(make(p, g, "undercut", Severity::Info, "no undercut above " + num(std::ceil(zmin), 0) + " teeth", "", g.teeth, zmin));
+            }
+        } else if (has("undercut")) {
             const double a = g.pressure_angle_deg * kPi / 180;
             const double zmin = 2.0 / (std::sin(a) * std::sin(a));
             if (g.teeth < zmin) {

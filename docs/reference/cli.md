@@ -33,7 +33,7 @@ Subcommands:
   materials                   List the material catalogue
   thermal                     Rate change per kelvin of a hairspring and balance pair
   fea                         Finite-element check of a part: tooth bending or shock and modes
-  gear                        Generate an involute wheel as STEP, DXF, SVG or PDF drawing
+  gear                        Generate an involute or cycloidal wheel as STEP, DXF, SVG or PDF drawing
   draw                        Dimensioned drawing of one part of a project (SVG, DXF or PDF)
   tolerance                   Monte Carlo tolerance stack-up: backlash, engagement, end and side shake
   dfm                         Design-for-manufacturing rules for your processes
@@ -506,15 +506,17 @@ Options:
 ### `ohs gear`
 
 ```text
-Generate an involute wheel as STEP, DXF, SVG or PDF drawing
+Generate an involute or cycloidal wheel as STEP, DXF, SVG or PDF drawing
 Usage: ohs gear [OPTIONS]
 
 Options:
   -h,--help                   Print this help message and exit
   --teeth INT REQUIRED        Number of teeth
   --module FLOAT REQUIRED     Module in mm
+  --profile TEXT [involute]   Tooth profile: involute or cycloidal
   --pressure-angle FLOAT [20] 
-                              Pressure angle in degrees
+                              Pressure angle in degrees (involute)
+  --rolling-radius FLOAT [3]  Rolling circle radius in modules (cycloidal; wheels that mesh share it)
   --addendum FLOAT [1]        Addendum in modules
   --dedendum FLOAT [1.25]     Dedendum in modules
   --fillet FLOAT [0.38]       Root fillet radius in modules

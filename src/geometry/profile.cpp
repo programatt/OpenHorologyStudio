@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+#include "gear/cycloid.hpp"
+
 namespace ohs::geometry {
 
 namespace {
@@ -155,6 +157,76 @@ FlankFit fit_involute_flank(std::span<const PolarPoint> points, int teeth, doubl
         }
         lo_rb = std::max(rmin * 0.3, best.base_radius - 2 * width);
         hi_rb = std::min(rmin * 0.9999, best.base_radius + 2 * width);
+    }
+    return best;
+}
+
+CycloidFit fit_cycloidal_flank(std::span<const PolarPoint> points, int teeth, double phase,
+                               double root_radius, double tip_radius) {
+    if (teeth < 3 || tip_radius <= root_radius) return {};
+    const double pitch = 2.0 * std::numbers::pi / teeth;
+    const double depth = tip_radius - root_radius;
+    const double lo = root_radius + 0.2 * depth;
+    const double hi = tip_radius - 0.2 * depth;
+
+    std::vector<std::pair<double, double>> flank;  // (r, |angle from tooth centre|)
+    for (const PolarPoint& p : points) {
+        if (p.r < lo || p.r > hi) continue;
+        double u = std::fmod(p.theta - phase, pitch);
+        u -= pitch * std::round(u / pitch);
+        flank.emplace_back(p.r, std::abs(u));
+    }
+    if (flank.size() < 30) return {};
+    constexpr std::size_t kMaxSamples = 400;
+    if (flank.size() > kMaxSamples) {
+        std::vector<std::pair<double, double>> thinned;
+        const double stride = static_cast<double>(flank.size()) / kMaxSamples;
+        for (std::size_t i = 0; i < kMaxSamples; ++i) thinned.push_back(flank[static_cast<std::size_t>(i * stride)]);
+        flank = std::move(thinned);
+    }
+
+    // rms for a pitch radius R and rolling radius rho; false when the flank leaves the curve's range.
+    auto rms_for = [&](double R, double rho, double& rms) {
+        if (rho <= 0.0 || rho >= R || lo < std::abs(R - 2 * rho) * 1.01 || hi > (R + 2 * rho) * 0.99) return false;
+        std::vector<double> x(flank.size());
+        double s0 = 0.0;
+        for (std::size_t i = 0; i < flank.size(); ++i) {
+            const double r = flank[i].first;
+            const double d = gear::cycloid_offset(R, rho, r);
+            x[i] = r >= R ? -d : d;  // flank angle relative to the angle at the pitch circle
+            s0 += flank[i].second - x[i];
+        }
+        s0 /= static_cast<double>(flank.size());
+        double sum = 0.0;
+        for (std::size_t i = 0; i < flank.size(); ++i) {
+            const double e = flank[i].first * (flank[i].second - (s0 + x[i]));
+            sum += e * e;
+        }
+        rms = std::sqrt(sum / static_cast<double>(flank.size()));
+        return true;
+    };
+
+    // Coarse scan of the pitch and rolling radii, then repeated zooming around the best pair.
+    double r_lo = root_radius + 0.25 * depth, r_hi = tip_radius - 0.1 * depth;
+    double p_lo = 0.1, p_hi = 0.95;  // rolling radius as a fraction of the pitch radius
+    CycloidFit best;
+    best.rms = 1e300;
+    for (int pass = 0; pass < 6; ++pass) {
+        constexpr int kSteps = 40;
+        const double dr = (r_hi - r_lo) / (kSteps - 1), dp = (p_hi - p_lo) / (kSteps - 1);
+        for (int i = 0; i < kSteps; ++i) {
+            for (int j = 0; j < kSteps; ++j) {
+                const double R = r_lo + dr * i, frac = p_lo + dp * j;
+                double rms = 0.0;
+                if (rms_for(R, frac * R, rms) && rms < best.rms) best = {true, R, frac * R, rms};
+            }
+        }
+        if (!best.ok) return {};
+        r_lo = std::max(root_radius + 0.25 * depth, best.pitch_radius - 2 * dr);
+        r_hi = std::min(tip_radius - 0.1 * depth, best.pitch_radius + 2 * dr);
+        const double frac = best.rolling_radius / best.pitch_radius;
+        p_lo = std::max(0.1, frac - 2 * dp);
+        p_hi = std::min(0.95, frac + 2 * dp);
     }
     return best;
 }

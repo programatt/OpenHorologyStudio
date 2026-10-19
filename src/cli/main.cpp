@@ -160,6 +160,7 @@ int cmd_rig_check(const Options& o) {
             if (c.gear) {
                 std::cout << "  m=" << c.gear->module << " " << c.gear->profile;
                 if (c.gear->profile == "involute") std::cout << " " << std::setprecision(3) << c.gear->pressure_angle_deg << "deg";
+                if (c.gear->profile == "cycloidal") std::cout << " rolling " << std::setprecision(3) << c.gear->rolling_radius << "m";
             }
             std::cout << '\n';
         }

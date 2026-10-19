@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "core/error.hpp"
+#include "gear/cycloid.hpp"
 
 namespace ohs::gear {
 
@@ -21,21 +22,36 @@ P2 rotate(const P2& p, double a) { return {p.x * std::cos(a) - p.y * std::sin(a)
 
 P2 polar(double r, double a) { return {r * std::cos(a), r * std::sin(a)}; }
 
+/// Half the angular tooth thickness at radius r (r >= the root radius), either profile.
+double half_angle(const GearSpec& s, double r) {
+    if (s.profile == Profile::Cycloidal) return cycloidal_half_angle(s.teeth, s.pitch_radius(), s.rolling_radius * s.module, r);
+    const double rb = s.base_radius();
+    return kPi / (2 * s.teeth) + inv(s.pressure_angle_deg * kPi / 180) - inv(std::acos(std::min(rb / r, 1.0)));
+}
+
 void validate(const GearSpec& s) {
     if (s.teeth < 6) throw Error("a gear needs at least 6 teeth");
     if (s.module <= 0) throw Error("the module must be positive");
     if (s.pressure_angle_deg <= 0 || s.pressure_angle_deg >= 45) throw Error("the pressure angle must be between 0 and 45 degrees");
     if (s.root_radius() <= s.bore_radius) throw Error("the bore reaches the tooth roots");
+    if (s.profile == Profile::Cycloidal) {
+        const double R = s.pitch_radius(), rho = s.rolling_radius * s.module;
+        if (rho <= 0 || rho >= R) throw Error("the rolling circle must be smaller than the pitch circle");
+        if (s.tip_radius() > R + 1.98 * rho) throw Error("the addendum reaches the epicycloid's cusp: use a larger rolling circle or a smaller addendum");
+        if (s.root_radius() < std::abs(R - 2 * rho) * 1.02) throw Error("the dedendum reaches the hypocycloid's cusp: use a smaller rolling circle or a smaller dedendum");
+    }
 }
 
 /// One tooth, centred on angle 0: right-hand root tangent point, fillet, flank to the tip.
 std::vector<P2> right_side(const GearSpec& s) {
     const double rp = s.pitch_radius(), rb = s.base_radius(), rt = s.tip_radius(), rr = s.root_radius();
-    if (rt <= rb) throw Error("the tip circle lies inside the base circle");
-    auto phi = [&](double r) { return kPi / (2 * s.teeth) + inv(s.pressure_angle_deg * kPi / 180) - inv(std::acos(std::min(rb / r, 1.0))); };
+    // Involute flanks start at the base circle (below it the flank runs radially); cycloids have none.
+    const double rb_flank = s.profile == Profile::Involute ? rb : 0.0;
+    if (s.profile == Profile::Involute && rt <= rb) throw Error("the tip circle lies inside the base circle");
+    auto phi = [&](double r) { return half_angle(s, r); };
     if (phi(rt) <= 0) throw Error("the teeth are pointed: reduce the addendum or the pressure angle");
     // Below the base circle the "flank" runs radially at the angle where the involute starts.
-    auto flank = [&](double r) { return polar(r, -phi(std::max(r, rb))); };
+    auto flank = [&](double r) { return polar(r, -phi(std::max(r, rb_flank))); };
 
     const double lo = rr + 1e-6 * s.module;
     std::vector<P2> pts;
@@ -91,8 +107,8 @@ std::vector<P2> right_side(const GearSpec& s) {
         pts.push_back(flank(rr));
     }
     // The corner where the radial run-out meets the involute at the base circle.
-    if (r_start < rb - 1e-9) pts.push_back(flank(rb));
-    const double r_from = std::max(r_start, rb);
+    if (r_start < rb_flank - 1e-9) pts.push_back(flank(rb_flank));
+    const double r_from = std::max(r_start, rb_flank);
     for (int j = 1; j <= s.points_per_flank; ++j) {
         // Denser near the root where the curvature is highest.
         const double t = static_cast<double>(j) / s.points_per_flank;
@@ -114,10 +130,7 @@ std::vector<P2> tooth(const GearSpec& s, const std::vector<P2>& right) {
 
 double GearSpec::base_radius() const { return pitch_radius() * std::cos(pressure_angle_deg * kPi / 180); }
 
-double half_tooth_angle(const GearSpec& s, double r) {
-    const double rb = s.base_radius();
-    return kPi / (2 * s.teeth) + inv(s.pressure_angle_deg * kPi / 180) - inv(std::acos(std::min(rb / r, 1.0)));
-}
+double half_tooth_angle(const GearSpec& s, double r) { return half_angle(s, r); }
 
 namespace {
 

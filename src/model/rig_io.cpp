@@ -31,6 +31,11 @@ toml::table component_to_table(const Component& c) {
     t.insert("bore_radius", f.bore_radius);
     t.insert("flank_base_radius", f.flank_base_radius);
     t.insert("flank_rms", f.flank_rms);
+    if (f.flank_cycloid_rms >= 0) {
+        t.insert("flank_cycloid_rms", f.flank_cycloid_rms);
+        t.insert("flank_cycloid_pitch_radius", f.flank_cycloid_pitch_radius);
+        t.insert("flank_cycloid_rolling_radius", f.flank_cycloid_rolling_radius);
+    }
     t.insert("volume", f.volume);
     // TOML integers are signed 64-bit, so store the fingerprint as hex text.
     std::ostringstream fp;
@@ -46,6 +51,7 @@ toml::table component_to_table(const Component& c) {
         gt.insert("base_radius", g.base_radius);
         gt.insert("pressure_angle_deg", g.pressure_angle_deg);
         gt.insert("profile", g.profile);
+        if (g.rolling_radius > 0) gt.insert("rolling_radius", g.rolling_radius);
         t.insert("gear", std::move(gt));
     }
     return t;
@@ -86,6 +92,9 @@ Component component_from_table(const toml::table& t) {
     f.bore_radius = number(t, "bore_radius");
     f.flank_base_radius = number(t, "flank_base_radius");
     f.flank_rms = number(t, "flank_rms", -1.0);
+    f.flank_cycloid_rms = number(t, "flank_cycloid_rms", -1.0);
+    f.flank_cycloid_pitch_radius = number(t, "flank_cycloid_pitch_radius");
+    f.flank_cycloid_rolling_radius = number(t, "flank_cycloid_rolling_radius");
     f.volume = number(t, "volume");
     const std::string fp = t["fingerprint"].value_or(std::string{"0"});
     f.fingerprint = std::stoull(fp, nullptr, 16);
@@ -98,6 +107,7 @@ Component component_from_table(const toml::table& t) {
         g.base_radius = number(*gt, "base_radius");
         g.pressure_angle_deg = number(*gt, "pressure_angle_deg");
         g.profile = (*gt)["profile"].value_or(std::string{});
+        g.rolling_radius = number(*gt, "rolling_radius");
         c.gear = g;
     }
     return c;

@@ -382,6 +382,18 @@ TEST_CASE("wheel-cutting rules: cutter module, tooth counts, undercut, pinion le
     w.pressure_angle_deg = 25;  // a steeper profile undercuts less
     CHECK(find(run_dfm(wc, w), "undercut").severity == Severity::Info);
 
+    // A cycloidal tooth undercuts below four times its rolling circle in modules (12 teeth for 3 modules).
+    w.rolling_radius = 3.0;
+    w.teeth = 11;
+    const auto cyc_findings = run_dfm(wc, w);
+    const Finding& cu = find(cyc_findings, "undercut");
+    CHECK(cu.severity == Severity::Warning);
+    CHECK(cu.limit == Approx(12.0));
+    CHECK_THAT(cu.message, ContainsSubstring("cycloidal"));
+    w.teeth = 12;
+    CHECK(find(run_dfm(wc, w), "undercut").severity == Severity::Info);
+    w.rolling_radius = 0;
+
     PartGeometry pinion = w;
     pinion.role = model::Role::Pinion;
     pinion.teeth = 5;

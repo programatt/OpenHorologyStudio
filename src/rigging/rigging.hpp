@@ -28,6 +28,10 @@ struct RigOptions {
     double ideal_clearance = 0.25;
     /// A flank fits an involute when its rms deviation is below this many modules.
     double involute_rms_modules = 0.02;
+    /// A flank that is not an involute is cycloidal when its cycloid fit is within this many modules
+    /// and the fitted pitch circle is within `cycloid_pitch_tolerance` of the one the module gives.
+    double cycloid_rms_modules = 0.02;
+    double cycloid_pitch_tolerance = 0.04;
     int min_teeth = 6;                ///< toothed parts need at least this many detected teeth
     double beat_rate_vph = 0.0;
     std::vector<RolePreset> presets;

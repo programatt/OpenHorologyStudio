@@ -5,12 +5,21 @@
 
 namespace ohs::gear {
 
-/// A spur gear with involute teeth, in the dial plane, centred on the origin with tooth 0 on the
-/// +x axis. (Cycloidal horological profiles follow the same interface later.)
+enum class Profile {
+    Involute,
+    Cycloidal,  ///< epicycloid addendum and hypocycloid dedendum, the traditional horological tooth
+};
+
+/// A spur gear in the dial plane, centred on the origin with tooth 0 on the +x axis.
 struct GearSpec {
     int teeth = 24;
     double module = 1.0;            ///< pitch diameter / teeth, mm
-    double pressure_angle_deg = 20;
+    Profile profile = Profile::Involute;
+    double pressure_angle_deg = 20;   ///< involute only
+    /// Cycloidal only: radius of the rolling circles that generate both flanks, in modules. Two wheels
+    /// that mesh must share it. 3 modules (half the pitch radius of a 12-tooth wheel) is the usual
+    /// choice: it gives a 12-tooth pinion radial dedendum flanks.
+    double rolling_radius = 3.0;
     double addendum = 1.0;          ///< in modules
     double dedendum = 1.25;         ///< in modules
     double root_fillet = 0.38;      ///< in modules; 0 gives a sharp root corner
@@ -19,7 +28,7 @@ struct GearSpec {
     int points_per_fillet = 8;
 
     double pitch_radius() const { return 0.5 * module * teeth; }
-    double base_radius() const;
+    double base_radius() const;  ///< involute base circle; meaningless for a cycloidal profile
     double tip_radius() const { return pitch_radius() + addendum * module; }
     double root_radius() const { return pitch_radius() - dedendum * module; }
 };

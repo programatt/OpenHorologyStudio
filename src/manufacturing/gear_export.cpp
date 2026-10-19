@@ -110,7 +110,11 @@ report::Drawing gear_profile(const gear::GearSpec& spec) {
 
 std::vector<std::string> gear_info(const gear::GearSpec& s, const DrawingNotes& n) {
     std::vector<std::string> info;
-    info.push_back("Spur gear, involute: " + std::to_string(s.teeth) + " teeth, module " + num(s.module, 4) + ", pressure angle " + num(s.pressure_angle_deg, 1) + " deg");
+    if (s.profile == gear::Profile::Cycloidal) {
+        info.push_back("Spur gear, cycloidal: " + std::to_string(s.teeth) + " teeth, module " + num(s.module, 4) + ", rolling circle radius " + num(s.rolling_radius * s.module, 4));
+    } else {
+        info.push_back("Spur gear, involute: " + std::to_string(s.teeth) + " teeth, module " + num(s.module, 4) + ", pressure angle " + num(s.pressure_angle_deg, 1) + " deg");
+    }
     info.push_back("Tip diameter " + num(2 * s.tip_radius()) + " +-" + num(n.tolerance_diameter, 3) + ", pitch diameter " + num(2 * s.pitch_radius()) + ", root diameter " + num(2 * s.root_radius()) +
                    (s.bore_radius > 0 ? ", bore " + num(2 * s.bore_radius) : ""));
     info.push_back("Thickness " + num(n.thickness) + (n.material.empty() ? "" : ", material " + n.material) + ", root fillet " + num(s.root_fillet * s.module, 3));

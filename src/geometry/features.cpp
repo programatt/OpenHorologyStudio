@@ -158,6 +158,16 @@ model::PartFeatures extract_features(const ImportedPart& part, const FeatureOpti
             f.flank_base_radius = fit.base_radius;
             f.flank_rms = fit.rms;
         }
+        // A flank the involute does not explain (more than about 0.02 module off) may be cycloidal.
+        const double depth = f.outer_radius - root;
+        if (!fit.ok || fit.rms > 0.008 * depth) {
+            const CycloidFit cyc = fit_cycloidal_flank(outline.points, f.teeth, phase, root, f.outer_radius);
+            if (cyc.ok) {
+                f.flank_cycloid_rms = cyc.rms;
+                f.flank_cycloid_pitch_radius = cyc.pitch_radius;
+                f.flank_cycloid_rolling_radius = cyc.rolling_radius;
+            }
+        }
     }
     return f;
 }

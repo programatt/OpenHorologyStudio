@@ -149,3 +149,105 @@ TEST_CASE("verification: FE tooth root stress against the Lewis formula") {
     CHECK(std::hypot(at.x, at.y) < s.pitch_radius() - 0.8 * s.module);
     CHECK(at.y < 0);
 }
+
+namespace {
+
+bool inside(const mesh::Ring& ring, double x, double y) {
+    bool in = false;
+    for (std::size_t i = 0, j = ring.size() - 1; i < ring.size(); j = i++) {
+        if ((ring[i].y > y) != (ring[j].y > y) && x < (ring[j].x - ring[i].x) * (y - ring[i].y) / (ring[j].y - ring[i].y) + ring[i].x) in = !in;
+    }
+    return in;
+}
+
+mesh::Ring moved(const mesh::Ring& ring, double turn, double dx) {
+    mesh::Ring out;
+    for (const auto& p : ring) out.push_back({dx + p.x * std::cos(turn) - p.y * std::sin(turn), p.x * std::sin(turn) + p.y * std::cos(turn)});
+    return out;
+}
+
+// Area (mm^2) covered by both wheels, by sampling the strip between the two pitch circles' contact zone.
+double overlap_area(const mesh::Ring& a, const mesh::Ring& b, double x0, double x1, double y0, double y1, int n) {
+    double count = 0;
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < n; ++j) {
+            const double x = x0 + (x1 - x0) * (i + 0.5) / n, y = y0 + (y1 - y0) * (j + 0.5) / n;
+            if (inside(a, x, y) && inside(b, x, y)) ++count;
+        }
+    }
+    return count * (x1 - x0) * (y1 - y0) / (static_cast<double>(n) * n);
+}
+
+GearSpec cycloidal(int teeth, double module = 0.2) {
+    GearSpec s;
+    s.teeth = teeth;
+    s.module = module;
+    s.profile = Profile::Cycloidal;
+    s.root_fillet = 0.2;
+    return s;
+}
+
+}  // namespace
+
+TEST_CASE("cycloidal tooth: thickness at the pitch circle, monotone flank, radial dedendum at 12 teeth") {
+    const GearSpec s = cycloidal(30, 1.0);
+    const double R = s.pitch_radius();
+    CHECK(half_tooth_angle(s, R) == Approx(kPi / 60).epsilon(1e-9));  // tooth = gap = half the pitch
+    double prev = half_tooth_angle(s, s.root_radius());
+    for (int i = 1; i <= 100; ++i) {
+        const double r = s.root_radius() + (s.tip_radius() - s.root_radius()) * i / 100;
+        const double h = half_tooth_angle(s, r);
+        CHECK(h < prev);  // the tooth narrows from root to tip
+        prev = h;
+    }
+    CHECK(prev > 0);
+
+    // A rolling circle of half the pitch radius makes the dedendum flank a diameter: constant angle.
+    GearSpec twelve = cycloidal(12, 1.0);
+    for (double r : {twelve.root_radius() + 1e-3, 4.0, 5.5})  CHECK(half_tooth_angle(twelve, r) == Approx(kPi / 24).epsilon(1e-6));
+
+    const mesh::Ring ring = outline(s);
+    CHECK(polygon_area(ring) > 0);
+    double rmin = 1e9, rmax = 0;
+    for (const auto& p : ring) {
+        rmin = std::min(rmin, std::hypot(p.x, p.y));
+        rmax = std::max(rmax, std::hypot(p.x, p.y));
+    }
+    CHECK(rmin == Approx(s.root_radius()).epsilon(1e-6));
+    CHECK(rmax == Approx(s.tip_radius()).epsilon(1e-6));
+}
+
+TEST_CASE("cycloidal wheel and pinion with one rolling circle mesh without overlap at every phase") {
+    const GearSpec wheel = cycloidal(30), pinion = cycloidal(10);
+    const double cd = wheel.pitch_radius() + pinion.pitch_radius();
+    const mesh::Ring a = outline(wheel);
+    const mesh::Ring b0 = outline(pinion);
+    // Wheel turns by t, the pinion by the ratio the other way; the pinion starts with a gap on the line of centres.
+    const double pitch_a = 2 * kPi / wheel.teeth, pitch_b = 2 * kPi / pinion.teeth;
+    const double tooth_area = polygon_area(b0) / pinion.teeth;
+    double worst = 0.0;
+    for (int k = 0; k < 24; ++k) {
+        const double t = pitch_a * k / 24.0;
+        const mesh::Ring wa = moved(a, t, 0.0);
+        const mesh::Ring pb = moved(b0, kPi + pitch_b / 2 - t * wheel.teeth / pinion.teeth, cd);
+        worst = std::max(worst, overlap_area(wa, pb, cd - pinion.tip_radius() - 0.1, wheel.tip_radius() + 0.1, -0.7 * cd / 3, 0.7 * cd / 3, 300));
+    }
+    CHECK(worst < 0.03 * tooth_area);
+
+    // A pinion turned half a pitch off (tooth into tooth) must overlap, or the test would pass for nothing.
+    const mesh::Ring bad = moved(b0, kPi, cd);
+    const mesh::Ring wa = moved(a, 0.0, 0.0);
+    CHECK(overlap_area(wa, bad, cd - pinion.tip_radius() - 0.1, wheel.tip_radius() + 0.1, -0.7 * cd / 3, 0.7 * cd / 3, 300) > 0.2 * tooth_area);
+}
+
+TEST_CASE("cycloidal specifications that cannot be made are refused") {
+    GearSpec s = cycloidal(30, 1.0);
+    s.rolling_radius = 20.0;  // bigger than the pitch circle
+    CHECK_THROWS_AS(outline(s), Error);
+    s = cycloidal(30, 1.0);
+    s.addendum = 7.0;  // beyond the epicycloid's cusp at 2 rho
+    CHECK_THROWS_AS(outline(s), Error);
+    s = cycloidal(30, 1.0);
+    s.rolling_radius = 14.5;  // the hypocycloid cusp (at 14 mm) lies above the 13.75 mm root
+    CHECK_THROWS_AS(outline(s), Error);
+}

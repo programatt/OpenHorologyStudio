@@ -25,6 +25,7 @@ struct PartGeometry {
     int teeth{};
     double module{};
     double pressure_angle_deg{20};
+    double rolling_radius{};  ///< in modules; > 0 marks a cycloidal profile
 };
 
 struct Finding {

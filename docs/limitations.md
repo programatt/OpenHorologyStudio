@@ -21,7 +21,9 @@ know where to be careful.
   interfaces later.
 - **No general 3D meshing.** Parts are meshed from their mid-height section and extruded; features
   that vary through the thickness are not seen by the mesher or by the DFM rules.
-- **No cycloidal gear profiles.** Gears are fitted and generated as involutes.
+- **Cycloidal gears** are generated and fitted (one rolling circle for both flanks), but the Lewis
+  hand calculation and the tolerance stack-up's contact ratio use involute formulas, and a cycloid
+  fit is only tried for flanks the involute fit rejects.
 - **Escapements:** the Swiss lever only. The architecture is ready for others.
 - **No STEP PMI tolerances:** they come from a TOML table. HDF5 (`ohs fea --hdf5`) holds the
   structural fields only; the timekeeping results are JSON and CSV.

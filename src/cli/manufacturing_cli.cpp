@@ -36,7 +36,7 @@ constexpr int kExitCheckFailed = 1;
 
 struct MfgOptions {
     std::string project, part, step_override, up, out, rules_file, process = "mill,wheel-cutting", tolerance_file, calibre_file, material = "brass_leaded";
-    std::string out_step, out_dxf, out_svg, out_pdf, name = "gear", formats = "html,pdf";
+    std::string out_step, out_dxf, out_svg, out_pdf, name = "gear", formats = "html,pdf", gear_profile = "involute";
     std::vector<std::string> plugins;
     gear::GearSpec gear;
     double thickness = 0.5, beat_rate = 0, fail_above = 0.02;
@@ -90,15 +90,19 @@ std::vector<geometry::ImportedPart> load_parts(const MfgOptions& o, const model:
     return geometry::import_cad(step);
 }
 
-int cmd_gear(const MfgOptions& o, bool as_json) {
+int cmd_gear(const MfgOptions& options, bool as_json) {
+    MfgOptions o = options;
+    if (o.gear_profile == "involute") o.gear.profile = gear::Profile::Involute;
+    else if (o.gear_profile == "cycloidal") o.gear.profile = gear::Profile::Cycloidal;
+    else throw Error("--profile must be involute or cycloidal");
     if (o.out_step.empty() && o.out_dxf.empty() && o.out_svg.empty() && o.out_pdf.empty()) throw Error("give at least one of --step-out, --dxf, --svg, --pdf");
     manufacturing::DrawingNotes notes;
     notes.title = o.name;
     notes.thickness = o.thickness;
     notes.material = o.material;
     const auto info = manufacturing::gear_info(o.gear, notes);
-    json j = {{"teeth", o.gear.teeth}, {"module", o.gear.module}, {"pressure_angle_deg", o.gear.pressure_angle_deg}, {"tip_diameter", 2 * o.gear.tip_radius()},
-              {"pitch_diameter", 2 * o.gear.pitch_radius()}, {"root_diameter", 2 * o.gear.root_radius()}, {"base_diameter", 2 * o.gear.base_radius()},
+    json j = {{"teeth", o.gear.teeth}, {"module", o.gear.module}, {"profile", o.gear_profile}, {"pressure_angle_deg", o.gear.pressure_angle_deg}, {"tip_diameter", 2 * o.gear.tip_radius()},
+              {"pitch_diameter", 2 * o.gear.pitch_radius()}, {"root_diameter", 2 * o.gear.root_radius()}, {"base_diameter", o.gear.profile == gear::Profile::Involute ? 2 * o.gear.base_radius() : 0.0},
               {"thickness", o.thickness}, {"outputs", json::array()}};
     if (!o.out_step.empty()) {
         manufacturing::export_gear_step(o.gear, o.thickness, o.name, o.out_step);
@@ -240,6 +244,7 @@ int cmd_dfm(const MfgOptions& o, bool as_json) {
         g.teeth = c.features.teeth;
         g.module = c.gear ? c.gear->module : 0.0;
         if (c.gear && c.gear->pressure_angle_deg > 5) g.pressure_angle_deg = c.gear->pressure_angle_deg;
+        if (c.gear && c.gear->profile == "cycloidal") g.rolling_radius = c.gear->rolling_radius;
         try {
             g.region = geometry::section_region(geometry::orient_dial_axis_to_z(found->shape, axis_of(o.up, m)), 0.5 * (c.features.z_min + c.features.z_max), 0.002, 0.002);
         } catch (const Error&) {
@@ -351,10 +356,12 @@ void add_manufacturing_commands(CLI::App& app, const bool& json_flag, std::funct
         cmd->add_option("--up", o->up, "CAD axis normal to the dial (default: the one found at import)");
     };
 
-    auto* g = app.add_subcommand("gear", "Generate an involute wheel as STEP, DXF, SVG or PDF drawing");
+    auto* g = app.add_subcommand("gear", "Generate an involute or cycloidal wheel as STEP, DXF, SVG or PDF drawing");
     g->add_option("--teeth", o->gear.teeth, "Number of teeth")->required();
     g->add_option("--module", o->gear.module, "Module in mm")->required();
-    g->add_option("--pressure-angle", o->gear.pressure_angle_deg, "Pressure angle in degrees")->capture_default_str();
+    g->add_option("--profile", o->gear_profile, "Tooth profile: involute or cycloidal")->capture_default_str();
+    g->add_option("--pressure-angle", o->gear.pressure_angle_deg, "Pressure angle in degrees (involute)")->capture_default_str();
+    g->add_option("--rolling-radius", o->gear.rolling_radius, "Rolling circle radius in modules (cycloidal; wheels that mesh share it)")->capture_default_str();
     g->add_option("--addendum", o->gear.addendum, "Addendum in modules")->capture_default_str();
     g->add_option("--dedendum", o->gear.dedendum, "Dedendum in modules")->capture_default_str();
     g->add_option("--fillet", o->gear.root_fillet, "Root fillet radius in modules")->capture_default_str();

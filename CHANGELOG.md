@@ -9,6 +9,9 @@ Semantic Versioning, with the Python API and the plugin ABI versioned as describ
 Found by running the plan's gates on the real OM10 file.
 
 ### Added
+- Cycloidal gear profiles: `ohs gear --profile cycloidal --rolling-radius`, a cycloid flank fit on
+  import (`profile = "cycloidal"` and `rolling_radius` in the project file), Explain, DFM undercut
+  and the tooth-bending case follow the profile.
 - `ohs import` and every command that re-reads the CAD file accept IGES (`.igs`, `.iges`) and DXF
   (`.dxf`) as well as STEP; `geometry::import_cad` dispatches by extension.
 - `ohs animate -o file.usda` exports the animation as OpenUSD text; the glTF and USD writers share

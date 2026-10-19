@@ -54,6 +54,9 @@ struct PartFeatures {
     double bore_radius{};   ///< 0 when the part has no central bore
     double flank_base_radius{};  ///< base circle of the best-fit involute flank (0 if no fit)
     double flank_rms{-1};        ///< rms distance of the flank from that fit in mm (-1 if no fit)
+    double flank_cycloid_rms{-1};          ///< rms distance from the best cycloidal fit (-1 if not tried or no fit)
+    double flank_cycloid_pitch_radius{};   ///< pitch circle of that fit, mm
+    double flank_cycloid_rolling_radius{}; ///< rolling circle of that fit, mm
     int teeth{};            ///< 0 when no toothing was detected
     double tooth_confidence{};
     std::uint64_t fingerprint{};
@@ -69,7 +72,8 @@ struct GearFit {
     double dedendum{};          ///< dedendum depth in modules
     double base_radius{};       ///< 0 when the flank fit failed
     double pressure_angle_deg{};
-    std::string profile;        ///< "involute" or "unknown"
+    double rolling_radius{};    ///< rolling circle in modules; cycloidal profiles only
+    std::string profile;        ///< "involute", "cycloidal" or "unknown"
 };
 
 struct Component {

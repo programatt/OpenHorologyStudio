@@ -42,7 +42,10 @@ What `import` does, in order:
 3. **Infer meshes**: two toothed parts whose pitch circles are tangent within tolerance, with
    plausible addendum and dedendum for the module taken from the centre distance.
 4. **Fit gear parameters**: module, addendum, dedendum, and whether the flank is an involute (with
-   its base circle and pressure angle). Cycloidal flanks are not fitted yet.
+   its base circle and pressure angle) or a cycloid (with its rolling circle). A flank is called
+   cycloidal only when the involute fit fails, the cycloid fit is within 0.02 module and its pitch
+   circle agrees with the one the module gives. Wheels with very many teeth are nearly the same in
+   both profiles and are reported as involute.
 5. **Score** every inference.
 
 !!! note "Fused wheels and pinions"

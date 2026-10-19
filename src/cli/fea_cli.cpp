@@ -123,6 +123,10 @@ int cmd_fea(const FeaOptions& o, bool as_json) {
         in.spec.teeth = comp.features.teeth;
         in.spec.module = comp.gear && comp.gear->module > 0 ? comp.gear->module : model::module_from_tip(comp.features.outer_radius, comp.features.teeth);
         if (comp.gear && comp.gear->pressure_angle_deg > 5) in.spec.pressure_angle_deg = comp.gear->pressure_angle_deg;
+        if (comp.gear && comp.gear->profile == "cycloidal") {
+            in.spec.profile = gear::Profile::Cycloidal;
+            in.spec.rolling_radius = comp.gear->rolling_radius;
+        }
         in.spec.bore_radius = comp.features.bore_radius;
         in.face_width = comp.features.thickness();
         in.size_factor = o.size_factor;

@@ -35,4 +35,18 @@ struct FlankFit {
 FlankFit fit_involute_flank(std::span<const PolarPoint> points, int teeth, double phase,
                             double root_radius, double tip_radius);
 
+struct CycloidFit {
+    bool ok{false};
+    double pitch_radius{};    ///< pitch circle of the best-fit cycloidal flank
+    double rolling_radius{};  ///< radius of the circle that rolls to generate both flanks
+    double rms{};             ///< rms distance of the sampled flank from the fit, in the outline's units
+};
+
+/// Fits a cycloidal flank (epicycloid above the pitch circle, hypocycloid below, one rolling circle)
+/// to the middle 60 % of the tooth depth, with the pitch radius and the rolling radius free. It is
+/// meant for flanks the involute fit does not explain; a free pitch radius can make nearly any smooth
+/// flank fit, so callers should check the fitted pitch radius against the module they trust.
+CycloidFit fit_cycloidal_flank(std::span<const PolarPoint> points, int teeth, double phase,
+                               double root_radius, double tip_radius);
+
 }  // namespace ohs::geometry

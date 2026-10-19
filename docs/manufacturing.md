@@ -13,8 +13,12 @@ view with tip, pitch, root and bore circles, a side view with the thickness, and
 cutter set-up needs. The PDF is at the largest standard scale that fits the sheet. `--profile-only`
 writes just the outline and bore, without annotation, for laser, wire or wheel-cutting set-up.
 
-The profile is an involute with a circular root fillet (`--fillet`, in modules). Cycloidal
-horological profiles are not generated yet.
+The profile is an involute with a circular root fillet (`--fillet`, in modules). `--profile cycloidal`
+generates the traditional horological tooth instead: an epicycloid addendum and a hypocycloid
+dedendum, both traced by a rolling circle of `--rolling-radius` modules (default 3, which gives a
+12-tooth pinion radial dedendum flanks). The wheel and pinion of a mesh must be cut with the same
+rolling radius; the generator is checked by meshing a 30-tooth wheel with a 10-tooth pinion and
+finding no overlap at any phase.
 
 ## Draw a part of your project
 
@@ -70,7 +74,7 @@ end mills you own, the cutter modules you have, minimum wall). Copy it, edit it,
 | `min_wall` | thinnest wall across material |
 | `module_cutter` | the module is within a tolerance of a cutter you own |
 | `min_teeth`, `pinion_leaves` | tooth and leaf counts |
-| `undercut` | involute undercut below 2 / sin^2(alpha) teeth |
+| `undercut` | involute undercut below 2 / sin^2(alpha) teeth; cycloidal undercut below 4 rolling radii (in modules) |
 | `jewel_fit` | press-fit interference of jewel seats, 4 to 20 um by default |
 
 Every rule reports a finding, passes included; errors name a fix. Exit code 1 when any rule

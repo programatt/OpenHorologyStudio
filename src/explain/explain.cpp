@@ -65,8 +65,10 @@ PartExplanation explain_part(const Movement& m, const kinematics::TrainAnalysis&
         fact("addendum " + num(g.addendum, 3) + " m, dedendum " + num(g.dedendum, 3) + " m");
         if (g.profile == "involute") {
             fact("involute flank, pressure angle " + num(g.pressure_angle_deg, 3) + " deg");
+        } else if (g.profile == "cycloidal") {
+            fact("cycloidal flank, rolling circle " + num(g.rolling_radius, 2) + " m (a wheel meshing with it needs the same one)");
         } else {
-            fact("flank is not a recognisable involute (cycloidal or unfitted)");
+            fact("flank is neither a recognisable involute nor a cycloid (unfitted)");
         }
     }
 

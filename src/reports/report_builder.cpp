@@ -229,6 +229,7 @@ report::Document build_report(const model::Movement& m, const ReportOptions& o) 
             g.teeth = c.features.teeth;
             g.module = c.gear ? c.gear->module : 0.0;
             if (c.gear && c.gear->pressure_angle_deg > 5) g.pressure_angle_deg = c.gear->pressure_angle_deg;
+            if (c.gear && c.gear->profile == "cycloidal") g.rolling_radius = c.gear->rolling_radius;
             try {
                 g.region = geometry::section_region(geometry::orient_dial_axis_to_z(found->shape, o.up), 0.5 * (c.features.z_min + c.features.z_max), 0.001, 0.002);
             } catch (const Error&) {
@@ -378,6 +379,10 @@ report::Document build_report(const model::Movement& m, const ReportOptions& o) 
                         job.input.spec.teeth = c.features.teeth;
                         job.input.spec.module = c.gear && c.gear->module > 0 ? c.gear->module : model::module_from_tip(c.features.outer_radius, c.features.teeth);
                         if (c.gear && c.gear->pressure_angle_deg > 5) job.input.spec.pressure_angle_deg = c.gear->pressure_angle_deg;
+                        if (c.gear && c.gear->profile == "cycloidal") {
+                            job.input.spec.profile = gear::Profile::Cycloidal;
+                            job.input.spec.rolling_radius = c.gear->rolling_radius;
+                        }
                         job.input.spec.bore_radius = c.features.bore_radius;
                         job.input.face_width = c.features.thickness();
                         job.input.tangential_load_n = torque / job.input.spec.pitch_radius();
