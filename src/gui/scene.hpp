@@ -4,6 +4,7 @@
 #include <array>
 #include <filesystem>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "geometry/features.hpp"
@@ -121,7 +122,7 @@ private:
     kinematics::TrainAnalysis train_;
     std::vector<ScenePart> parts_;
     std::string train_error_;
-    std::vector<std::string> hidden_;
+    std::unordered_set<std::string> hidden_;  ///< looked up for every part on every frame
     double time_{0};
     bool stepped_{false};
     double explode_{0};

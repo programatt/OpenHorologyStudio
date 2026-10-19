@@ -31,6 +31,7 @@ class QTabWidget;
 class QTimer;
 class QThread;
 class QTreeWidget;
+class QTreeWidgetItem;
 
 namespace ohs::gui {
 
@@ -129,7 +130,7 @@ private slots:
     void on_demo();
     void on_timeline(int value);
     void on_view_changed();
-    void on_tree_changed();
+    void on_tree_changed(QTreeWidgetItem* item);
     void on_tree_selected();
     void on_run_analysis();
     void on_apply_role();

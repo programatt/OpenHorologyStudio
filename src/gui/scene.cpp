@@ -141,13 +141,12 @@ bool Scene::reload_rig(const std::filesystem::path& project, double beat_rate_vp
 }
 
 void Scene::set_visible(const std::string& part, bool visible) {
-    const auto it = std::find(hidden_.begin(), hidden_.end(), part);
-    if (visible && it != hidden_.end()) hidden_.erase(it);
-    if (!visible && it == hidden_.end()) hidden_.push_back(part);
+    if (visible) hidden_.erase(part);
+    else hidden_.insert(part);
 }
 
 bool Scene::visible(const std::string& part) const {
-    return std::find(hidden_.begin(), hidden_.end(), part) == hidden_.end();
+    return hidden_.empty() || !hidden_.contains(part);
 }
 
 void Scene::update_bounds() {

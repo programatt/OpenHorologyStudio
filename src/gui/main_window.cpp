@@ -205,7 +205,7 @@ void MainWindow::build_ui() {
     timer_->setInterval(33);
     connect(timer_, &QTimer::timeout, this, &MainWindow::on_timer);
     connect(viewport_, &Viewport::part_picked, this, &MainWindow::select_part);
-    connect(tree_, &QTreeWidget::itemChanged, this, [this] { on_tree_changed(); });
+    connect(tree_, &QTreeWidget::itemChanged, this, &MainWindow::on_tree_changed);
     connect(tree_, &QTreeWidget::itemSelectionChanged, this, &MainWindow::on_tree_selected);
 }
 
@@ -727,12 +727,13 @@ void MainWindow::on_tree_selected() {
     select_part(items.first()->text(0));
 }
 
-void MainWindow::on_tree_changed() {
-    if (rebuilding_ || !scene_) return;
-    for (QTreeWidgetItemIterator it(tree_); *it; ++it) {
-        if (!(*it)->parent()) continue;
-        scene_->set_visible((*it)->text(0).toStdString(), (*it)->checkState(0) == Qt::Checked);
-    }
+void MainWindow::on_tree_changed(QTreeWidgetItem* item) {
+    if (rebuilding_ || !scene_ || !item || !item->parent()) return;
+    // Only the item that changed: ticking one part used to re-apply every part's check state.
+    const std::string name = item->text(0).toStdString();
+    const bool visible = item->checkState(0) == Qt::Checked;
+    if (scene_->visible(name) == visible) return;  // a change other than the tick
+    scene_->set_visible(name, visible);
     viewport_->update();
 }
 

@@ -178,6 +178,19 @@ TEST_CASE("gui: the timeline turns the train, explode and cut-away change the pi
     const std::string name = scene->parts().front().name;
     scene->set_visible(name, false);
     CHECK(scene->draw_list().triangles.size() < full);
+    scene->set_visible(name, true);
+    CHECK(scene->draw_list().triangles.size() == full);
+
+    // So does unticking it in the model tree, and only that part is hidden.
+    QTreeWidgetItem* item = nullptr;
+    for (QTreeWidgetItemIterator it(w.model_tree()); *it && !item; ++it)
+        if ((*it)->parent() && (*it)->text(0).toStdString() == name) item = *it;
+    REQUIRE(item);
+    item->setCheckState(0, Qt::Unchecked);
+    CHECK_FALSE(scene->visible(name));
+    for (const auto& p : scene->parts()) CHECK(scene->visible(p.name) == (p.name != name));
+    item->setCheckState(0, Qt::Checked);
+    CHECK(scene->visible(name));
 }
 
 TEST_CASE("gui: analyses run through the same commands as the CLI and the session replays", "[gui]") {
