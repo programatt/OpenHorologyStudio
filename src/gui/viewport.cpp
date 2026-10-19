@@ -147,6 +147,7 @@ std::vector<Viewport::Projected> Viewport::project(const QSize& size) const {
     };
     // Light from the upper left, in view space.
     const double lx = -0.4, ly = 0.5, lz = 0.77;
+    const bool cull = !scene_->section().enabled;
     out.reserve(drawn.triangles.size());
     for (std::size_t i = 0; i < drawn.triangles.size(); ++i) {
         const Triangle& t = drawn.triangles[i];
@@ -170,6 +171,9 @@ std::vector<Viewport::Projected> Viewport::project(const QSize& size) const {
         Point3 n{u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]};
         const double len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
         if (len < 1e-12) continue;
+        // The far side of a closed solid is always covered by its near side, so it is not drawn: about half the
+        // triangles. Not with a cut-away (it shows the inside), nor on a field plot (its faces are not oriented).
+        if (n[2] < 0 && cull && scene_->parts()[static_cast<std::size_t>(p.part)].closed && std::isnan(p.value)) continue;
         const double dot = (n[0] * lx + n[1] * ly + n[2] * lz) / len;
         p.shade = 0.35 + 0.65 * std::abs(dot);
         out.push_back(p);

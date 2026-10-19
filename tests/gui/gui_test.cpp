@@ -97,6 +97,21 @@ TEST_CASE("gui: the demonstration movement opens, is listed and is drawn", "[gui
     const QImage image = w.viewport()->render(QSize(640, 480));
     CHECK(coloured_pixels(image) > 20000);
     if (const QByteArray snap = qgetenv("OHS_GUI_SNAPSHOT"); !snap.isEmpty()) image.save(QString::fromLocal8Bit(snap));
+
+    // The parts are solids, so their back faces are skipped; the picture is the one with every face drawn (a
+    // cut-away above the whole movement turns the skipping off), up to antialiased edges seen edge-on.
+    auto* scene = w.viewport()->scene();
+    for (const auto& p : scene->parts()) CHECK(p.closed);
+    scene->set_section({true, {0, 0, 1}, 1e9});
+    const QImage every_face = w.viewport()->render(QSize(640, 480));
+    scene->set_section({});
+    int differ = 0;
+    for (int y = 0; y < image.height(); ++y)
+        for (int x = 0; x < image.width(); ++x) {
+            const QRgb a = image.pixel(x, y), b = every_face.pixel(x, y);
+            if (std::abs(qRed(a) - qRed(b)) + std::abs(qGreen(a) - qGreen(b)) + std::abs(qBlue(a) - qBlue(b)) > 72) ++differ;
+        }
+    CHECK(differ < image.width() * image.height() / 500);
 }
 
 TEST_CASE("gui: clicking a part selects it and fills the Explain panel", "[gui]") {

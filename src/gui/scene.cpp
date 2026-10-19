@@ -85,6 +85,8 @@ Scene Scene::load(const std::filesystem::path& project, const std::filesystem::p
         }
         const TopoDS_Shape shape = geometry::orient_dial_axis_to_z(found->second->shape, dial_axis);
         part.triangles = tessellate(shape, 0.02, part.pivot_x, part.pivot_y);
+        // At least one solid, and no face that is not in a solid (a loose sheet is seen from both sides).
+        part.closed = TopExp_Explorer(shape, TopAbs_SOLID).More() && !TopExp_Explorer(shape, TopAbs_FACE, TopAbs_SOLID).More();
         part.z_min = std::numeric_limits<double>::max();
         part.z_max = std::numeric_limits<double>::lowest();
         for (const auto& t : part.triangles) {
