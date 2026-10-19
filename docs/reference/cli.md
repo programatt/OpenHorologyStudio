@@ -106,6 +106,21 @@ Positionals:
   label TEXT                  The label; leave out to remove it
 ```
 
+#### `ohs rig winding`
+
+```text
+Leave a mesh out of the going train (the winding work), or put it back
+Usage: ohs rig winding [OPTIONS] project part partner
+
+Positionals:
+  project TEXT:FILE REQUIRED  Project file
+  part TEXT REQUIRED          One of the two meshed parts
+  partner TEXT REQUIRED       The other
+
+Options:
+  --in-train                  Put the mesh back in the train
+```
+
 #### `ohs rig set`
 
 ```text

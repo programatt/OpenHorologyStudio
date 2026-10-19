@@ -143,6 +143,7 @@ struct MeshJoint {
     double module{};
     double confidence{};
     bool manual{false};  ///< declared by the user (`ohs rig mesh`, a preset), kept when the rig is re-inferred
+    bool winding{false}; ///< not a link of the going train (the winding work, say): `ohs rig winding`, kept when re-inferred
 };
 
 struct Movement {
@@ -158,6 +159,10 @@ struct Movement {
     int mobile_of(int component) const;
     /// Index of the component called `name`, or -1.
     int find_component(std::string_view name) const;
+    /// True when the mesh is a link of the going train, which runs from the barrel to the escape wheel. Not so a mesh
+    /// the user marked as winding, nor one with a part of the winding work (a ratchet or click wheel, a crown wheel):
+    /// that one turns the barrel, so it is the wrong way round for the train.
+    bool in_train(const MeshJoint& joint) const;
 };
 
 /// Gear module estimated from the tip radius assuming a standard addendum of one module.

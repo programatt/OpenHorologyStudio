@@ -56,6 +56,10 @@ void infer_structure(model::Movement& movement, const RigOptions& options);
 /// Throws ohs::Error if there is no component called `name`.
 void set_role(model::Movement& movement, const std::string& name, model::Role role, const RigOptions& options);
 
+/// Takes the mesh between two parts out of the going train (`winding` true: it is the winding work, or just not a link
+/// from the barrel to the escape wheel) or puts it back. Throws when the two parts are not meshed.
+void set_mesh_winding(model::Movement& movement, const std::string& a, const std::string& b, bool winding);
+
 /// Declares that two toothed parts mesh although the geometry does not show it (a smooth barrel
 /// drum, a simplified model). The module follows from the centre distance and the tooth counts.
 /// The mesh is kept whenever the structure is re-inferred. Throws ohs::Error if either part is

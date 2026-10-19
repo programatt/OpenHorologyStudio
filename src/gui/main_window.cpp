@@ -49,6 +49,7 @@
 #include <QTabWidget>
 #include <QTextStream>
 #include <QLineEdit>
+#include <QShortcut>
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
@@ -494,6 +495,10 @@ QWidget* MainWindow::build_rig_page() {
     next_step_->setToolTip(tr("The next mesh along the train (Alt+Right)"));
     step_row->addWidget(prev_step_);
     step_row->addWidget(next_step_);
+    leave_out_ = new QPushButton(tr("Not in the train"));
+    leave_out_->setToolTip(tr("This mesh is the winding work, or not a link from the barrel to the escape wheel: leave it "
+                              "out so that the walk goes another way (undoable)"));
+    step_row->addWidget(leave_out_);
     step_row->addStretch(1);
     rig_overlay_ = new QCheckBox(tr("Show the whole rig instead"));
     rig_overlay_->setToolTip(tr("Colour each mobile and draw every gear mesh (green where the barrel feeds it), the "
@@ -505,8 +510,20 @@ QWidget* MainWindow::build_rig_page() {
     train_layout->addLayout(step_row);
     train_layout->addWidget(rig_overlay_);
     layout->addWidget(train_box);
+    auto* escape = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+    connect(escape, &QShortcut::activated, this, [this] { cancel_pick(); });
     connect(rig_overlay_, &QCheckBox::toggled, this, [this](bool on) { set_show_rig(on); });
     connect(rerig_button_, &QPushButton::clicked, this, [this] { rerig(false); });
+    connect(leave_out_, &QPushButton::clicked, this, [this] {
+        if (!scene_) return;
+        const auto& walk = scene_->review().walk;
+        if (walk.steps.empty()) return;
+        const auto& step = walk.steps[static_cast<std::size_t>(std::clamp(walk_pos_, 0, static_cast<int>(walk.steps.size()) - 1))];
+        if (step.kind != rigging::WalkStep::Kind::Mesh) return;
+        const auto& m = scene_->movement();
+        set_winding(QString::fromStdString(m.components[static_cast<std::size_t>(step.driver)].features.name),
+                    QString::fromStdString(m.components[static_cast<std::size_t>(step.driven)].features.name), true);
+    });
     connect(prev_step_, &QPushButton::clicked, this, [this] { go_to_step(walk_pos_ - 1); });
     connect(next_step_, &QPushButton::clicked, this, [this] { go_to_step(walk_pos_ + 1); });
     connect(candidates_, &QListWidget::currentRowChanged, this, [this](int) { update_walk_view(); });
@@ -521,6 +538,10 @@ QWidget* MainWindow::build_rig_page() {
     });
     connect(pick_partner_, &QPushButton::clicked, this, [this] {
         if (!scene_) return;
+        if (picking_) {
+            cancel_pick();
+            return;
+        }
         const auto& walk = scene_->review().walk;
         if (walk.steps.empty()) return;
         const auto& step = walk.steps[static_cast<std::size_t>(std::clamp(walk_pos_, 0, static_cast<int>(walk.steps.size()) - 1))];
@@ -552,7 +573,16 @@ QWidget* MainWindow::build_rig_page() {
     rig_table_->setSelectionMode(QAbstractItemView::SingleSelection);
     rig_table_->setAlternatingRowColors(true);
     rig_table_->setShowGrid(false);
-    rig_tabs_->addTab(rig_table_, tr("Parts"));
+    auto* parts_page = new QWidget;
+    auto* parts_layout = new QVBoxLayout(parts_page);
+    parts_layout->setContentsMargins(0, 4, 0, 0);
+    parts_filter_ = new QLineEdit;
+    parts_filter_->setPlaceholderText(tr("Search parts by name, label or role"));
+    parts_filter_->setClearButtonEnabled(true);
+    parts_layout->addWidget(parts_filter_);
+    parts_layout->addWidget(rig_table_, 1);
+    connect(parts_filter_, &QLineEdit::textChanged, this, [this] { apply_parts_filter(); });
+    rig_tabs_->addTab(parts_page, tr("Parts"));
 
     issue_list_ = new QListWidget;
     issue_list_->setWordWrap(true);
@@ -619,12 +649,31 @@ QWidget* MainWindow::build_rig_page() {
     form->addWidget(new QLabel(tr("Meshes with")), 2, 0);
     form->addWidget(mesh_box_, 2, 1);
     form->addWidget(declare_mesh_, 2, 2);
+    winding_button_ = new QPushButton(tr("In or out of the train"));
+    winding_button_->setToolTip(tr("Take the mesh between the selected part and this partner out of the going train (the "
+                                   "winding work, say), or put it back in (undoable)"));
+    form->addWidget(winding_button_, 3, 2);
     form->setColumnStretch(1, 1);
     layout->addWidget(selected_box_);
 
     connect(declare_mesh_, &QPushButton::clicked, this, &MainWindow::on_declare_mesh);
     connect(apply_role_, &QPushButton::clicked, this, &MainWindow::on_apply_role);
     connect(apply_label_, &QPushButton::clicked, this, &MainWindow::on_apply_label);
+    connect(winding_button_, &QPushButton::clicked, this, [this] {
+        if (!scene_ || viewport_->selected().empty() || mesh_box_->currentText().isEmpty()) {
+            statusBar()->showMessage(tr("Select a part and the part it meshes with first"), 4000);
+            return;
+        }
+        const auto& m = scene_->movement();
+        const int a = m.find_component(viewport_->selected()), b = m.find_component(mesh_box_->currentText().toStdString());
+        for (const auto& j : m.meshes) {
+            if ((j.a == a && j.b == b) || (j.a == b && j.b == a)) {
+                set_winding(QString::fromStdString(viewport_->selected()), mesh_box_->currentText(), m.in_train(j));
+                return;
+            }
+        }
+        statusBar()->showMessage(tr("Those two parts are not meshed"), 4000);
+    });
     connect(label_edit_, &QLineEdit::returnPressed, this, &MainWindow::on_apply_label);
     connect(rig_table_, &QTableWidget::itemSelectionChanged, this, [this] {
         const auto rows = rig_table_->selectionModel()->selectedRows();
@@ -1091,6 +1140,8 @@ void MainWindow::refresh_rig_review() {
     const int meshes = static_cast<int>(review.walk.steps.size());
     chain_label_->setText(dot + (chain.connected ? tr("<b>Connected</b> from the barrel to the escape wheel, in %n mesh(es).", nullptr, meshes)
                                                  : tr("<b>Not connected</b> from the barrel to the escape wheel: step %1 is missing.").arg(meshes)));
+    const auto left_out = std::count_if(m.meshes.begin(), m.meshes.end(), [&m](const model::MeshJoint& j) { return !m.in_train(j); });
+    if (left_out > 0) chain_label_->setText(chain_label_->text() + tr(" %n mesh(es) left out of the train as winding work.", nullptr, static_cast<int>(left_out)));
 
     issue_list_->clear();
     int to_do = 0;
@@ -1137,14 +1188,40 @@ void MainWindow::pick_partner_for(const QString& from) {
     picking_ = true;
     pick_from_ = from;
     pick_role_.clear();
-    statusBar()->showMessage(tr("Click the part that %1 drives in the viewport (click beside the movement to cancel)").arg(from));
+    update_pick_ui();
 }
 
 void MainWindow::pick_part_for_role(const QString& role) {
     picking_ = true;
     pick_role_ = role;
     pick_from_.clear();
-    statusBar()->showMessage(tr("Click the %1 in the viewport (click beside the movement to cancel)").arg(role));
+    update_pick_ui();
+}
+
+void MainWindow::update_pick_ui() {
+    if (!picking_) {
+        viewport_->set_prompt({});
+        statusBar()->clearMessage();
+        return;
+    }
+    const auto shown = [this](const QString& part) {
+        const int i = scene_ ? scene_->movement().find_component(part.toStdString()) : -1;
+        return i >= 0 ? QString::fromStdString(scene_->movement().components[static_cast<std::size_t>(i)].display_name()) : part;
+    };
+    QString role = pick_role_;
+    const QString what = pick_role_.isEmpty() ? tr("Click the part that %1 drives, in the viewport").arg(shown(pick_from_))
+                                              : tr("Click the %1 in the viewport").arg(role.replace('_', ' '));
+    viewport_->set_prompt(what + tr("  (Esc cancels)"));
+    statusBar()->showMessage(what + tr(". Click beside the movement or press Esc to cancel."));
+    pick_partner_->setText(tr("Cancel: click a part in the viewport"));
+}
+
+void MainWindow::cancel_pick() {
+    if (!picking_) return;
+    picking_ = false;
+    update_pick_ui();
+    statusBar()->showMessage(tr("Cancelled"), 3000);
+    update_walk();  // the button's text goes back
 }
 
 void MainWindow::on_part_picked(const QString& name) {
@@ -1153,15 +1230,32 @@ void MainWindow::on_part_picked(const QString& name) {
         return;
     }
     picking_ = false;
+    update_pick_ui();
     if (name.isEmpty()) {
         statusBar()->showMessage(tr("Cancelled"), 3000);
         select_part(name);
+        update_walk();
         return;
     }
-    statusBar()->clearMessage();
-    if (!pick_role_.isEmpty()) change_role(name, pick_role_);
-    else if (name != pick_from_) declare_mesh(pick_from_, name);
+    if (!pick_role_.isEmpty()) {
+        change_role(name, pick_role_);
+    } else if (name == pick_from_) {
+        statusBar()->showMessage(tr("A part cannot mesh with itself: pick another one"), 6000);
+    } else if (!declare_mesh(pick_from_, name)) {
+        // The command says why in the log; the usual reasons are named here, as the log is easy to miss.
+        const auto& m = scene_->movement();
+        const int a = m.find_component(pick_from_.toStdString()), b = m.find_component(name.toStdString());
+        QString why = tr("see the Log panel");
+        if (a >= 0 && b >= 0) {
+            if (m.components[static_cast<std::size_t>(b)].features.teeth <= 0) why = tr("%1 has no teeth found, so no tooth count to mesh with").arg(name);
+            else if (m.components[static_cast<std::size_t>(a)].features.teeth <= 0) why = tr("%1 has no teeth found, so no tooth count to mesh with").arg(pick_from_);
+            else if (m.mobile_of(a) >= 0 && m.mobile_of(a) == m.mobile_of(b)) why = tr("both parts turn together on one mobile");
+            else if (m.mobile_of(b) < 0) why = tr("%1 does not rotate: give it a role such as wheel or pinion first").arg(name);
+        }
+        statusBar()->showMessage(tr("Could not declare that mesh: %1").arg(why), 10000);
+    }
     select_part(name);
+    update_walk();
 }
 
 void MainWindow::update_walk() {
@@ -1223,6 +1317,7 @@ void MainWindow::update_walk() {
     prev_step_->setEnabled(have && walk_pos_ > 0);
     next_step_->setEnabled(have && walk_pos_ + 1 < count);
     gap_box_->setVisible(false);
+    leave_out_->setVisible(have && walk.steps[static_cast<std::size_t>(walk_pos_)].kind == Kind::Mesh);
     const QSignalBlocker candidates_block(candidates_);  // the viewport is updated once, at the end
     candidates_->clear();
     if (!have) {
@@ -1245,8 +1340,13 @@ void MainWindow::update_walk() {
             candidates_->setVisible(gap && !step.suggestions.empty());
             declare_candidate_->setVisible(gap && !step.suggestions.empty());
             change_role_->setVisible(gap && step.driver >= 0);
-            pick_partner_->setText(gap ? tr("Pick what it drives...") : tr("Pick the %1...").arg(QString::fromUtf8(model::to_string(step.needs_role).data()).replace('_', ' ')));
-            pick_partner_->setToolTip(gap ? tr("Then click the part it meshes with in the viewport") : tr("Then click the part in the viewport"));
+            pick_partner_->setText(picking_ ? tr("Cancel: click a part in the viewport")
+                                   : gap     ? tr("Pick what it drives...")
+                                             : tr("Pick the %1...").arg(QString::fromUtf8(model::to_string(step.needs_role).data()).replace('_', ' ')));
+            pick_partner_->setToolTip(gap ? tr("Press this, then click in the 3D viewport the part that this one drives. The viewport "
+                                               "shows a prompt and the cursor turns into a cross; click beside the movement or press "
+                                               "Esc to cancel")
+                                          : tr("Press this, then click that part in the 3D viewport; Esc cancels"));
             if (gap) {
                 const auto& suggestions = scene_->review().suggestions;
                 for (int k : step.suggestions) {
@@ -1353,6 +1453,7 @@ void MainWindow::refresh_panels() {
         rig_table_->setItem(static_cast<int>(row), 2, confidence);
         rig_table_->setItem(static_cast<int>(row), 3, new QTableWidgetItem(QString::fromStdString(c.role_source)));
     }
+    apply_parts_filter();
     const QString partner = mesh_box_->currentText();
     mesh_box_->clear();
     for (const auto& c : m.components) {
@@ -1437,7 +1538,7 @@ void MainWindow::update_selection_ui() {
     selected_box_->setTitle(has ? tr("Selected part: %1").arg(shown) : tr("Selected part (click one in the list or the viewport)"));
     for (QWidget* w : {static_cast<QWidget*>(role_box_), static_cast<QWidget*>(apply_role_), static_cast<QWidget*>(label_edit_),
                        static_cast<QWidget*>(apply_label_), static_cast<QWidget*>(mesh_box_),
-                       static_cast<QWidget*>(declare_mesh_)})
+                       static_cast<QWidget*>(declare_mesh_), static_cast<QWidget*>(winding_button_)})
         w->setEnabled(has);
     if (has) {
         // The role box starts at the part's current role, so Set role changes only what is changed.
@@ -1687,6 +1788,13 @@ bool MainWindow::change_label(const QString& part, const QString& label) {
     return edit_project(text.isEmpty() ? tr("Remove the label of %1").arg(part) : tr("Label %1: %2").arg(part, text), args);
 }
 
+bool MainWindow::set_winding(const QString& a, const QString& b, bool winding) {
+    if (!scene_ || a == b) return false;
+    QStringList args{"rig", "winding", project_, a, b};
+    if (!winding) args << "--in-train";
+    return edit_project(winding ? tr("Leave %1 / %2 out of the train").arg(a, b) : tr("Put %1 / %2 back in the train").arg(a, b), args);
+}
+
 bool MainWindow::declare_mesh(const QString& a, const QString& b) {
     if (!scene_ || a == b) return false;
     return edit_project(tr("Mesh %1 with %2").arg(a, b), {"rig", "mesh", project_, a, b});
@@ -1698,6 +1806,20 @@ void MainWindow::on_declare_mesh() {
         return;
     }
     declare_mesh(QString::fromStdString(viewport_->selected()), mesh_box_->currentText());
+}
+
+void MainWindow::apply_parts_filter() {
+    const QString text = parts_filter_->text().trimmed();
+    for (int row = 0; row < rig_table_->rowCount(); ++row) {
+        bool match = text.isEmpty();
+        for (int col = 0; col < 2 && !match; ++col) {
+            if (const auto* item = rig_table_->item(row, col)) match = item->text().contains(text, Qt::CaseInsensitive);
+        }
+        if (!match) {
+            if (const auto* item = rig_table_->item(row, 0)) match = item->data(Qt::UserRole).toString().contains(text, Qt::CaseInsensitive);
+        }
+        rig_table_->setRowHidden(row, !match);
+    }
 }
 
 void MainWindow::on_apply_label() {

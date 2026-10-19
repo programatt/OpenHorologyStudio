@@ -230,6 +230,10 @@ void infer_structure(Movement& m, const RigOptions& options) {
     for (const model::MeshJoint& j : m.meshes) {
         if (j.manual) manual.push_back(j);
     }
+    std::vector<std::pair<int, int>> winding;  // meshes the user took out of the train: the flag outlives the meshes
+    for (const model::MeshJoint& j : m.meshes) {
+        if (j.winding) winding.emplace_back(j.a, j.b);
+    }
     m.mobiles.clear();
     m.meshes.clear();
     const int n = static_cast<int>(m.components.size());
@@ -309,7 +313,26 @@ void infer_structure(Movement& m, const RigOptions& options) {
         }
         if (!found) m.meshes.push_back(j);
     }
+    for (model::MeshJoint& j : m.meshes) {
+        j.winding = std::any_of(winding.begin(), winding.end(), [&j](const std::pair<int, int>& w) {
+            return (w.first == j.a && w.second == j.b) || (w.first == j.b && w.second == j.a);
+        });
+    }
     fit_gears(m, options);
+}
+
+void set_mesh_winding(Movement& m, const std::string& a, const std::string& b, bool winding) {
+    const int ia = m.find_component(a);
+    const int ib = m.find_component(b);
+    if (ia < 0) throw Error("no component named '" + a + "'");
+    if (ib < 0) throw Error("no component named '" + b + "'");
+    for (model::MeshJoint& j : m.meshes) {
+        if ((j.a == ia && j.b == ib) || (j.a == ib && j.b == ia)) {
+            j.winding = winding;
+            return;
+        }
+    }
+    throw Error("'" + a + "' and '" + b + "' are not meshed");
 }
 
 void add_manual_mesh(Movement& m, const std::string& a, const std::string& b, const RigOptions& options) {
@@ -534,7 +557,7 @@ TrainChain train_chain(const Movement& m) {
     std::vector<std::vector<int>> adjacent(nm);
     for (const model::MeshJoint& j : m.meshes) {
         const int a = m.mobile_of(j.a), b = m.mobile_of(j.b);
-        if (a < 0 || b < 0 || a == b) continue;
+        if (a < 0 || b < 0 || a == b || !m.in_train(j)) continue;
         adjacent[static_cast<std::size_t>(a)].push_back(b);
         adjacent[static_cast<std::size_t>(b)].push_back(a);
     }
@@ -623,6 +646,7 @@ TrainWalk walk_train(const Movement& m, const TrainChain& chain, const std::vect
         int best = -1;
         for (std::size_t k = 0; k < m.meshes.size(); ++k) {
             const model::MeshJoint& j = m.meshes[k];
+            if (!m.in_train(j)) continue;
             const int a = m.mobile_of(j.a), b = m.mobile_of(j.b);
             if (!((a == way[i] && b == way[i + 1]) || (a == way[i + 1] && b == way[i]))) continue;
             if (best < 0 || j.confidence > m.meshes[static_cast<std::size_t>(best)].confidence) best = static_cast<int>(k);

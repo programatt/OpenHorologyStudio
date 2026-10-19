@@ -79,6 +79,9 @@ public:
     bool change_label(const QString& part, const QString& label);
     /// Declares that two toothed parts mesh (`ohs rig mesh`), undoable.
     bool declare_mesh(const QString& part_a, const QString& part_b);
+    /// Takes the mesh between two parts out of the going train (it is the winding work, or not a link of the train),
+    /// or puts it back; the walk then goes another way. Undoable.
+    bool set_winding(const QString& a, const QString& b, bool winding);
     /// Runs `ohs <args>`, a command that rewrites the project file, as one undoable edit: undo puts the
     /// project file back exactly as it was and reloads it, redo restores what the command wrote. Returns
     /// false (and changes nothing) when the command fails or the result cannot be opened.
@@ -181,6 +184,11 @@ private slots:
     void on_run_analysis();
     void on_apply_role();
     void on_apply_label();
+    /// Shows only the rows of the part list that match the search box (part name, label or role).
+    void apply_parts_filter();
+    /// Shows or hides what tells the user that the next click in the viewport is a pick (see pick_partner_for).
+    void update_pick_ui();
+    void cancel_pick();
     void on_declare_mesh();
     void on_accept_suggestion();
     /// A click on a part in the viewport: selects it, or finishes a pick that is waiting for one.
@@ -253,6 +261,7 @@ private:
     PlotWidget* plot_{};
     QComboBox* role_box_{};
     QLineEdit* label_edit_{};
+    QLineEdit* parts_filter_{};  ///< Rig tab, Parts: hides the rows that do not match
     QPushButton* apply_label_{};
     QComboBox* mesh_box_{};
     QComboBox* field_box_{};
@@ -272,6 +281,8 @@ private:
     QGroupBox* selected_box_{};
     QPushButton* apply_role_{};
     QPushButton* declare_mesh_{};
+    QPushButton* winding_button_{};  ///< Selected part: takes the mesh with the partner out of the train, or puts it back
+    QPushButton* leave_out_{};       ///< Walk: takes the mesh of the step shown out of the train
     QLabel* chain_label_{};
     QCheckBox* rig_overlay_{};
     QAction* rig_overlay_action_{};

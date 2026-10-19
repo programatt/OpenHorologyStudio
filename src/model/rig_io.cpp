@@ -185,6 +185,7 @@ std::string to_toml(const Movement& m) {
         t.insert("module", j.module);
         t.insert("confidence", j.confidence);
         if (j.manual) t.insert("manual", true);
+        if (j.winding) t.insert("winding", true);
         joints.push_back(std::move(t));
     }
     root.insert("joint", std::move(joints));
@@ -255,6 +256,7 @@ Movement from_toml(std::string_view text) {
             j.module = number(*t, "module");
             j.confidence = number(*t, "confidence");
             j.manual = (*t)["manual"].value_or(false);
+            j.winding = (*t)["winding"].value_or(false);
             m.meshes.push_back(j);
         }
     }

@@ -96,6 +96,7 @@ struct Options {
 
     // rig set
     std::string part_name, part_b, role_name, label_text;
+    bool in_train{false};  ///< rig winding: put the mesh back in the train
 
     // rig auto / suggest
     bool apply = false;
@@ -423,6 +424,16 @@ int cmd_rig_label(const Options& o) {
     return kExitOk;
 }
 
+int cmd_rig_winding(const Options& o) {
+    ohs::model::Movement m = ohs::model::load_rig(o.project);
+    ohs::rigging::set_mesh_winding(m, o.part_name, o.part_b, !o.in_train);
+    ohs::model::save_rig(m, o.project);
+    const auto chain = ohs::rigging::train_chain(m);
+    std::cout << o.part_name << " / " << o.part_b << (o.in_train ? " is a link of the train again" : " is left out of the train (winding)")
+              << "; the train is " << (chain.connected ? "connected" : "not connected") << '\n';
+    return kExitOk;
+}
+
 int cmd_rig_mesh(const Options& o) {
     ohs::model::Movement m = ohs::model::load_rig(o.project);
     ohs::rigging::RigOptions rig;
@@ -569,6 +580,13 @@ int ohs::cli::run(int argc, char** argv) {
     label->add_option("part", o.part_name, "Part name")->required();
     label->add_option("label", o.label_text, "The label; leave out to remove it");
     label->callback(pick(cmd_rig_label));
+
+    auto* winding = rig->add_subcommand("winding", "Leave a mesh out of the going train (the winding work), or put it back");
+    winding->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);
+    winding->add_option("part", o.part_name, "One of the two meshed parts")->required();
+    winding->add_option("partner", o.part_b, "The other")->required();
+    winding->add_flag("--in-train", o.in_train, "Put the mesh back in the train");
+    winding->callback(pick(cmd_rig_winding));
 
     auto* mesh = rig->add_subcommand("mesh", "Declare that two toothed parts mesh although the geometry does not show it");
     mesh->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);

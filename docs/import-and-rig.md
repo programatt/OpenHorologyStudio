@@ -68,6 +68,12 @@ A part name from a CAD file is often a number. `ohs rig label movement.hsproj Pa
 the part a label, stored in the project, that the desktop application shows in place of the name (hover over it
 to see the name); leave the label out to remove it.
 
+The train runs from the barrel to the escape wheel. A mesh that turns the barrel instead of being turned by it,
+the ratchet or click wheel of the winding work, is not a link of it: meshes with a part whose name or label
+says ratchet, click, crown, winding or clutch are left out automatically. For any other mesh that is the wrong way
+round, `ohs rig winding movement.hsproj "part" "partner"` leaves it out of the train (the walk and the animation then
+go another way) and `--in-train` puts it back. The choice is kept when the rig is run again.
+
 `rig check --strict` fails on warnings; use it in scripts. Setting a role re-infers mobiles and
 meshes, and your choice is recorded with confidence 1 and source `user`.
 

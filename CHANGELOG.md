@@ -9,6 +9,11 @@ Semantic Versioning, with the Python API and the plugin ABI versioned as describ
 Found by running the plan's gates on the real OM10 file.
 
 ### Added
+- A search box above the Rig tab's part list, and clearer picking: a prompt in the viewport, a cross cursor, Esc to
+  cancel, and the reason in the status bar when a picked mesh cannot be declared.
+- The train starts at the barrel. A mesh with a ratchet, click, crown, winding or clutch part (by name or label) is
+  the winding work and not a link of the going train, and `ohs rig winding` (the *Not in the train* button in the Rig
+  tab) leaves any other mesh out of the train, or puts it back; the choice survives `rig auto`.
 - Part labels. `ohs rig label` gives a part a name of your own, stored in the project; the model tree, the part list,
   the status bar and the viewport show it in place of the part name, and hovering shows the part name.
 - Seeing and finishing the rig. `ohs rig auto` runs the classification and mesh inference again on an imported

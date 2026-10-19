@@ -38,6 +38,8 @@ public:
     /// the confidence is low), dotted amber lines for meshes worth declaring, and a ring round every part that
     /// needs a look.
     void set_show_rig(bool on);
+    /// Says on screen what the next click does (empty: nothing special); the cursor becomes a cross meanwhile.
+    void set_prompt(const QString& text);
     bool show_rig() const { return show_rig_; }
 
     /// What the Rig tab's walk through the train shows. The parts walked so far are drawn as usual and everything
@@ -105,6 +107,7 @@ private:
     enum class Drag { None, Turn, Pan };
     Drag drag_{Drag::None};
     bool show_rig_{false};
+    QString prompt_;
     std::optional<WalkView> walk_;
     bool fast_{false};          ///< the next paint is an interactive one
     QTimer* settle_{};          ///< draws at full quality once the interaction pauses

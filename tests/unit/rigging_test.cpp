@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "core/error.hpp"
+#include "model/rig_io.hpp"
 #include "rigging/rigging.hpp"
 #include "support.hpp"
 
@@ -288,6 +289,33 @@ TEST_CASE("meshes that just missed the strict test are suggested, and declaring 
 
     // A properly rigged train has nothing to suggest.
     CHECK(rigging::suggest_meshes(rigging::auto_rig("train", test::synthetic_train(), {}), {}).empty());
+}
+
+TEST_CASE("a mesh left out of the train as winding work is not walked, and stays out when re-rigged") {
+    auto m = rigging::auto_rig("train", test::synthetic_train(), {});
+    REQUIRE(rigging::train_chain(m).connected);
+
+    rigging::set_mesh_winding(m, "barrel", "center_pinion", true);
+    CHECK_FALSE(rigging::train_chain(m).connected);
+    const auto walk = rigging::walk_train(m, rigging::train_chain(m), {});
+    REQUIRE_FALSE(walk.steps.empty());
+    CHECK(walk.steps.front().kind == rigging::WalkStep::Kind::Gap);
+    CHECK(m.components[static_cast<std::size_t>(walk.steps.front().driver)].features.name == "barrel");
+
+    rigging::re_rig(m, {}, true);
+    CHECK_FALSE(rigging::train_chain(m).connected);
+    const auto back = model::from_toml(model::to_toml(m));
+    CHECK_FALSE(rigging::train_chain(back).connected);
+
+    rigging::set_mesh_winding(m, "barrel", "center_pinion", false);
+    CHECK(rigging::train_chain(m).connected);
+    CHECK_THROWS_AS(rigging::set_mesh_winding(m, "barrel", "escape_wheel", true), Error);
+
+    // A ratchet or click wheel is the winding work whatever the user calls it: its meshes are not the train's.
+    for (auto& c : m.components) {
+        if (c.features.name == "center_wheel") c.label = "Ratchet wheel";
+    }
+    CHECK_FALSE(rigging::train_chain(m).connected);
 }
 
 TEST_CASE("walking the train goes mesh by mesh from the barrel, and stops at the gap with what could fill it") {

@@ -80,6 +80,13 @@ void Viewport::fit() {
     update();
 }
 
+void Viewport::set_prompt(const QString& text) {
+    prompt_ = text;
+    if (prompt_.isEmpty()) unsetCursor();
+    else setCursor(Qt::CrossCursor);
+    update();
+}
+
 void Viewport::set_show_rig(bool on) {
     show_rig_ = on;
     update();
@@ -464,6 +471,21 @@ void Viewport::draw_legend(QPainter& painter, const QSize& size, const FieldOver
 void Viewport::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     draw(painter, size(), fast_);
+    if (scene_ && !prompt_.isEmpty()) {
+        // A pick is waiting for a click: a plate across the top, on screen only.
+        QFont big = font();
+        big.setPointSizeF(big.pointSizeF() * 1.1);
+        big.setWeight(QFont::DemiBold);
+        painter.setFont(big);
+        const QFontMetrics fm(big);
+        const QRectF box(10, 10, std::min<double>(width() - 20, fm.horizontalAdvance(prompt_) + 24), fm.height() + 14);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.setPen(QPen(QColor(240, 170, 40), 2.0));
+        painter.setBrush(QColor(26, 28, 32, 235));
+        painter.drawRoundedRect(box, 6, 6);
+        painter.setPen(QColor(236, 236, 238));
+        painter.drawText(box, Qt::AlignCenter, prompt_);
+    }
     // How to move the view, on screen only: render() (snapshots, video) leaves it out.
     if (scene_) {
         QFont small = font();
@@ -535,7 +557,8 @@ void Viewport::mouseMoveEvent(QMouseEvent* e) {
 
 void Viewport::mouseReleaseEvent(QMouseEvent* e) {
     drag_ = Drag::None;
-    unsetCursor();
+    if (prompt_.isEmpty()) unsetCursor();
+    else setCursor(Qt::CrossCursor);
     if (dragged_ || e->button() != Qt::LeftButton || !scene_) return;
     selected_ = pick(e->pos());
     update();

@@ -108,6 +108,7 @@ TrainAnalysis analyze_train(const Movement& m, double beat_rate_vph, int root) {
     struct Edge { int to; double factor; };
     std::vector<std::vector<Edge>> adj(nm);
     for (const model::MeshJoint& j : m.meshes) {
+        if (!m.in_train(j)) continue;
         const int ma = m.mobile_of(j.a);
         const int mb = m.mobile_of(j.b);
         const double za = m.components[j.a].features.teeth;

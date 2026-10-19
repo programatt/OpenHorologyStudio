@@ -2,6 +2,7 @@
 #include "model/model.hpp"
 
 #include <array>
+#include <cctype>
 #include <utility>
 
 namespace ohs::model {
@@ -54,6 +55,27 @@ bool is_toothed_role(Role role) {
 bool is_rotating_role(Role role) {
     return is_toothed_role(role) || role == Role::Arbor || role == Role::Balance ||
            role == Role::Roller || role == Role::DateRing;
+}
+
+namespace {
+
+// Parts of the winding work, which a mesh of the going train never passes through.
+bool is_winding_part(const Component& c) {
+    for (const std::string* text : {&c.label, &c.features.name}) {
+        std::string lower(*text);
+        for (char& ch : lower) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        for (const char* word : {"ratchet", "click", "crown", "winding", "clutch", "sliding pinion"}) {
+            if (lower.find(word) != std::string::npos) return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
+bool Movement::in_train(const MeshJoint& joint) const {
+    return !joint.winding && !is_winding_part(components[static_cast<std::size_t>(joint.a)]) &&
+           !is_winding_part(components[static_cast<std::size_t>(joint.b)]);
 }
 
 int Movement::mobile_of(int component) const {

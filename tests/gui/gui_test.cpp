@@ -22,11 +22,15 @@
 #include <QPushButton>
 #include <QSlider>
 #include <QTableWidget>
+#include <QLineEdit>
+#include <QStatusBar>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
 #include <QTabWidget>
 #include <QTimer>
 #include <QToolButton>
+#include <QLineEdit>
+#include <QStatusBar>
 #include <QTreeWidget>
 #include <QListWidget>
 #include <QMouseEvent>
@@ -425,6 +429,65 @@ TEST_CASE("gui: a label replaces the part name in the model tree", "[gui]") {
     const auto& back = m().components[static_cast<std::size_t>(m().find_component(part.toStdString()))];
     CHECK(back.label.empty());
     CHECK(back.display_name() == part.toStdString());
+}
+
+TEST_CASE("gui: a mesh can be left out of the train and put back, undoably", "[gui]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_demo(fresh_dir("winding")));
+    const auto connected = [&] { return w.viewport()->scene()->review().chain.connected; };
+    REQUIRE(connected());
+
+    REQUIRE(w.set_winding("barrel", "center_pinion", true));
+    CHECK_FALSE(connected());
+    CHECK(w.viewport()->scene()->review().walk.steps.front().kind == ohs::rigging::WalkStep::Kind::Gap);
+
+    w.undo_stack()->undo();
+    CHECK(connected());
+    w.undo_stack()->redo();
+    CHECK_FALSE(connected());
+    REQUIRE(w.set_winding("barrel", "center_pinion", false));
+    CHECK(connected());
+}
+
+TEST_CASE("gui: the part list can be searched, and a pick says what the next click does", "[gui]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_demo(fresh_dir("search")));
+    auto* table = w.rig_table();
+    const auto visible_rows = [&] {
+        int n = 0;
+        for (int r = 0; r < table->rowCount(); ++r) n += table->isRowHidden(r) ? 0 : 1;
+        return n;
+    };
+    REQUIRE(visible_rows() == table->rowCount());
+
+    auto* filter = w.findChild<QLineEdit*>();
+    for (auto* edit : w.findChildren<QLineEdit*>()) {
+        if (edit->placeholderText().startsWith("Search parts")) filter = edit;
+    }
+    REQUIRE(filter);
+    filter->setText("ESCAPE");  // case does not matter; matches the part name and the role
+    CHECK(visible_rows() >= 1);
+    CHECK(visible_rows() < table->rowCount());
+    for (int r = 0; r < table->rowCount(); ++r) {
+        if (!table->isRowHidden(r)) CHECK(table->item(r, 0)->data(Qt::UserRole).toString().contains("escape", Qt::CaseInsensitive));
+    }
+    filter->setText("no such part");
+    CHECK(visible_rows() == 0);
+    filter->clear();
+    CHECK(visible_rows() == table->rowCount());
+
+    // A pick shows a prompt and can be cancelled; nothing is declared.
+    w.pick_partner_for("barrel");
+    CHECK(w.is_picking());
+    CHECK(w.statusBar()->currentMessage().contains("Esc"));
+    CHECK(w.viewport()->cursor().shape() == Qt::CrossCursor);
+    emit w.viewport()->part_picked(QString());  // a click beside the movement cancels
+    CHECK_FALSE(w.is_picking());
+    CHECK(w.viewport()->cursor().shape() != Qt::CrossCursor);
 }
 
 TEST_CASE("job queue: jobs run in worker processes, failures and bad programs are reported", "[gui][jobs]") {

@@ -109,6 +109,11 @@ TEST_CASE("ohs CLI end to end") {
         CHECK(std::count_if(labelled.begin(), labelled.end(), [](const auto& c) { return c.value("label", "") == "Seconds"; }) == 1);
         CHECK(run("rig label " + proj + " fourth_wheel", dir).exit_code == 0);  // clears it
 
+        // A mesh can be left out of the going train (the winding work) and put back.
+        CHECK(run("rig winding " + proj + " barrel center_pinion", dir).output.find("not connected") != std::string::npos);
+        CHECK(run("rig winding " + proj + " barrel fourth_wheel", dir).exit_code == 2);  // not meshed
+        CHECK(run("rig winding " + proj + " barrel center_pinion --in-train", dir).output.find("is connected") != std::string::npos);
+
         CHECK(run("rig set " + proj + " fourth_wheel --role screw", dir).exit_code == 0);
         CHECK(nlohmann::json::parse(run("--json rig check " + proj, dir).output)["components"].size() == 15);
         CHECK(run("kinematics " + proj, dir).output.find("warning") != std::string::npos);
