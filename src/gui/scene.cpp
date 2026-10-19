@@ -15,6 +15,8 @@
 #include <TopoDS_Face.hxx>
 
 #include "core/error.hpp"
+#include "dynamics/calibre.hpp"
+#include "dynamics/torque_chain.hpp"
 #include "geometry/cad_io.hpp"
 #include "geometry/features.hpp"
 #include "model/rig_io.hpp"
@@ -137,6 +139,78 @@ double Scene::radius() const {
     return r;
 }
 
+void Scene::compute_forces(double wind) {
+    forces_.clear();
+    const double vph = movement_.beat_rate_vph > 0 ? movement_.beat_rate_vph : 25200.0;
+    const dynamics::Calibre calibre = dynamics::default_calibre(vph);
+    const dynamics::TorqueChain chain = dynamics::build_chain(movement_, train_, calibre);
+    std::map<std::string, double> torque;  // N.mm at each mobile of the path
+    for (const auto& row : dynamics::torque_table(chain, calibre, wind)) torque[row.mobile] = row.torque_nmm;
+
+    for (const model::MeshJoint& mesh : movement_.meshes) {
+        const int ma = movement_.mobile_of(mesh.a), mb = movement_.mobile_of(mesh.b);
+        if (ma < 0 || mb < 0) continue;
+        const auto ta = torque.find(movement_.mobiles[static_cast<std::size_t>(ma)].name);
+        const auto tb = torque.find(movement_.mobiles[static_cast<std::size_t>(mb)].name);
+        if (ta == torque.end() || tb == torque.end()) continue;  // a mesh off the path from the barrel to the escape wheel
+        // Torque falls along the train, so the mobile with the smaller torque is the one being driven.
+        const bool a_driven = ta->second < tb->second;
+        const int driver_comp = a_driven ? mesh.b : mesh.a, driven_comp = a_driven ? mesh.a : mesh.b;
+        const int driver_mobile = a_driven ? mb : ma, driven_mobile = a_driven ? ma : mb;
+        const auto& driver = movement_.components[static_cast<std::size_t>(driver_comp)];
+        const auto& driven = movement_.components[static_cast<std::size_t>(driven_comp)];
+        const double r_driver = 0.5 * mesh.module * driver.features.teeth, r_driven = 0.5 * mesh.module * driven.features.teeth;
+        if (r_driver <= 0 || r_driven <= 0) continue;
+        const auto& c1 = movement_.mobiles[static_cast<std::size_t>(driver_mobile)].center;
+        const auto& c2 = movement_.mobiles[static_cast<std::size_t>(driven_mobile)].center;
+        const double dx = c2.x - c1.x, dy = c2.y - c1.y, dist = std::hypot(dx, dy);
+        if (dist <= 0) continue;
+        const double t = r_driver / (r_driver + r_driven);  // pitch point along the line of centres
+        const double sense = train_.mobiles[static_cast<std::size_t>(driver_mobile)].ratio >= 0 ? 1.0 : -1.0;
+        // Surface velocity of the driver's rim at the pitch point: omega x r, with omega along +Z (or -Z).
+        const double vx = -sense * dy / dist, vy = sense * dx / dist;
+        ForceArrow arrow;
+        arrow.driver = movement_.mobiles[static_cast<std::size_t>(driver_mobile)].name;
+        arrow.driven = movement_.mobiles[static_cast<std::size_t>(driven_mobile)].name;
+        arrow.at = {c1.x + t * dx, c1.y + t * dy, 0.5 * (driver.features.z_min + driver.features.z_max)};
+        arrow.direction = {vx, vy, 0.0};
+        arrow.newtons = (a_driven ? ta->second : tb->second) / r_driven;
+        forces_.push_back(std::move(arrow));
+    }
+}
+
+std::vector<Scene::Trail> Scene::trails(int samples) const {
+    std::vector<Trail> out;
+    if (!can_animate() || samples < 2 || trail_seconds_ <= 0) return out;
+    const kinematics::PoseOptions pose{stepped_, 0.2};
+    for (std::size_t m = 0; m < movement_.mobiles.size(); ++m) {
+        if (!train_.mobiles[m].reached) continue;
+        // The marker sits where a tooth tip would be, at angle zero of the mobile's own frame.
+        double radius = 0.0, z = 0.0;
+        for (int c : movement_.mobiles[m].components) {
+            const auto& f = movement_.components[static_cast<std::size_t>(c)].features;
+            if (f.outer_radius > radius) {
+                radius = f.outer_radius;
+                z = 0.5 * (f.z_min + f.z_max);
+            }
+        }
+        if (radius <= 0) continue;
+        const auto& centre = movement_.mobiles[m].center;
+        Trail trail;
+        trail.mobile = movement_.mobiles[m].name;
+        // The window is the shorter of the requested time and one revolution of this mobile.
+        const double omega = 2.0 * 3.14159265358979323846 * std::abs(train_.mobiles[m].ratio) / (train_.root_period_hours * 3600.0);
+        const double window = omega > 0 ? std::min(trail_seconds_, 2.0 * 3.14159265358979323846 / omega) : trail_seconds_;
+        for (int i = samples - 1; i >= 0; --i) {
+            const double t = std::max(0.0, time_ - window * i / (samples - 1));
+            const double a = kinematics::mobile_angles(train_, t, pose)[m];
+            trail.points.push_back({centre.x + radius * std::cos(a), centre.y + radius * std::sin(a), z});
+        }
+        if (trail.points.size() >= 2) out.push_back(std::move(trail));
+    }
+    return out;
+}
+
 Scene::Drawn Scene::draw_list() const {
     std::vector<double> angles(movement_.mobiles.size(), 0.0);
     if (can_animate()) angles = kinematics::mobile_angles(train_, time_, {stepped_, 0.2});
@@ -152,7 +226,10 @@ Scene::Drawn Scene::draw_list() const {
         auto place = [&](const Point3& p) -> Point3 {
             return {part.pivot_x + ca * p[0] - sa * p[1], part.pivot_y + sa * p[0] + ca * p[1], p[2] + lift};
         };
-        for (const Triangle& t : part.triangles) {
+        const bool on_field = has_field_ && field_.part == part.name;
+        const std::vector<Triangle>& tris = on_field ? field_.triangles : part.triangles;
+        for (std::size_t k = 0; k < tris.size(); ++k) {
+            const Triangle& t = tris[k];
             Triangle w{place(t.a), place(t.b), place(t.c)};
             if (section_.enabled) {
                 const auto& n = section_.normal;
@@ -162,6 +239,8 @@ Scene::Drawn Scene::draw_list() const {
             }
             out.triangles.push_back(w);
             out.part_index.push_back(static_cast<int>(i));
+            const double nan = std::numeric_limits<double>::quiet_NaN();
+            out.values.push_back(on_field ? field_.values[k] : std::array<double, 3>{nan, nan, nan});
         }
     }
     return out;

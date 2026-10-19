@@ -5,6 +5,7 @@
 #include <cmath>
 #include <numbers>
 
+#include <QLinearGradient>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPolygonF>
@@ -59,6 +60,59 @@ void Viewport::select(const std::string& part) {
     update();
 }
 
+QPointF Viewport::to_screen(const Point3& p, const QSize& size) const {
+    const Point3 c = scene_->centre();
+    const double scale = 0.45 * std::min(size.width(), size.height()) / scene_->radius() * zoom_;
+    const double yaw = yaw_ * std::numbers::pi / 180.0, pitch = pitch_ * std::numbers::pi / 180.0;
+    const double x = p[0] - c[0], y = p[1] - c[1], z = p[2] - c[2];
+    const double x1 = std::cos(yaw) * x - std::sin(yaw) * y, y1 = std::sin(yaw) * x + std::cos(yaw) * y;
+    const double y2 = std::cos(pitch) * y1 - std::sin(pitch) * z;
+    return {size.width() / 2.0 + pan_x_ + scale * x1, size.height() / 2.0 + pan_y_ - scale * y2};
+}
+
+void Viewport::draw_overlays(QPainter& painter, const QSize& size) const {
+    const bool lifted = scene_->explode() > 0;  // the overlays follow the assembled positions only
+    if (scene_->show_trails() && !lifted) {
+        const auto trails = scene_->trails();
+        for (std::size_t i = 0; i < trails.size(); ++i) {
+            const QColor hue = QColor::fromHsv(static_cast<int>((i * 47) % 360), 200, 230);
+            const auto& pts = trails[i].points;
+            for (std::size_t k = 1; k < pts.size(); ++k) {
+                QColor c = hue;
+                c.setAlpha(30 + static_cast<int>(200.0 * static_cast<double>(k) / static_cast<double>(pts.size() - 1)));  // older is fainter
+                painter.setPen(QPen(c, 2.0, Qt::SolidLine, Qt::RoundCap));
+                painter.drawLine(to_screen(pts[k - 1], size), to_screen(pts[k], size));
+            }
+            painter.setPen(Qt::NoPen);
+            painter.setBrush(hue);
+            painter.drawEllipse(to_screen(pts.back(), size), 3.0, 3.0);
+        }
+    }
+    if (scene_->show_forces() && !lifted && !scene_->forces().empty()) {
+        double biggest = 0.0;
+        for (const auto& f : scene_->forces()) biggest = std::max(biggest, f.newtons);
+        const QColor ink(225, 50, 50);
+        const QColor text = palette().window().color().lightness() < 128 ? QColor(240, 200, 200) : QColor(140, 20, 20);
+        for (const auto& f : scene_->forces()) {
+            if (biggest <= 0) break;
+            const double length = 0.22 * scene_->radius() * f.newtons / biggest;
+            const Point3 tip{f.at[0] + f.direction[0] * length, f.at[1] + f.direction[1] * length, f.at[2]};
+            const QPointF a = to_screen(f.at, size), b = to_screen(tip, size);
+            painter.setPen(QPen(ink, 2.6, Qt::SolidLine, Qt::RoundCap));
+            painter.drawLine(a, b);
+            const double dx = b.x() - a.x(), dy = b.y() - a.y(), len = std::hypot(dx, dy);
+            if (len > 1.0) {
+                const double head = std::max(8.0, 0.28 * len), back = std::atan2(dy, dx) + std::numbers::pi;
+                for (double turn : {0.45, -0.45}) {
+                    painter.drawLine(b, QPointF(b.x() + head * std::cos(back + turn), b.y() + head * std::sin(back + turn)));
+                }
+            }
+            painter.setPen(text);
+            painter.drawText(b + QPointF(6, -4), tr("%1 mN").arg(f.newtons * 1000.0, 0, 'g', 3));
+        }
+    }
+}
+
 std::vector<Viewport::Projected> Viewport::project(const QSize& size) const {
     std::vector<Projected> out;
     if (!scene_) return out;
@@ -90,6 +144,7 @@ std::vector<Viewport::Projected> Viewport::project(const QSize& size) const {
         view(t.c, p.x[2], p.y[2], d[2]);
         p.depth = (d[0] + d[1] + d[2]) / 3.0;
         p.part = drawn.part_index[i];
+        p.value = (drawn.values[i][0] + drawn.values[i][1] + drawn.values[i][2]) / 3.0;
 
         // Face normal in view space (x right, y up, z towards the viewer).
         auto vp = [&](const Point3& q) {
@@ -119,9 +174,14 @@ void Viewport::draw(QPainter& painter, const QSize& size) const {
         painter.drawText(QRect(QPoint(0, 0), size), Qt::AlignCenter, tr("Open a project to see the movement"));
         return;
     }
+    const FieldOverlay* field = scene_->field();
     for (const Projected& p : project(size)) {
         QColor base = role_colour(scene_->parts()[p.part].role);
         if (!selected_.empty() && scene_->parts()[p.part].name == selected_) base = QColor(255, 120, 30);
+        if (field && !std::isnan(p.value)) {
+            const auto c = field_colour((p.value - field->lo) / (field->hi - field->lo));
+            base = QColor(c[0], c[1], c[2]);
+        }
         const QColor col(std::min(255, int(base.red() * p.shade)), std::min(255, int(base.green() * p.shade)),
                          std::min(255, int(base.blue() * p.shade)));
         painter.setPen(QPen(col, 0.6));
@@ -129,6 +189,27 @@ void Viewport::draw(QPainter& painter, const QSize& size) const {
         const QPointF pts[3] = {{p.x[0], p.y[0]}, {p.x[1], p.y[1]}, {p.x[2], p.y[2]}};
         painter.drawPolygon(pts, 3);
     }
+    draw_overlays(painter, size);
+    if (field) draw_legend(painter, size, *field);
+}
+
+void Viewport::draw_legend(QPainter& painter, const QSize& size, const FieldOverlay& field) const {
+    const QColor text = palette().window().color().lightness() < 128 ? QColor(230, 230, 230) : QColor(30, 30, 30);
+    const int bar_w = 14, bar_h = std::min(180, size.height() / 2), x = size.width() - 78, y = 44;
+    QLinearGradient gradient(0, y + bar_h, 0, y);
+    for (int i = 0; i <= 8; ++i) {
+        const auto c = field_colour(i / 8.0);
+        gradient.setColorAt(i / 8.0, QColor(c[0], c[1], c[2]));
+    }
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(gradient);
+    painter.drawRect(x, y, bar_w, bar_h);
+    painter.setPen(text);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRect(x, y, bar_w, bar_h);
+    painter.drawText(QRect(x - 60, y - 22, 150, 18), Qt::AlignLeft, QString::fromStdString(field.label));
+    painter.drawText(QRect(x + bar_w + 4, y - 6, 60, 14), Qt::AlignLeft, QString::number(field.hi, 'g', 4));
+    painter.drawText(QRect(x + bar_w + 4, y + bar_h - 8, 60, 14), Qt::AlignLeft, QString::number(field.lo, 'g', 4));
 }
 
 void Viewport::paintEvent(QPaintEvent*) {

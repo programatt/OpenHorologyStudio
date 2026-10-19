@@ -7,17 +7,12 @@
 #include <vector>
 
 #include "geometry/features.hpp"
+#include "gui/field.hpp"
 #include "geometry/step_io.hpp"
 #include "kinematics/kinematics.hpp"
 #include "model/model.hpp"
 
 namespace ohs::gui {
-
-using Point3 = std::array<double, 3>;
-
-struct Triangle {
-    Point3 a, b, c;  ///< millimetres, dial axis = Z, relative to the part's mobile centre
-};
 
 /// One part of the movement as the viewport draws it.
 struct ScenePart {
@@ -62,11 +57,50 @@ public:
     /// Why the going train could not be analysed (empty when it could).
     const std::string& train_error() const { return train_error_; }
 
+    /// Draws a result field on one part, replacing its CAD surface (the finite element mesh of a part
+    /// carries the part's own placement, so the overlay turns with the part).
+    void set_field(FieldOverlay field) { field_ = std::move(field); has_field_ = true; }
+    void clear_field() { has_field_ = false; field_ = {}; }
+    const FieldOverlay* field() const { return has_field_ ? &field_ : nullptr; }
+
+    /// The tooth force at one gear mesh: the driver's rim pushes the driven wheel along `direction` (a unit
+    /// vector in the dial plane) at the pitch point `at`.
+    struct ForceArrow {
+        std::string driver, driven;  ///< mobile names
+        Point3 at{};
+        Point3 direction{};
+        double newtons{};
+    };
+    /// Computes the tangential tooth force at every mesh on the path from the barrel to the escape wheel for
+    /// a state of wind between 0 and 1 (torque of the driven mobile over the pitch radius of the wheel it
+    /// meshes with), with the default calibre for the movement's beat rate. Throws ohs::Error when the torque
+    /// chain cannot be built (no barrel, no path to the escape wheel).
+    void compute_forces(double wind = 1.0);
+    const std::vector<ForceArrow>& forces() const { return forces_; }
+    void set_show_forces(bool on) { show_forces_ = on; }
+    bool show_forces() const { return show_forces_; }
+
+    /// A marker on the rim of a turning mobile and where it has been over the last `trail_seconds` of movement
+    /// time (at most one turn), oldest point first, in world space.
+    struct Trail {
+        std::string mobile;
+        std::vector<Point3> points;
+    };
+    void set_show_trails(bool on, double trail_seconds = 10.0) {
+        show_trails_ = on;
+        trail_seconds_ = trail_seconds;
+    }
+    bool show_trails() const { return show_trails_; }
+    double trail_seconds() const { return trail_seconds_; }
+    std::vector<Trail> trails(int samples = 48) const;
+
     /// Triangles of every visible part in world space at the current time, exploded and cut.
-    /// `part_index[i]` is the index into parts() of triangle i.
+    /// `part_index[i]` is the index into parts() of triangle i; `values[i]` the field at its corners
+    /// (NaN where there is no field).
     struct Drawn {
         std::vector<Triangle> triangles;
         std::vector<int> part_index;
+        std::vector<std::array<double, 3>> values;
     };
     Drawn draw_list() const;
 
@@ -84,6 +118,12 @@ private:
     bool stepped_{false};
     double explode_{0};
     SectionPlane section_;
+    FieldOverlay field_;
+    bool has_field_{false};
+    std::vector<ForceArrow> forces_;
+    bool show_forces_{false};
+    bool show_trails_{false};
+    double trail_seconds_{10.0};
 };
 
 }  // namespace ohs::gui

@@ -238,6 +238,29 @@ TEST_CASE("VTU output describes the mesh and its fields") {
     CHECK_THAT(fea::to_vtu(lin, {}), Catch::Matchers::ContainsSubstring("10 10"));
 }
 
+TEST_CASE("VTU files read back as written") {
+    for (int order : {1, 2}) {
+        const mesh::TetMesh m = mesh::extrude(mesh::structured_rect(0, 0, 2, 1, 2, 1), 0, 1, 1, order);
+        fea::NodeField scalar{"von_mises", std::vector<double>(m.nodes.size()), 1};
+        fea::NodeField vec{"displacement", std::vector<double>(3 * m.nodes.size()), 3};
+        for (std::size_t i = 0; i < scalar.values.size(); ++i) scalar.values[i] = 0.125 * static_cast<double>(i) - 3.0;
+        for (std::size_t i = 0; i < vec.values.size(); ++i) vec.values[i] = 1e-3 * static_cast<double>(i);
+        const auto back = fea::parse_vtu(fea::to_vtu(m, {scalar, vec}));
+        REQUIRE(back.mesh.order == order);
+        REQUIRE(back.mesh.nodes.size() == m.nodes.size());
+        REQUIRE(back.mesh.elems.size() == m.elems.size());
+        CHECK(back.mesh.elems.back() == m.elems.back());
+        CHECK(back.mesh.nodes[5].y == Approx(m.nodes[5].y));
+        REQUIRE(back.fields.size() == 2);
+        CHECK(back.fields[0].name == "von_mises");
+        CHECK(back.fields[0].values[7] == Approx(scalar.values[7]));
+        CHECK(back.fields[1].components == 3);
+        CHECK(back.fields[1].values[11] == Approx(vec.values[11]));
+    }
+    CHECK_THROWS_AS(fea::parse_vtu("not xml"), Error);
+    CHECK_THROWS_AS(fea::parse_vtu("<VTKFile type=\"UnstructuredGrid\"><UnstructuredGrid></UnstructuredGrid></VTKFile>"), Error);
+}
+
 TEST_CASE("HDF5 output round-trips the mesh and fields") {
     fea::Model model;
     model.mesh = mesh::extrude(mesh::structured_rect(0, 0, 1, 1, 1, 1), 0, 1, 1, 2);

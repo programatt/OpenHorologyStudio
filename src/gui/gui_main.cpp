@@ -27,7 +27,10 @@ int main(int argc, char** argv) {
     QCommandLineOption movement_seconds("movement-seconds", "Movement time the video covers (with --video)", "seconds", "60");
     QCommandLineOption fps("fps", "Frames per second (with --video)", "n", "30");
     QCommandLineOption size("size", "Video size (with --video)", "WxH", "1280x720");
-    parser.addOptions({snapshot, view, explode, time, step, video, video_seconds, movement_seconds, fps, size});
+    QCommandLineOption field("field", "Plot a result on a part: file.vtu,part[,von_mises|displacement] (with --snapshot or --video)", "spec");
+    QCommandLineOption forces("forces", "Draw the tooth force arrows (with --snapshot or --video)");
+    QCommandLineOption trails("trails", "Draw motion trails covering this many seconds of movement time (with --snapshot or --video)", "seconds");
+    parser.addOptions({snapshot, view, explode, time, step, video, video_seconds, movement_seconds, fps, size, field, forces, trails});
     parser.process(app);
 
     ohs::gui::MainWindow window;
@@ -40,6 +43,21 @@ int main(int argc, char** argv) {
             scene->set_explode(parser.value(explode).toDouble());
             scene->set_time(parser.value(time).toDouble());
         }
+        if (parser.isSet(field)) {
+            const QStringList f = parser.value(field).split(',');
+            if (f.size() < 2 || !window.show_field(f[0], f[1], f.value(2, "von_mises"))) return 1;
+        }
+        if (auto* scene = window.viewport()->scene()) {
+            if (parser.isSet(forces)) {
+                try {
+                    scene->compute_forces();
+                    scene->set_show_forces(true);
+                } catch (const std::exception& e) {
+                    qWarning("no force arrows: %s", e.what());
+                }
+            }
+            if (parser.isSet(trails)) scene->set_show_trails(true, parser.value(trails).toDouble());
+        }
         return window.viewport()->render(QSize(1000, 800)).save(parser.value(snapshot)) ? 0 : 1;
     }
     if (parser.isSet(video)) {
@@ -47,6 +65,21 @@ int main(int argc, char** argv) {
         const QString v = parser.value(view);
         window.viewport()->set_view(v == "top" ? 0 : v == "side" ? 0 : 35, v == "top" ? 0 : v == "side" ? -90 : -55);
         if (auto* scene = window.viewport()->scene()) scene->set_explode(parser.value(explode).toDouble());
+        if (parser.isSet(field)) {
+            const QStringList f = parser.value(field).split(',');
+            if (f.size() < 2 || !window.show_field(f[0], f[1], f.value(2, "von_mises"))) return 1;
+        }
+        if (auto* scene = window.viewport()->scene()) {
+            if (parser.isSet(forces)) {
+                try {
+                    scene->compute_forces();
+                    scene->set_show_forces(true);
+                } catch (const std::exception& e) {
+                    qWarning("no force arrows: %s", e.what());
+                }
+            }
+            if (parser.isSet(trails)) scene->set_show_trails(true, parser.value(trails).toDouble());
+        }
         ohs::gui::VideoOptions options;
         options.video_seconds = parser.value(video_seconds).toDouble();
         options.movement_seconds = parser.value(movement_seconds).toDouble();

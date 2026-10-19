@@ -116,6 +116,98 @@ void write_hdf5([[maybe_unused]] const std::filesystem::path& path, [[maybe_unus
 #endif
 }
 
+namespace {
+
+struct Array {
+    std::string name;
+    int components{1};
+    std::vector<double> values;
+};
+
+// The text between the quotes after `key=`, or empty.
+std::string attribute(const std::string& tag, const std::string& key) {
+    const std::size_t at = tag.find(key + "=\"");
+    if (at == std::string::npos) return {};
+    const std::size_t from = at + key.size() + 2;
+    return tag.substr(from, tag.find('"', from) - from);
+}
+
+}  // namespace
+
+VtuData parse_vtu(const std::string& text) {
+    if (text.find("<VTKFile") == std::string::npos || text.find("UnstructuredGrid") == std::string::npos) throw Error("not a VTU file");
+    // Every DataArray in file order, tagged with the section it sits in.
+    std::vector<std::pair<std::string, Array>> arrays;
+    std::string section;
+    for (std::size_t pos = 0; pos < text.size();) {
+        const std::size_t open = text.find('<', pos);
+        if (open == std::string::npos) break;
+        const std::size_t close = text.find('>', open);
+        if (close == std::string::npos) throw Error("the VTU file is truncated");
+        const std::string tag = text.substr(open, close - open + 1);
+        pos = close + 1;
+        for (const char* s : {"PointData", "Points", "Cells", "CellData"}) {
+            if (tag == std::string("<") + s + ">") section = s;
+        }
+        if (tag.rfind("<DataArray", 0) != 0) continue;
+        if (attribute(tag, "format") != "ascii") throw Error("only ASCII VTU files can be read");
+        const std::size_t end = text.find("</DataArray>", pos);
+        if (end == std::string::npos) throw Error("the VTU file is truncated");
+        Array a;
+        a.name = attribute(tag, "Name");
+        const std::string nc = attribute(tag, "NumberOfComponents");
+        a.components = nc.empty() ? 1 : std::stoi(nc);
+        std::istringstream in(text.substr(pos, end - pos));
+        double v;
+        while (in >> v) a.values.push_back(v);
+        arrays.emplace_back(section, std::move(a));
+        pos = end;
+    }
+
+    VtuData out;
+    const Array *points = nullptr, *connectivity = nullptr, *offsets = nullptr, *types = nullptr;
+    for (const auto& [where, a] : arrays) {
+        if (where == "Points") points = &a;
+        else if (where == "Cells" && a.name == "connectivity") connectivity = &a;
+        else if (where == "Cells" && a.name == "offsets") offsets = &a;
+        else if (where == "Cells" && a.name == "types") types = &a;
+        else if (where == "PointData") out.fields.push_back({a.name, a.values, a.components});
+    }
+    if (!points || !connectivity || !offsets || !types || points->components != 3 || points->values.size() % 3 != 0) {
+        throw Error("the VTU file has no tetrahedral mesh");
+    }
+    const std::size_t nodes = points->values.size() / 3, cells = types->values.size();
+    if (cells == 0 || offsets->values.size() != cells) throw Error("the VTU file has no cells");
+    const int type = static_cast<int>(types->values[0]);
+    if (type != 10 && type != 24) throw Error("the VTU file holds cells other than tetrahedra");
+    const int npe = type == 10 ? 4 : 10;
+    if (connectivity->values.size() != cells * static_cast<std::size_t>(npe)) throw Error("the VTU file has mixed or malformed cells");
+    out.mesh.order = npe == 4 ? 1 : 2;
+    out.mesh.nodes.resize(nodes);
+    for (std::size_t i = 0; i < nodes; ++i) out.mesh.nodes[i] = {points->values[3 * i], points->values[3 * i + 1], points->values[3 * i + 2]};
+    out.mesh.elems.resize(cells);
+    for (std::size_t c = 0; c < cells; ++c) {
+        out.mesh.elems[c].fill(-1);
+        for (int k = 0; k < npe; ++k) {
+            const int id = static_cast<int>(connectivity->values[c * static_cast<std::size_t>(npe) + static_cast<std::size_t>(k)]);
+            if (id < 0 || static_cast<std::size_t>(id) >= nodes) throw Error("the VTU file has a bad node index");
+            out.mesh.elems[c][static_cast<std::size_t>(k)] = id;
+        }
+    }
+    for (const NodeField& f : out.fields) {
+        if (f.values.size() != nodes * static_cast<std::size_t>(f.components)) throw Error("field '" + f.name + "' does not match the mesh");
+    }
+    return out;
+}
+
+VtuData read_vtu(const std::filesystem::path& path) {
+    std::ifstream in(path);
+    if (!in) throw Error("cannot read " + path.string());
+    std::stringstream buffer;
+    buffer << in.rdbuf();
+    return parse_vtu(buffer.str());
+}
+
 std::vector<NodeField> static_fields(const StaticResult& r) {
     std::vector<NodeField> out;
     out.push_back({"displacement", std::vector<double>(r.u.data(), r.u.data() + r.u.size()), 3});

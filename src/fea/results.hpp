@@ -20,6 +20,17 @@ struct NodeField {
 std::string to_vtu(const mesh::TetMesh& mesh, const std::vector<NodeField>& fields);
 void write_vtu(const std::filesystem::path& path, const mesh::TetMesh& mesh, const std::vector<NodeField>& fields);
 
+/// A mesh and its per-node fields as read back from a VTU file.
+struct VtuData {
+    mesh::TetMesh mesh;
+    std::vector<NodeField> fields;
+};
+
+/// Reads the ASCII VTU files that to_vtu writes (linear or quadratic tetrahedra, Float64 point data).
+/// Throws ohs::Error for anything else.
+VtuData read_vtu(const std::filesystem::path& path);
+VtuData parse_vtu(const std::string& text);
+
 /// True when the build links libhdf5.
 bool hdf5_available();
 

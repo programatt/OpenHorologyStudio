@@ -26,7 +26,13 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include "dynamics/calibre.hpp"
+#include "dynamics/torque_chain.hpp"
+#include "fea/results.hpp"
+#include "gui/field.hpp"
 #include "gui/job_queue.hpp"
+#include "kinematics/kinematics.hpp"
+#include "mesh/tetmesh.hpp"
 #include "gui/main_window.hpp"
 
 namespace fs = std::filesystem;
@@ -376,6 +382,158 @@ TEST_CASE("job queue: unfinished jobs survive a restart and finished ones keep t
     ohs::gui::JobQueue third("/bin/sh");
     CHECK(third.load(journal) == 0);  // nothing left to resume
     CHECK(third.jobs()[2].out == "queued behind\n");
+}
+
+TEST_CASE("field overlay: the boundary of a result mesh, coloured by the field and placed like the part", "[gui][field]") {
+    const auto m = ohs::mesh::extrude(ohs::mesh::structured_rect(0, 0, 2, 1, 2, 1), 0, 1, 1, 2);
+    ohs::fea::NodeField vm{"von_mises", std::vector<double>(m.nodes.size()), 1};
+    ohs::fea::NodeField disp{"displacement", std::vector<double>(3 * m.nodes.size(), 0.0), 3};
+    for (std::size_t i = 0; i < m.nodes.size(); ++i) {
+        vm.values[i] = 10.0 + m.nodes[i].x;  // 10 at the clamped end, 12 at the far end
+        disp.values[3 * i + 2] = -0.5 * m.nodes[i].x;
+    }
+    const QString path = QDir(fresh_dir("field")).filePath("r.vtu");
+    ohs::fea::write_vtu(path.toStdString(), m, {vm, disp});
+
+    CHECK(ohs::gui::plottable_fields(path.toStdString()) == std::vector<std::string>{"von_mises", "displacement"});
+    const auto o = ohs::gui::field_overlay_from_vtu(path.toStdString(), "wheel", "von_mises", 1.0, 0.5);
+    CHECK(o.part == "wheel");
+    CHECK(o.lo == Catch::Approx(10.0));
+    CHECK(o.hi == Catch::Approx(12.0));
+    CHECK(o.triangles.size() == ohs::mesh::boundary_faces(m).size());
+    CHECK(o.values.size() == o.triangles.size());
+    double xmin = 1e9;
+    for (const auto& t : o.triangles) xmin = std::min({xmin, t.a[0], t.b[0], t.c[0]});
+    CHECK(xmin == Catch::Approx(-1.0));  // moved by the pivot
+    const auto d = ohs::gui::field_overlay_from_vtu(path.toStdString(), "wheel", "displacement", 0, 0);
+    CHECK(d.hi == Catch::Approx(1.0));  // the length of the displacement vector, 0.5 * x at x = 2
+    CHECK_THROWS(ohs::gui::field_overlay_from_vtu(path.toStdString(), "wheel", "temperature", 0, 0));
+
+    const auto lo = ohs::gui::field_colour(0.0), hi = ohs::gui::field_colour(1.0);
+    CHECK(lo != hi);
+    CHECK(ohs::gui::field_colour(-3.0) == lo);  // clamped
+    CHECK(ohs::gui::field_colour(7.0) == hi);
+}
+
+TEST_CASE("gui: a shock analysis is drawn on the part as a colour field, and can be switched and cleared", "[gui][field]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_demo(fresh_dir("field-gui")));
+    w.select_part("escape_wheel");
+    const auto before = w.viewport()->render(QSize(600, 450));
+    REQUIRE(button(w, "Shock and modes of the selected part"));
+    button(w, "Shock and modes of the selected part")->click();
+    w.wait_for_jobs();
+
+    const auto* field = w.viewport()->scene()->field();
+    REQUIRE(field);  // the job's VTU was found and plotted
+    CHECK(field->part == "escape_wheel");
+    CHECK(field->hi > field->lo);
+    CHECK(field->label.find("von Mises") != std::string::npos);
+    const auto after = w.viewport()->render(QSize(600, 450));
+    CHECK(after != before);
+    // The wheel is no longer one flat colour: the pixels carry a spread of scale colours.
+    std::set<QRgb> colours;
+    for (int y = 0; y < after.height(); y += 2)
+        for (int x = 0; x < after.width(); x += 2) colours.insert(after.pixel(x, y));
+    CHECK(colours.size() > 60);
+
+    w.field_box()->setCurrentIndex(1);  // displacement
+    CHECK(w.viewport()->scene()->field()->label.find("displacement") != std::string::npos);
+    w.clear_field();
+    CHECK(w.viewport()->scene()->field() == nullptr);
+    CHECK(w.viewport()->render(QSize(600, 450)) == before);
+}
+
+TEST_CASE("gui: tooth force arrows and motion trails follow the torque chain and the kinematics", "[gui][overlays]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_demo(fresh_dir("overlays")));
+    ohs::gui::Scene scene = ohs::gui::Scene::load(w.project().toStdString());
+    const auto& m = scene.movement();
+
+    // Forces: one arrow for each mesh on the path from the barrel to the escape wheel.
+    scene.compute_forces(1.0);
+    REQUIRE(scene.forces().size() >= 3);
+    const auto cal = ohs::dynamics::default_calibre(m.beat_rate_vph);
+    const auto chain = ohs::dynamics::build_chain(m, scene.train(), cal);
+    const auto table = ohs::dynamics::torque_table(chain, cal, 1.0);
+    for (const auto& f : scene.forces()) {
+        INFO(f.driver << " -> " << f.driven);
+        double torque = 0;
+        for (const auto& row : table)
+            if (row.mobile == f.driven) torque = row.torque_nmm;
+        REQUIRE(torque > 0);
+        CHECK(f.newtons > 0);
+        // F times the pitch radius of the driven wheel is the torque the driven mobile receives.
+        bool matched = false;
+        for (const auto& mesh : m.meshes) {
+            for (int driven_comp : {mesh.a, mesh.b}) {
+                const int mob = m.mobile_of(driven_comp);
+                if (mob < 0 || m.mobiles[static_cast<std::size_t>(mob)].name != f.driven) continue;
+                const double r = 0.5 * mesh.module * m.components[static_cast<std::size_t>(driven_comp)].features.teeth;
+                matched = matched || std::abs(f.newtons * r - torque) < 1e-9 * torque;
+            }
+        }
+        CHECK(matched);
+        // Tangential: perpendicular to the line of centres, a unit vector in the dial plane.
+        const auto find = [&](const std::string& name) {
+            for (const auto& mob : m.mobiles) if (mob.name == name) return mob.center;
+            return ohs::model::Vec2{};
+        };
+        const auto c1 = find(f.driver), c2 = find(f.driven);
+        const double len = std::hypot(c2.x - c1.x, c2.y - c1.y);
+        CHECK(std::hypot(f.direction[0], f.direction[1]) == Catch::Approx(1.0));
+        CHECK(std::abs(f.direction[0] * (c2.x - c1.x) + f.direction[1] * (c2.y - c1.y)) < 1e-9 * len);
+    }
+    // Wind scales every force: half wind, half the force.
+    const double full = scene.forces().front().newtons;
+    scene.compute_forces(0.5);
+    CHECK(scene.forces().front().newtons < full);
+
+    // Trails: a marker per turning mobile, ending where the mobile is now, covering at most a turn.
+    scene.set_time(300.0);
+    scene.set_show_trails(true, 600.0);
+    const auto trails = scene.trails(48);
+    REQUIRE(trails.size() >= 3);
+    const auto angles = ohs::kinematics::mobile_angles(scene.train(), 300.0, {false, 0.2});
+    double fastest_span = 0, slowest_span = 1e9;
+    for (const auto& t : trails) {
+        REQUIRE(t.points.size() == 48);
+        std::size_t mobile = 0;
+        for (std::size_t i = 0; i < m.mobiles.size(); ++i) if (m.mobiles[i].name == t.mobile) mobile = i;
+        const auto& c = m.mobiles[mobile].center;
+        const auto& last = t.points.back();
+        CHECK(std::atan2(last[1] - c.y, last[0] - c.x) == Catch::Approx(std::remainder(angles[mobile], 2 * M_PI)).margin(1e-9));
+        double span = 0;  // path length of the polyline in turns of the marker
+        const double r = std::hypot(last[0] - c.x, last[1] - c.y);
+        for (std::size_t k = 1; k < t.points.size(); ++k) {
+            span += std::hypot(t.points[k][0] - t.points[k - 1][0], t.points[k][1] - t.points[k - 1][1]) / r;
+        }
+        CHECK(span <= 2 * M_PI + 0.2);  // never more than one revolution (chord length slightly under arc length)
+        fastest_span = std::max(fastest_span, span);
+        slowest_span = std::min(slowest_span, span);
+    }
+    CHECK(fastest_span > 5.5);   // fast wheels have turned a full circle in the window
+    CHECK(slowest_span < 1.0);   // the barrel has hardly moved
+    scene.set_show_trails(false);
+    CHECK(scene.show_trails() == false);
+
+    // Drawing: each overlay changes the picture.
+    w.viewport()->set_view(0, 0);
+    const auto plain = w.viewport()->render(QSize(600, 450));
+    w.forces_check()->setChecked(true);
+    const auto with_forces = w.viewport()->render(QSize(600, 450));
+    CHECK(with_forces != plain);
+    w.forces_check()->setChecked(false);
+    w.trails_check()->setChecked(true);
+    w.set_time(300.0);
+    const auto with_trails = w.viewport()->render(QSize(600, 450));
+    CHECK(with_trails != plain);
+    w.trails_check()->setChecked(false);
+    CHECK(w.viewport()->render(QSize(600, 450)) == w.viewport()->render(QSize(600, 450)));
 }
 
 TEST_CASE("gui: the animation is exported as a video whose frames show the train turning", "[gui][video]") {

@@ -8,8 +8,8 @@ know where to be careful.
 - **A basic graphical user interface.** `ohs-gui` ([Desktop application](desktop.md)) has a 3D
   viewport, exploded and cut-away views, an animation timeline, the Explain panel and a button for
   every analysis. It is not the plan's full UI: the viewport is drawn with Qt's painter, not the
-  OpenCASCADE OpenGL viewer or VTK, so there are no PBR materials, motion trails, force arrows,
-  field plots or mode-shape viewport (MP4 export needs ffmpeg); there is one plot (rate against amplitude);
+  OpenCASCADE OpenGL viewer or VTK, so there are no PBR materials, and the field plot covers the
+  shock case only, with no mode-shape display; MP4 export needs ffmpeg; there is one chart (rate against amplitude);
   undo covers edits of the project file (role changes and declared meshes), not views; and a job that was running when the window closed starts
   again from the beginning on the next open (jobs run in worker processes and are journalled, but the
   solvers do not checkpoint). It is built

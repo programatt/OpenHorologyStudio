@@ -83,6 +83,12 @@ public:
     /// string on success, else the reason.
     QString export_video(const QString& path, const VideoOptions& options = {});
 
+    /// Draws a field of a finite element result (a VTU file written by `ohs fea --vtu`) on a part:
+    /// "von_mises" or "displacement". Returns false and logs the reason when it cannot.
+    bool show_field(const QString& vtu, const QString& part, const QString& field);
+    void clear_field();
+    QComboBox* field_box() const { return field_box_; }
+
     void select_part(const QString& name);
     void set_time(double seconds);
     void set_playing(bool playing);
@@ -102,6 +108,8 @@ public:
     QSlider* timeline() const { return timeline_; }
     QSlider* explode_slider() const { return explode_; }
     QCheckBox* section_check() const { return section_; }
+    QCheckBox* forces_check() const { return forces_check_; }
+    QCheckBox* trails_check() const { return trails_check_; }
 
 private slots:
     void on_timer();
@@ -142,6 +150,9 @@ private:
     QSlider* section_offset_{};
     QCheckBox* section_{};
     QCheckBox* stepped_{};
+    QCheckBox* forces_check_{};
+    QCheckBox* trails_check_{};
+    QDoubleSpinBox* trail_seconds_{};
     QDoubleSpinBox* speed_{};
     QPushButton* play_{};
     QLabel* status_{};
@@ -151,6 +162,8 @@ private:
     PlotWidget* plot_{};
     QComboBox* role_box_{};
     QComboBox* mesh_box_{};
+    QComboBox* field_box_{};
+    QString field_vtu_, field_part_;
     JobQueue* queue_{};                               ///< every job, in submission order (the list shows these)
 
     std::shared_ptr<Scene> scene_;

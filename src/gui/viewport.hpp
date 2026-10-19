@@ -48,9 +48,13 @@ private:
         double depth;
         int part;
         double shade;
+        double value;  ///< field value at the triangle (mean of its corners), NaN without a field
     };
     std::vector<Projected> project(const QSize& size) const;
     void draw(QPainter& painter, const QSize& size) const;
+    void draw_legend(QPainter& painter, const QSize& size, const FieldOverlay& field) const;
+    void draw_overlays(QPainter& painter, const QSize& size) const;  ///< force arrows and motion trails
+    QPointF to_screen(const Point3& p, const QSize& size) const;
 
     std::shared_ptr<Scene> scene_;
     std::string selected_;

@@ -11,6 +11,7 @@
 #include <QListWidget>
 #include <QThread>
 #include <QMessageBox>
+#include <QSignalBlocker>
 #include <QUndoCommand>
 #include <QUndoStack>
 #include <QUndoView>
@@ -266,6 +267,18 @@ QWidget* MainWindow::build_animate_page() {
     row->addWidget(speed_);
     layout->addLayout(row);
 
+    auto* overlay_row = new QHBoxLayout;
+    forces_check_ = new QCheckBox(tr("Tooth force arrows"));
+    trails_check_ = new QCheckBox(tr("Motion trails over"));
+    trail_seconds_ = new QDoubleSpinBox;
+    trail_seconds_->setRange(0.1, 3600);
+    trail_seconds_->setValue(10.0);
+    trail_seconds_->setSuffix(tr(" s"));
+    overlay_row->addWidget(forces_check_);
+    overlay_row->addWidget(trails_check_);
+    overlay_row->addWidget(trail_seconds_);
+    layout->addLayout(overlay_row);
+
     timeline_ = new QSlider(Qt::Horizontal);
     timeline_->setRange(0, 10000);  // 0..60 s of movement time
     layout->addWidget(new QLabel(tr("Timeline (60 s of movement time)")));
@@ -289,10 +302,13 @@ QWidget* MainWindow::build_animate_page() {
     for (auto* s : {explode_, section_offset_}) connect(s, &QSlider::valueChanged, this, &MainWindow::on_view_changed);
     connect(section_, &QCheckBox::toggled, this, &MainWindow::on_view_changed);
     connect(stepped_, &QCheckBox::toggled, this, &MainWindow::on_view_changed);
+    connect(forces_check_, &QCheckBox::toggled, this, &MainWindow::on_view_changed);
+    connect(trails_check_, &QCheckBox::toggled, this, &MainWindow::on_view_changed);
+    connect(trail_seconds_, &QDoubleSpinBox::valueChanged, this, &MainWindow::on_view_changed);
     return page;
 }
 
-QWidget* MainWindow::build_analysis_page(const QString&, const std::vector<std::pair<QString, QStringList>>& commands) {
+QWidget* MainWindow::build_analysis_page(const QString& title, const std::vector<std::pair<QString, QStringList>>& commands) {
     auto* page = new QWidget;
     auto* layout = new QVBoxLayout(page);
     for (const auto& [label, args] : commands) {
@@ -300,6 +316,21 @@ QWidget* MainWindow::build_analysis_page(const QString&, const std::vector<std::
         b->setProperty("ohs_args", args);
         connect(b, &QPushButton::clicked, this, &MainWindow::on_run_analysis);
         layout->addWidget(b);
+    }
+    if (title == tr("Analyse")) {
+        auto* row = new QHBoxLayout;
+        field_box_ = new QComboBox;
+        field_box_->addItem(tr("von Mises stress"), "von_mises");
+        field_box_->addItem(tr("Displacement"), "displacement");
+        auto* clear = new QPushButton(tr("Clear the field plot"));
+        row->addWidget(new QLabel(tr("Plot on the part:")));
+        row->addWidget(field_box_, 1);
+        row->addWidget(clear);
+        layout->addLayout(row);
+        connect(field_box_, &QComboBox::currentIndexChanged, this, [this] {
+            if (!field_vtu_.isEmpty()) show_field(field_vtu_, field_part_, field_box_->currentData().toString());
+        });
+        connect(clear, &QPushButton::clicked, this, [this] { clear_field(); });
     }
     // The results panel is shared by every analysis workspace through the first page that makes it.
     if (!results_) {
@@ -489,6 +520,44 @@ void MainWindow::refresh_panels() {
     play_->setEnabled(scene_->can_animate());
 }
 
+bool MainWindow::show_field(const QString& vtu, const QString& part, const QString& field) {
+    if (!scene_) return false;
+    const int index = scene_->movement().find_component(part.toStdString());
+    if (index < 0) {
+        append_log(tr("Cannot plot a field: no part called %1").arg(part));
+        return false;
+    }
+    const int mobile = scene_->movement().mobile_of(index);
+    const double px = mobile >= 0 ? scene_->movement().mobiles[static_cast<std::size_t>(mobile)].center.x : 0.0;
+    const double py = mobile >= 0 ? scene_->movement().mobiles[static_cast<std::size_t>(mobile)].center.y : 0.0;
+    try {
+        scene_->set_field(field_overlay_from_vtu(vtu.toStdString(), part.toStdString(), field.toStdString(), px, py));
+    } catch (const std::exception& e) {
+        append_log(tr("Cannot plot %1 from %2: %3").arg(field, vtu, e.what()));
+        return false;
+    }
+    field_vtu_ = vtu;
+    field_part_ = part;
+    if (field_box_) {
+        const int at = field_box_->findData(field);
+        if (at >= 0 && at != field_box_->currentIndex()) {
+            const QSignalBlocker block(field_box_);
+            field_box_->setCurrentIndex(at);
+        }
+    }
+    const FieldOverlay* f = scene_->field();
+    append_log(tr("Plotting %1 on %2: %3 to %4").arg(QString::fromStdString(f->label), part).arg(f->lo, 0, 'g', 4).arg(f->hi, 0, 'g', 4));
+    viewport_->update();
+    return true;
+}
+
+void MainWindow::clear_field() {
+    field_vtu_.clear();
+    field_part_.clear();
+    if (scene_) scene_->clear_field();
+    viewport_->update();
+}
+
 QString MainWindow::export_video(const QString& path, const VideoOptions& options) {
     append_log(tr("Exporting %1 (%2 s of video, %3 s of movement time)").arg(path).arg(options.video_seconds).arg(options.movement_seconds));
     const QString error = gui::export_video(*viewport_, path, options, [this](int frame, int frames) {
@@ -571,6 +640,17 @@ void MainWindow::on_view_changed() {
     const double r = scene_->radius();
     plane.offset = c[2] + (section_offset_->value() / 500.0 - 1.0) * r;
     scene_->set_section(plane);
+    if (forces_check_->isChecked() && scene_->forces().empty()) {
+        try {
+            scene_->compute_forces();
+        } catch (const std::exception& e) {
+            append_log(tr("No force arrows: %1").arg(e.what()));
+            const QSignalBlocker block(forces_check_);
+            forces_check_->setChecked(false);
+        }
+    }
+    scene_->set_show_forces(forces_check_->isChecked());
+    scene_->set_show_trails(trails_check_->isChecked(), trail_seconds_->value());
     viewport_->update();
 }
 
@@ -591,6 +671,12 @@ void MainWindow::on_run_analysis() {
             args << QString::fromStdString(viewport_->selected());
         } else if (a == "@report") args << QFileInfo(project_).dir().filePath("report");
         else args << a;
+    }
+    // The shock case also writes its result for the viewport's field plot.
+    const int shock = args.indexOf("--case");
+    if (shock >= 0 && args.value(shock + 1) == "shock" && !args.contains("--vtu")) {
+        const QString part = args.value(args.indexOf("--part") + 1);
+        args << "--vtu" << QFileInfo(project_).dir().filePath(part + ".shock.vtu");
     }
     submit(static_cast<QPushButton*>(sender())->text(), args);
     if (args.value(0) == "timekeeping") submit(tr("Timekeeping plot data"), {"--json", "timekeeping", project_});
@@ -667,6 +753,11 @@ void MainWindow::on_job_finished(int index) {
     if (!job.err.isEmpty()) append_log(job.err.trimmed());
     append_log(tr("exit code %1").arg(job.exit_code));
     show_result(job.args, job.out, job.exit_code);
+    const int vtu = job.args.indexOf("--vtu");
+    if (vtu >= 0 && job.exit_code == 0 && QFileInfo::exists(job.args.value(vtu + 1))) {
+        const QString field = field_box_ ? field_box_->currentData().toString() : QString("von_mises");
+        show_field(job.args.value(vtu + 1), job.args.value(job.args.indexOf("--part") + 1), field);
+    }
 }
 
 void MainWindow::show_result(const QStringList& args, const QString& out, int code) {

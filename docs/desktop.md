@@ -37,6 +37,16 @@ ohs-gui movement.hsproj
   file back exactly as it was (the history is snapshots of the file), and the Edit history dock lists
   the steps; click one to return to that state. Opening or importing another project starts a new
   history. Analyses, views and the timeline change no project data and are not part of it.
+- **Field plot.** *Shock and modes of the selected part* also writes its result, and the part is then
+  drawn in the viewport as the finite element surface coloured by von Mises stress (or, from the
+  *Plot on the part* list, by displacement), with a colour scale. *Clear the field plot* brings the CAD
+  surface back. Only the shock case places its mesh in the movement, so the tooth case has no plot.
+  From the command line: `ohs-gui project.hsproj --snapshot out.png --field result.vtu,part,von_mises`.
+- **Tooth force arrows and motion trails** (Animate workspace, or `--forces` and `--trails SECONDS`
+  with `--snapshot` or `--video`). An arrow at each mesh on the path from the barrel to the escape
+  wheel shows the tangential tooth force at full wind, computed from the torque chain and the pitch
+  radius, with its value in mN. A trail follows a marker on the rim of every turning mobile over the
+  chosen movement time, at most one turn, so the length of a trail shows the speed of the wheel.
 - **File, Export video** renders the animation to an MP4 (or WebM or GIF) with ffmpeg, which must be
   installed (or set `OHS_FFMPEG`): the movement time shown, the length and the frame rate are the
   options of `ohs-gui project.hsproj --video out.mp4 --movement-seconds 60 --video-seconds 10 --fps 30
@@ -46,7 +56,8 @@ ohs-gui movement.hsproj
 ## Not in the window
 
 The viewport draws with Qt's own painter, so it needs no GPU and runs anywhere, but it does not
-have the OpenCASCADE OpenGL viewer, PBR materials, motion trails or force arrows, and there is no
-A job that was running when the window closed starts again from the beginning rather than
-carrying on (the solvers do not checkpoint). The only plot is rate against amplitude, and views
-cannot be undone, only edits of the project. Use `ohs animate` for glTF, and `ohs report` for the report. See [Limitations](limitations.md).
+have the OpenCASCADE OpenGL viewer or PBR materials. The flat-shaded triangles, the field plot and the
+overlays are the whole of it. A job that was running when the window closed starts again from the
+beginning rather than carrying on (the solvers do not checkpoint). Views cannot be undone, only
+edits of the project. Use `ohs animate` for glTF or USD, and `ohs report` for the report. See
+[Limitations](limitations.md).
