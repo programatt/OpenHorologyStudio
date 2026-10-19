@@ -16,6 +16,7 @@
 #include "core/error.hpp"
 #include "dynamics/bench.hpp"
 #include "dynamics/calibre.hpp"
+#include "dynamics/hairspring.hpp"
 #include "dynamics/chrono_adapter.hpp"
 #include "dynamics/detailed.hpp"
 #include "dynamics/oscillator.hpp"
@@ -42,6 +43,7 @@ struct DynOptions {
     double wind = 1.0, beat_rate = 0.0, jitter_us = 0.0;
     double amp_tolerance_percent = 2.0, rate_tolerance = 1.0;
     unsigned long seed = 1;
+    double hs_youngs = 210.0, hs_width = 0.14, hs_thickness = 0.025, hs_inner_radius = 0.6, hs_pitch = 0.12, hs_turns = 12.0, hs_amplitude_deg = 300.0;
     bool fit_damping = false, verify = false, no_trace = false;
 };
 
@@ -396,6 +398,48 @@ int cmd_calibre_init(const DynOptions& o, bool as_json) {
     return kExitOk;
 }
 
+int cmd_calibre_hairspring(const DynOptions& o, bool as_json) {
+    HairspringSpec s;
+    s.youngs_gpa = o.hs_youngs;
+    s.width_mm = o.hs_width;
+    s.thickness_mm = o.hs_thickness;
+    s.inner_radius_mm = o.hs_inner_radius;
+    s.pitch_mm = o.hs_pitch;
+    s.turns = o.hs_turns;
+    const double amplitude = o.hs_amplitude_deg * std::numbers::pi / 180.0;
+    const HairspringFit fit = fit_hairspring(s, amplitude);
+
+    Calibre c = default_calibre(o.beat_rate > 0 ? o.beat_rate : 25200);
+    if (!o.calibre_file.empty()) c = load_calibre(o.calibre_file);
+    c.hairspring_youngs_gpa = s.youngs_gpa;
+    c.hairspring_width_mm = s.width_mm;
+    c.hairspring_thickness_mm = s.thickness_mm;
+    c.hairspring_length_mm = s.length_mm();
+    c.hairspring_cubic_nm_rad3 = fit.cubic_nm_rad3;
+    const double frequency = c.natural_frequency_hz();
+    // The oscillation grows slower or faster with amplitude by 3 c A^2 / 8 k, to first order.
+    const double shift = 3.0 * fit.cubic_nm_rad3 * amplitude * amplitude / (8.0 * fit.stiffness_nm_rad);
+    if (as_json) {
+        json j = {{"length_mm", s.length_mm()}, {"stiffness_nm_rad", fit.stiffness_nm_rad}, {"euler_stiffness_nm_rad", fit.euler_stiffness},
+                  {"cubic_nm_rad3", fit.cubic_nm_rad3}, {"asymmetry", fit.asymmetry}, {"max_side_force_n", fit.max_side_force_n},
+                  {"frequency_shift_at_amplitude", shift}, {"natural_frequency_hz", frequency}};
+        std::cout << j.dump(2) << '\n';
+    } else {
+        std::cout << std::setprecision(5) << "spiral of " << s.turns << " turns, strip " << s.length_mm() << " mm long\n"
+                  << "stiffness " << fit.stiffness_nm_rad << " N.m/rad (E I / L would give " << fit.euler_stiffness << ")\n"
+                  << "cubic term " << fit.cubic_nm_rad3 << " N.m/rad^3: the frequency changes by " << std::showpos << shift * 100 << std::noshowpos
+                  << " % at " << o.hs_amplitude_deg << " degrees\n"
+                  << "largest side force on the staff over the swing " << fit.max_side_force_n * 1e6 << " uN, odd/even asymmetry " << fit.asymmetry
+                  << "\nfree frequency with this spring and the calibre's balance: " << frequency << " Hz ("
+                  << frequency * 7200.0 << " vph)\n";
+    }
+    if (!o.out.empty()) {
+        write_file(o.out, to_toml(c));
+        if (!as_json) std::cout << "wrote " << o.out << '\n';
+    }
+    return kExitOk;
+}
+
 }  // namespace
 
 void add_dynamics_commands(CLI::App& app, const bool& json_flag, std::function<int()>& chosen) {
@@ -479,6 +523,18 @@ void add_dynamics_commands(CLI::App& app, const bool& json_flag, std::function<i
     init->add_option("-o,--output", o->out, "File to write (default: stdout)");
     init->add_option("--beat-rate", o->beat_rate, "Beat rate in vph")->capture_default_str();
     init->callback(pick(cmd_calibre_init));
+    auto* hs = calibre->add_subcommand("hairspring", "Fit a calibre's hairspring from a beam model of a flat spiral: stiffness and the cubic term");
+    hs->add_option("--calibre", o->calibre_file, "Start from this calibre (default: the reference one)")->check(CLI::ExistingFile);
+    hs->add_option("--youngs", o->hs_youngs, "Young's modulus in GPa")->capture_default_str();
+    hs->add_option("--width", o->hs_width, "Strip height along the staff in mm")->capture_default_str();
+    hs->add_option("--thickness", o->hs_thickness, "Strip radial thickness in mm")->capture_default_str();
+    hs->add_option("--inner-radius", o->hs_inner_radius, "Radius of the inner end, mm")->capture_default_str();
+    hs->add_option("--pitch", o->hs_pitch, "Distance between coils, mm")->capture_default_str();
+    hs->add_option("--turns", o->hs_turns, "Number of coils")->capture_default_str();
+    hs->add_option("--amplitude", o->hs_amplitude_deg, "Amplitude to fit over, degrees")->capture_default_str();
+    hs->add_option("--beat-rate", o->beat_rate, "Beat rate in vph for the rest of the calibre")->capture_default_str();
+    hs->add_option("-o,--output", o->out, "Write the calibre with the fitted spring as TOML");
+    hs->callback(pick(cmd_calibre_hairspring));
 }
 
 }  // namespace ohs::cli

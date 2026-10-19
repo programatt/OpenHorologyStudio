@@ -28,7 +28,7 @@ double crown_phase(Position p) {
 
 /// The equations of motion of the balance in SI units, shared by the stepper and the estimate.
 struct Model {
-    double inertia, wheel_inertia, stiffness, rest, damping, friction;
+    double inertia, wheel_inertia, stiffness, cubic, rest, damping, friction;
     double gravity_torque, gravity_phase, lead;
     EscapementType type;
     EscapementGeometry esc;
@@ -37,6 +37,7 @@ struct Model {
         : inertia(c.inertia()),
           wheel_inertia(c.escape_wheel_inertia()),
           stiffness(c.hairspring_stiffness()),
+          cubic(c.hairspring_cubic_nm_rad3),
           rest(c.beat_offset_deg * kDeg),
           damping(c.air_damping_nms),
           friction(c.friction_torque(p)),
@@ -63,7 +64,8 @@ struct Model {
     }
 
     double acceleration(double theta, double omega, Zone z, int s) const {
-        double torque = -stiffness * (theta - rest) - damping * omega - friction * s;
+        const double a = theta - rest;
+        double torque = -stiffness * a - cubic * a * a * a - damping * omega - friction * s;
         torque -= gravity_torque * std::sin(theta + gravity_phase);
         if (z == kImpulse) torque += s * esc.impulse_torque;
         if (z == kUnlock) torque -= s * esc.unlock_torque;

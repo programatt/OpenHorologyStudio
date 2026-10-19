@@ -37,6 +37,7 @@ const std::vector<Field>& fields() {
         {"hairspring_width_mm", &Calibre::hairspring_width_mm},
         {"hairspring_thickness_mm", &Calibre::hairspring_thickness_mm},
         {"hairspring_length_mm", &Calibre::hairspring_length_mm},
+        {"hairspring_cubic_nm_rad3", &Calibre::hairspring_cubic_nm_rad3},
         {"air_damping_nms", &Calibre::air_damping_nms},
         {"pivot_friction_flat_nm", &Calibre::pivot_friction_flat_nm},
         {"vertical_friction_factor", &Calibre::vertical_friction_factor},

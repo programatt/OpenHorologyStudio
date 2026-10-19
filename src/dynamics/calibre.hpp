@@ -53,6 +53,9 @@ struct Calibre {
     double hairspring_width_mm = 0.14;
     double hairspring_thickness_mm = 0.025;
     double hairspring_length_mm = 0.0;       ///< 0: derive from the beat rate (default_calibre does)
+    /// Cubic term of the restoring torque, N·m/rad^3: torque = -(k a + c a^3) with a the angle from rest. 0 is
+    /// a perfectly linear spring; `ohs calibre hairspring` fits it from a beam model of the spiral.
+    double hairspring_cubic_nm_rad3 = 0.0;
     double air_damping_nms = 1.0e-11;        ///< viscous damping torque per rad/s, N·m·s
     double pivot_friction_flat_nm = 8.0e-10; ///< Coulomb friction torque on the balance, dial up/down
     double vertical_friction_factor = 1.3;   ///< multiplier in the hanging positions
