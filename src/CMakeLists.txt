@@ -39,8 +39,12 @@ file(READ ${PROJECT_SOURCE_DIR}/data/materials/materials.toml OHS_MATERIALS_TOML
 file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/materials_data.cpp
      CONTENT "namespace ohs::fea {\nextern const char* const kMaterialsToml;\nconst char* const kMaterialsToml = R\"TOML(${OHS_MATERIALS_TOML})TOML\";\n}\n")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/data/materials/materials.toml)
-ohs_library(ohs_fea fea/material.cpp fea/element.cpp fea/fea.cpp fea/analysis.cpp fea/results.cpp fea/calculix.cpp fea/mfem_adapter.cpp ${CMAKE_CURRENT_BINARY_DIR}/materials_data.cpp)
+ohs_library(ohs_fea fea/material.cpp fea/element.cpp fea/fea.cpp fea/analysis.cpp fea/results.cpp fea/calculix.cpp fea/mfem_adapter.cpp fea/vtk_adapter.cpp ${CMAKE_CURRENT_BINARY_DIR}/materials_data.cpp)
 target_link_libraries(ohs_fea PUBLIC ohs_mesh Eigen3::Eigen PRIVATE tomlplusplus::tomlplusplus)
+if(VTK_FOUND)
+  target_compile_definitions(ohs_fea PUBLIC OHS_WITH_VTK)
+  target_link_libraries(ohs_fea PUBLIC VTK::CommonCore VTK::CommonDataModel VTK::IOXML)
+endif()
 if(OHS_MFEM_FOUND)
   target_compile_definitions(ohs_fea PUBLIC OHS_WITH_MFEM)
   target_include_directories(ohs_fea SYSTEM PRIVATE ${OHS_MFEM_INCLUDE} ${OHS_HYPRE_INCLUDE})

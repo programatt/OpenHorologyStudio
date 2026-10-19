@@ -24,7 +24,7 @@ jobs:
             libocct-data-exchange-dev libocct-modeling-algorithms-dev libocct-foundation-dev \
             libocct-modeling-data-dev libocct-ocaf-dev libocct-visualization-dev libeigen3-dev \
             libcli11-dev libspdlog-dev nlohmann-json3-dev libtomlplusplus-dev catch2 poppler-utils \
-            libhdf5-dev libmfem-dev
+            libhdf5-dev libmfem-dev libvtk9-dev
           python3 -m pip install --break-system-packages nanobind scikit-build-core netgen-mesher
       - name: Build and test (release, with Python)
         run: |

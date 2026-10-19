@@ -351,7 +351,8 @@ Six milestones to 1.0, each usable on its own and closed by a gate you check.
 - [x] Worker-process job queue that survives restarts and cancels running jobs (journalled; a running job restarts from the beginning, no solver checkpoints)
 - [x] MFEM adapter as an independent cross-check of the static solver (`ohs fea --mfem`)
 - [x] Netgen as an out-of-process 3D volume mesher for the shock case (`--mesher netgen`, via its Python module)
-- [ ] A VTK adapter; MFEM as the solver itself; a 3D mesher of our own; Netgen for the other structural cases
+- [x] A VTK adapter for file output and checking (`--vtu-compressed`; OHS VTU files verified with VTK's reader)
+- [ ] VTK rendering; MFEM as the solver itself; a 3D mesher of our own; Netgen for the other structural cases
 - [ ] Chrono for the whole train, rigid bodies with collision geometry, shock transients
 - [x] HDF5 results for the structural fields (`ohs fea --hdf5`; JSON, CSV and VTU as before)
 - [x] USD export (`ohs animate -o x.usda`, checked with Pixar's reader)

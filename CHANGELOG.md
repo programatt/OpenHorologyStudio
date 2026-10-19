@@ -9,6 +9,8 @@ Semantic Versioning, with the Python API and the plugin ABI versioned as describ
 Found by running the plan's gates on the real OM10 file.
 
 ### Added
+- `ohs fea --vtu-compressed` writes a binary, zlib-compressed VTU through VTK (optional `libvtk9-dev`); the
+  text VTU files are now checked by opening them with VTK's own reader.
 - A spring detent (chronometer) escapement in the reduced timekeeping model (`escapement = "detent"` and
   `passing_spring_ratio` in a calibre): one impulse per oscillation, a passing spring on the return
   swing, a timegrapher that hears one tick per oscillation. Checked against an energy balance per

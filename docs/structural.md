@@ -39,6 +39,14 @@ netgen-mesher` into the `python3` on your PATH, or point `OHS_NETGEN_PYTHON` at 
 has it); OHS links nothing from it. The holes that are clamped are still the round holes found in the
 mid-height section.
 
+`--vtu-compressed` writes the same result as a zlib-compressed binary VTU through VTK (about 40 % smaller
+on a real part; it needs a build with VTK, `libvtk9-dev`). The VTU files `--vtu` writes were checked by opening them with VTK's own
+reader, so ParaView will take them: the points, the quadratic tetrahedra and the arrays all arrive.
+
+`--vtu-compressed` writes the same result as a zlib-compressed binary VTU through VTK (about 40 % smaller
+on a real part; it needs a build with VTK, `libvtk9-dev`). The VTU files `--vtu` writes were checked by opening them with VTK's own
+reader, so ParaView will take them: the points, the quadratic tetrahedra and the arrays all arrive.
+
 `--mfem` re-solves the shock case with MFEM, an independent finite element code, built from the same
 mesh and loads but with its own elements, assembly and conjugate-gradient solver, and prints the
 largest displacement difference. The two codes use the same discretisation, so they agree to solver

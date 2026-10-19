@@ -16,6 +16,7 @@
 #include "fea/fea.hpp"
 #include "fea/mfem_adapter.hpp"
 #include "fea/results.hpp"
+#include "fea/vtk_adapter.hpp"
 
 #ifdef OHS_WITH_HDF5
 #include <hdf5.h>
@@ -236,6 +237,73 @@ TEST_CASE("VTU output describes the mesh and its fields") {
     CHECK_THROWS_AS(fea::to_vtu(model.mesh, {bad}), Error);
     const auto lin = mesh::extrude(mesh::structured_rect(0, 0, 1, 1, 1, 1), 0, 1, 1, 1);
     CHECK_THAT(fea::to_vtu(lin, {}), Catch::Matchers::ContainsSubstring("10 10"));
+}
+
+TEST_CASE("VTK opens the VTU files OHS writes, and writes compressed ones of its own") {
+    const mesh::TetMesh quad = mesh::extrude(mesh::structured_rect(0, 0, 4, 2, 4, 2), 0, 1, 2, 2);
+    fea::NodeField vm{"von_mises", std::vector<double>(quad.nodes.size()), 1};
+    fea::NodeField disp{"displacement", std::vector<double>(3 * quad.nodes.size()), 3};
+    for (std::size_t i = 0; i < quad.nodes.size(); ++i) {
+        vm.values[i] = quad.nodes[i].x * quad.nodes[i].y;
+        for (int c = 0; c < 3; ++c) disp.values[3 * i + static_cast<std::size_t>(c)] = 1e-3 * (c + 1) * quad.nodes[i].x;
+    }
+    const auto dir = std::filesystem::temp_directory_path();
+    const auto ascii = dir / "ohs_vtk_ascii.vtu", packed = dir / "ohs_vtk_packed.vtu";
+
+    if (!fea::vtk_available()) {
+        CHECK_THROWS_AS(fea::write_vtu_compressed(packed, quad, {vm}), Error);
+        CHECK_THROWS_AS(fea::inspect_with_vtk(ascii), Error);
+        return;
+    }
+    fea::write_vtu(ascii, quad, {vm, disp});
+    fea::write_vtu_compressed(packed, quad, {vm, disp});
+
+    // VTK's own reader accepts OHS's text file: the same points, cells (quadratic tetrahedra) and arrays.
+    const auto a = fea::inspect_with_vtk(ascii);
+    INFO(a.error);
+    REQUIRE(a.ok);
+    CHECK(a.points == quad.nodes.size());
+    CHECK(a.cells == quad.elems.size());
+    CHECK(a.cell_type == 24);
+    CHECK(a.arrays == std::vector<std::string>{"von_mises", "displacement"});
+    CHECK(a.bounds[1] == Approx(4.0));
+    CHECK(a.bounds[3] == Approx(2.0));
+    CHECK(a.bounds[5] == Approx(1.0));
+
+    // The compressed file says the same and is smaller than the text one.
+    const auto p = fea::inspect_with_vtk(packed);
+    INFO(p.error << " (file size " << (std::filesystem::exists(packed) ? std::filesystem::file_size(packed) : 0) << ")");
+    REQUIRE(p.ok);
+    CHECK(p.points == a.points);
+    CHECK(p.cells == a.cells);
+    CHECK(p.cell_type == 24);
+    CHECK(p.arrays == a.arrays);
+    CHECK(std::filesystem::file_size(packed) * 5 < std::filesystem::file_size(ascii) * 3);  // base64 costs a third of what zlib saves
+
+    // Linear tetrahedra are VTK type 10.
+    const mesh::TetMesh lin = mesh::extrude(mesh::structured_rect(0, 0, 1, 1, 1, 1), 0, 1, 1, 1);
+    fea::write_vtu_compressed(packed, lin, {});
+    CHECK(fea::inspect_with_vtk(packed).cell_type == 10);
+
+    // A garbage file is reported, not trusted, and a mismatched field is refused.
+    std::ofstream(ascii) << "<VTKFile>not really";
+    CHECK_FALSE(fea::inspect_with_vtk(ascii).ok);
+    CHECK_THROWS_AS(fea::write_vtu_compressed(packed, quad, {fea::NodeField{"x", {1.0}, 1}}), Error);
+
+    // The node order the writers share with VTK's quadratic tetrahedron: corners, then the midsides of edges
+    // 01, 12, 20, 03, 13, 23.
+    const auto mid = [&](int a_node, int b_node) { return V3{0.5 * (quad.nodes[a_node].x + quad.nodes[b_node].x), 0.5 * (quad.nodes[a_node].y + quad.nodes[b_node].y), 0.5 * (quad.nodes[a_node].z + quad.nodes[b_node].z)}; };
+    const auto& e = quad.elems[7];
+    const int edges[6][2] = {{0, 1}, {1, 2}, {2, 0}, {0, 3}, {1, 3}, {2, 3}};
+    for (int k = 0; k < 6; ++k) {
+        const V3 want = mid(e[edges[k][0]], e[edges[k][1]]);
+        const V3& got = quad.nodes[e[4 + k]];
+        CHECK(got.x == Approx(want.x).margin(1e-12));
+        CHECK(got.y == Approx(want.y).margin(1e-12));
+        CHECK(got.z == Approx(want.z).margin(1e-12));
+    }
+    std::filesystem::remove(ascii);
+    std::filesystem::remove(packed);
 }
 
 TEST_CASE("VTU files read back as written") {

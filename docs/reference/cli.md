@@ -499,6 +499,7 @@ Options:
   --up TEXT                   CAD axis normal to the dial (default: the one found at import)
   --mesher TEXT [section]     Shock case mesher: section (mid-height section, extruded) or netgen (the whole B-rep; needs 'pip install netgen-mesher')
   --vtu TEXT                  Write the result for ParaView
+  --vtu-compressed TEXT       Write the result as a binary, zlib-compressed VTU written by VTK (needs a build with VTK)
   --hdf5 TEXT                 Write mesh and fields to an HDF5 file (needs a build with libhdf5)
   --crosscheck                Compare with CalculiX if it is installed
   --mfem                      Compare with MFEM, an independent finite element code, if this build has it (shock case)
