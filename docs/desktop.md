@@ -4,7 +4,7 @@
 `ohs` command run in the same process, so anything you do in the window you can also do in a
 script, and the window can save what you did as one.
 
-Build it with `-DOHS_BUILD_GUI=ON` (needs Qt 6.5 or newer with Widgets). See [Install](install.md).
+Build it with `-DOHS_BUILD_GUI=ON` (needs Qt 6.4 or newer with Widgets; Ubuntu 24.04's `qt6-base-dev`, 6.4.2, is enough). See [Install](install.md).
 
 ```
 ohs-gui movement.hsproj

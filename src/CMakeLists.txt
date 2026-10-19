@@ -117,7 +117,7 @@ target_link_libraries(ohs_perf PRIVATE ohs_lessons ohs_reports ohs_manufacturing
 
 # ---- Qt desktop application (optional) --------------------------------------------------------------
 if(OHS_BUILD_GUI)
-  find_package(Qt6 6.5 REQUIRED COMPONENTS Widgets)
+  find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets)
   set(CMAKE_AUTOMOC ON)
   # The scene is Qt-free (tessellated parts, pose, exploded view, section) and tested without a display.
   ohs_library(ohs_gui_scene gui/scene.cpp gui/field.cpp)

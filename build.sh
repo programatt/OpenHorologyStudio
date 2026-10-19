@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# One-command build and test: ./build.sh [--debug|--asan|--tsan|--coverage] [--jobs N] [--no-test]
+# One-command build and test: ./build.sh [--debug|--asan|--tsan|--coverage|--gui] [--jobs N] [--no-test]
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -13,6 +13,7 @@ while [[ $# -gt 0 ]]; do
     --asan) preset=asan ;;
     --tsan) preset=tsan ;;
     --coverage) preset=coverage ;;
+    --gui) preset=gui ;;
     --jobs) jobs="$2"; shift ;;
     --no-test) run_tests=0 ;;
     -h|--help) sed -n '3p' "$0"; exit 0 ;;
@@ -48,3 +49,4 @@ if [[ $run_tests -eq 1 ]]; then
   fi
 fi
 echo "ohs binary: build/$preset/src/ohs"
+if [[ $preset == gui ]]; then echo "desktop app: build/gui/src/ohs-gui"; fi

@@ -43,8 +43,9 @@ QApplication& app() {
     static int argc = 1;
     static char name[] = "ohs_gui_tests";
     static char* argv[] = {name, nullptr};
-    static QApplication a(argc, argv);
-    return a;
+    // Never destroyed: tearing a QApplication down at process exit crashes with some Qt versions (6.4).
+    static QApplication* a = new QApplication(argc, argv);
+    return *a;
 }
 
 QString fresh_dir(const char* tag) {

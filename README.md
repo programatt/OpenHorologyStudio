@@ -27,16 +27,34 @@ optional adapter for the escapement, `-DOHS_WITH_CHRONO=ON`) and escapements oth
 
 ## Build
 
+Everything below was run on Ubuntu 24.04 with GCC 13; each command is what produced the binaries.
+
 ```
-./build.sh              # release build + tests  (--debug, --asan, --jobs N, --no-test)
+# 1. Dependencies (apt provides OCCT 7.6; the plan targets 8.0)
+sudo apt install cmake ninja-build g++ python3 \
+  libocct-data-exchange-dev libocct-modeling-algorithms-dev libocct-foundation-dev \
+  libocct-modeling-data-dev libocct-ocaf-dev libocct-visualization-dev libeigen3-dev libcli11-dev \
+  libspdlog-dev nlohmann-json3-dev libtomlplusplus-dev catch2 libtbb-dev libhdf5-dev
+sudo apt install qt6-base-dev          # for the desktop app
+
+# 2. Command line tool: release build and the test suite
+./build.sh --jobs 14                   # -> build/release/src/ohs
+
+# 3. Desktop app (Qt 6 Widgets): same script, GUI preset
+./build.sh --gui --jobs 14 --no-test   # -> build/gui/src/ohs-gui (and build/gui/src/ohs)
 ```
 
-Needs CMake 3.28+, Ninja, GCC 13+ or Clang 17+, and on Ubuntu 24.04:
-`sudo apt install libocct-data-exchange-dev libocct-modeling-algorithms-dev libocct-foundation-dev
-libocct-modeling-data-dev libocct-ocaf-dev libocct-visualization-dev libeigen3-dev libcli11-dev
-libspdlog-dev nlohmann-json3-dev libtomlplusplus-dev catch2`. (apt provides OCCT 7.6; the plan
-targets 8.0.) The Python package (`-DOHS_BUILD_PYTHON=ON`, needs nanobind), packages (`cpack`),
-Windows (`build.ps1`) and macOS presets are described in [`docs/install.md`](docs/install.md).
+Run them with `build/release/src/ohs --help` and `build/gui/src/ohs-gui` (add a project:
+`build/gui/src/ohs-gui movement.hsproj`; `File, Open the demonstration movement` needs no CAD file).
+`./build.sh --help` lists the other builds (`--debug`, `--asan`, `--tsan`, `--coverage`). The GUI tests run
+offscreen: `ctest --preset gui` after a `--gui` build.
+
+Optional libraries are used when found at configure time, and `ohs fea` says so when a feature is missing:
+`libmfem-dev` (`--mfem`, `--solver mfem`), `libvtk9-dev` (`--vtu-compressed`), `libhdf5-dev` (`--hdf5`),
+`ffmpeg` at run time (video export) and `pip install netgen-mesher` (`--mesher netgen`). Chrono and a
+serial MFEM can be built at pinned commits with `cmake/superbuild`. The Python package
+(`-DOHS_BUILD_PYTHON=ON`, needs nanobind), packages (`cpack`), Windows (`build.ps1`) and macOS presets are
+described in [`docs/install.md`](docs/install.md).
 
 ## Try it without any CAD file
 

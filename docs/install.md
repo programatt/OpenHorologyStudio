@@ -69,7 +69,7 @@ passes), and the OHS build against the result finds them. It was not run on Wind
 ### Desktop application
 
 ```
-sudo apt install qt6-base-dev          # or point CMAKE_PREFIX_PATH at any Qt 6.5+ (aqtinstall works)
+sudo apt install qt6-base-dev          # or point CMAKE_PREFIX_PATH at any Qt 6.4+ (aqtinstall works)
 cmake --preset gui && cmake --build --preset gui && ctest --preset gui
 build/gui/src/ohs-gui
 ```
