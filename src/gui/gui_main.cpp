@@ -9,10 +9,13 @@
 #include <QTimer>
 
 #include "gui/main_window.hpp"
+#include "gui/theme.hpp"
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QApplication::setApplicationName("Open Horology Studio");
+    QApplication::setOrganizationName("Open Horology Studio");  // where the window layout is remembered
+    ohs::gui::apply_theme(app);
 
     QCommandLineParser parser;
     parser.addHelpOption();

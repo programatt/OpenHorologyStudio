@@ -38,6 +38,7 @@
 #include "kinematics/kinematics.hpp"
 #include "mesh/tetmesh.hpp"
 #include "gui/main_window.hpp"
+#include "gui/theme.hpp"
 
 namespace fs = std::filesystem;
 
@@ -899,4 +900,30 @@ TEST_CASE("bench: scene load, frame and pick times of the demonstration movement
     (void)v.pick(QPoint(512, 384));
     const qint64 pick_ms = t.elapsed();
     WARN("load " << load_ms << " ms, " << triangles << " triangles, centre() " << centre_ms << " ms, pick " << pick_ms << " ms");
+}
+
+// Hidden (run with `ohs_gui_tests "[screenshots]"`): the whole window on each workspace, written to
+// $OHS_SCREENSHOT_DIR (default: the temporary directory), for reviewing the layout.
+TEST_CASE("screenshots: the window on each workspace", "[.][screenshots]") {
+    ohs::gui::apply_theme(app());
+    ohs::gui::MainWindow w;
+    w.resize(1440, 900);
+    w.show();
+    QString out = qEnvironmentVariable("OHS_SCREENSHOT_DIR");
+    if (out.isEmpty()) out = fresh_dir("screenshots");
+    QDir().mkpath(out);
+    const auto pump = [] {
+        QElapsedTimer t;
+        t.start();
+        while (t.elapsed() < 400) QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    };
+    pump();
+    w.grab().save(QDir(out).filePath("00-empty.png"));
+    REQUIRE(w.open_demo(fresh_dir("screenshots-demo")));
+    w.select_part("escape_wheel");
+    for (int i = 0; i < w.workspaces()->count(); ++i) {
+        w.workspaces()->setCurrentIndex(i);
+        pump();
+        w.grab().save(QDir(out).filePath(QString("%1-%2.png").arg(i + 1, 2, 10, QChar('0')).arg(w.workspaces()->tabText(i).remove('&').replace(' ', '-').toLower())));
+    }
 }

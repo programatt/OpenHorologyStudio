@@ -184,7 +184,7 @@ std::vector<Viewport::Projected> Viewport::project(const QSize& size) const {
 }
 
 void Viewport::draw(QPainter& painter, const QSize& size, bool fast) const {
-    painter.fillRect(QRect(QPoint(0, 0), size), palette().window().color().lightness() < 128 ? QColor(34, 36, 40) : QColor(236, 238, 242));
+    painter.fillRect(QRect(QPoint(0, 0), size), palette().window().color().lightness() < 128 ? QColor(26, 28, 32) : QColor(226, 224, 218));
     // Antialiased triangles need a thin outline to hide the seams between them, and the two together are most
     // of a frame. Aliased fills tile without seams, so a fast frame draws neither.
     painter.setRenderHint(QPainter::Antialiasing, !fast);
@@ -197,7 +197,8 @@ void Viewport::draw(QPainter& painter, const QSize& size, bool fast) const {
     const FieldOverlay* field = scene_->field();
     for (const Projected& p : project(size)) {
         QColor base = role_colour(scene_->parts()[p.part].role);
-        if (!selected_.empty() && scene_->parts()[p.part].name == selected_) base = QColor(255, 120, 30);
+        // Cyan: the complement of the brass most parts are drawn in, and unlike the hairspring's blue.
+        if (!selected_.empty() && scene_->parts()[p.part].name == selected_) base = QColor(40, 200, 235);
         if (field && !std::isnan(p.value)) {
             const auto c = field_colour((p.value - field->lo) / (field->hi - field->lo));
             base = QColor(c[0], c[1], c[2]);

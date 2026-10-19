@@ -42,15 +42,24 @@ QImage PlotWidget::render(const QSize& size) const {
 }
 
 void PlotWidget::draw(QPainter& painter, const QSize& size) const {
-    const bool dark = palette().window().color().lightness() < 128;
-    painter.fillRect(QRect(QPoint(0, 0), size), dark ? QColor(34, 36, 40) : QColor(250, 250, 252));
+    // The theme's colours: the panel's base, its text, a quiet frame and the accent for the data.
+    painter.fillRect(QRect(QPoint(0, 0), size), palette().base().color());
     painter.setRenderHint(QPainter::Antialiasing, true);
-    const QColor ink = dark ? QColor(220, 222, 226) : QColor(40, 42, 48);
-    painter.setPen(ink);
+    const QColor ink = palette().text().color();
+    QColor frame = ink;
+    frame.setAlpha(70);
 
     const QRectF box(52, 26, size.width() - 70, size.height() - 66);
+    painter.setPen(ink);
+    QFont bold = painter.font();
+    bold.setWeight(QFont::DemiBold);
+    painter.save();
+    painter.setFont(bold);
     painter.drawText(QRectF(0, 4, size.width(), 20), Qt::AlignCenter, title_);
+    painter.restore();
+    painter.setPen(frame);
     painter.drawRect(box);
+    painter.setPen(ink);
     if (points_.empty()) {
         painter.drawText(box, Qt::AlignCenter, tr("no data"));
         return;
@@ -84,9 +93,10 @@ void PlotWidget::draw(QPainter& painter, const QSize& size) const {
     QPainterPath path;
     path.moveTo(sx(points_.front().first), sy(points_.front().second));
     for (const auto& p : points_) path.lineTo(sx(p.first), sy(p.second));
-    painter.setPen(QPen(QColor(40, 110, 200), 2));
+    const QColor accent = palette().highlight().color();
+    painter.setPen(QPen(accent, 2));
     painter.drawPath(path);
-    painter.setBrush(QColor(40, 110, 200));
+    painter.setBrush(accent);
     for (const auto& p : points_) painter.drawEllipse(QPointF(sx(p.first), sy(p.second)), 3.5, 3.5);
 }
 
