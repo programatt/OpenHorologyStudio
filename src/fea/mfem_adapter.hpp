@@ -15,6 +15,10 @@ namespace ohs::fea {
 /// True when this build links MFEM.
 bool mfem_available();
 
+/// Solves the linear static problem with MFEM (same restrictions as the cross-check below). Returns false, with the
+/// reason in `note`, when MFEM is not built in, the model is not supported or the solver does not converge.
+bool mfem_solve(const Model& model, const Vec& load, Vec& u, int& iterations, std::string& note);
+
 struct MfemCheck {
     bool available{false};
     double max_displacement_diff{};  ///< largest nodal difference, relative to the largest displacement

@@ -22,21 +22,20 @@ bool mfem_available() {
 
 #ifdef OHS_WITH_MFEM
 
-MfemCheck run_mfem_crosscheck(const Model& model, const Vec& load, const StaticResult& ohs_result) {
+bool mfem_solve(const Model& model, const Vec& load, Vec& u, int& iterations, std::string& note) {
     using namespace mfem;
-    MfemCheck out;
     if (!model.ties.empty()) {
-        out.note = "MFEM check: models with ties are not supported";
-        return out;
+        note = "MFEM: models with ties are not supported";
+        return false;
     }
     if (!model.element_material.empty() || !model.materials.empty()) {
-        out.note = "MFEM check: models with several materials are not supported";
-        return out;
+        note = "MFEM: models with several materials are not supported";
+        return false;
     }
     const mesh::TetMesh& tm = model.mesh;
     if (tm.elems.empty() || load.size() != static_cast<Eigen::Index>(tm.dofs())) {
-        out.note = "MFEM check: the model and the load do not match";
-        return out;
+        note = "MFEM: the model and the load do not match";
+        return false;
     }
     const int npe = tm.nodes_per_element();
 
@@ -131,33 +130,48 @@ MfemCheck run_mfem_crosscheck(const Model& model, const Vec& load, const StaticR
     cg.SetMaxIter(200000);
     cg.SetPrintLevel(-1);
     cg.Mult(B, X);
-    out.cg_iterations = cg.GetNumIterations();
+    iterations = cg.GetNumIterations();
     if (!cg.GetConverged()) {
-        out.note = "MFEM check: the conjugate gradient solver did not converge";
-        return out;
+        note = "MFEM: the conjugate gradient solver did not converge";
+        return false;
     }
     a.RecoverFEMSolution(X, b, x);
-
-    double max_ohs = 0.0, max_mfem = 0.0, max_diff = 0.0;
+    u = Vec::Zero(load.size());
     for (std::size_t n = 0; n < tm.nodes.size(); ++n) {
         if (dof_of_node[n] < 0) continue;
+        for (int c = 0; c < 3; ++c) u(static_cast<Eigen::Index>(3 * n) + c) = x[vdof(static_cast<int>(n), c)];
+    }
+    note = "MFEM " + std::to_string(MFEM_VERSION_MAJOR) + "." + std::to_string(MFEM_VERSION_MINOR) + ", " + std::to_string(iterations) + " CG iterations";
+    return true;
+}
+
+MfemCheck run_mfem_crosscheck(const Model& model, const Vec& load, const StaticResult& ohs_result) {
+    MfemCheck out;
+    Vec u;
+    if (!mfem_solve(model, load, u, out.cg_iterations, out.note)) return out;
+    const mesh::TetMesh& tm = model.mesh;
+    double max_ohs = 0.0, max_mfem = 0.0, max_diff = 0.0;
+    for (std::size_t n = 0; n < tm.nodes.size(); ++n) {
         for (int c = 0; c < 3; ++c) {
-            const double ours = ohs_result.u(static_cast<Eigen::Index>(3 * n) + c), theirs = x[vdof(static_cast<int>(n), c)];
-            max_ohs = std::max(max_ohs, std::abs(ours));
-            max_mfem = std::max(max_mfem, std::abs(theirs));
-            max_diff = std::max(max_diff, std::abs(ours - theirs));
+            const Eigen::Index k = static_cast<Eigen::Index>(3 * n) + c;
+            max_ohs = std::max(max_ohs, std::abs(ohs_result.u(k)));
+            max_mfem = std::max(max_mfem, std::abs(u(k)));
+            max_diff = std::max(max_diff, std::abs(ohs_result.u(k) - u(k)));
         }
     }
     out.available = true;
     out.ohs_max_displacement = max_ohs;
     out.mfem_max_displacement = max_mfem;
     out.max_displacement_diff = max_ohs > 0 ? max_diff / max_ohs : max_diff;
-    out.note = "MFEM " + std::to_string(MFEM_VERSION_MAJOR) + "." + std::to_string(MFEM_VERSION_MINOR) + ", " +
-               std::to_string(cg.GetNumIterations()) + " CG iterations";
     return out;
 }
 
 #else
+
+bool mfem_solve(const Model&, const Vec&, Vec&, int&, std::string& note) {
+    note = "this build of ohs has no MFEM support; install libmfem-dev (with HYPRE and MPI headers) and reconfigure";
+    return false;
+}
 
 MfemCheck run_mfem_crosscheck(const Model&, const Vec&, const StaticResult&) {
     MfemCheck out;

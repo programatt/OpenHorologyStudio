@@ -20,7 +20,7 @@ know where to be careful.
   rigid bodies with collision geometry, and not for the whole train. The finite-element stack and
   the mesher are OHS's own (ADR 3). MFEM (optional, found at configure time) is linked only to
   re-solve a shock case with its own elements and solver (`ohs fea --mfem`: one material, no ties); it
-  does not replace the solver, Netgen is used only as an out-of-process mesher, and VTK is linked
+  is an option for the shock case (`--solver mfem`) and a cross-check, not the default, Netgen is used only as an out-of-process mesher, and VTK is linked
   only for its file readers and writers (`--vtu-compressed`), not for display.
 - **3D meshing is optional.** By default parts are meshed from their mid-height section and extruded,
   so features that vary through the thickness are not seen by the mesher or by the DFM rules.

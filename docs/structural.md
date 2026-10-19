@@ -39,6 +39,11 @@ netgen-mesher` into the `python3` on your PATH, or point `OHS_NETGEN_PYTHON` at 
 has it); OHS links nothing from it. The holes that are clamped are still the round holes found in the
 mid-height section.
 
+`--solver mfem` makes MFEM, not OHS's own sparse Cholesky, solve the linear system of the shock case
+(one material, no ties; conjugate gradients to 1e-12, so a very large mesh is slower than the direct
+solver). The stresses are still recovered by OHS from MFEM's displacements. `--modes` runs on whichever
+mesh `--mesher` chose, so natural frequencies of a Netgen-meshed 3D part work too.
+
 `ohs tolerance --pmi` takes tolerances from the STEP file itself: the dimensional tolerances of a STEP
 AP242 file (its product and manufacturing information) set `pivot_diameter_tol` (a diameter on a wheel,
 pinion, arbor or other rotating part), `hole_diameter_tol` (a diameter on a plate or bridge),

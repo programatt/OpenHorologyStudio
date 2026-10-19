@@ -90,8 +90,14 @@ struct StaticResult {
     int max_von_mises_node{-1};
 };
 
+enum class Solver {
+    Direct,  ///< OHS's own sparse Cholesky
+    Mfem,    ///< MFEM's conjugate gradient solver on the same mesh (one material, no ties; needs a build with MFEM)
+};
+
 struct SolveOptions {
     double thermal_dT{0};  ///< also subtract this thermal strain when recovering stresses
+    Solver solver{Solver::Direct};
 };
 
 StaticResult solve_static(const Model& model, const Vec& load, const SolveOptions& options = {});

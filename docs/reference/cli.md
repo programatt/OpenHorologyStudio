@@ -498,6 +498,7 @@ Options:
   --step TEXT                 STEP file (default: next to the project)
   --up TEXT                   CAD axis normal to the dial (default: the one found at import)
   --mesher TEXT [section]     Shock case mesher: section (mid-height section, extruded) or netgen (the whole B-rep; needs 'pip install netgen-mesher')
+  --solver TEXT [direct]      Shock case linear solver: direct (OHS's own) or mfem (MFEM's conjugate gradients; one material, needs a build with MFEM)
   --vtu TEXT                  Write the result for ParaView
   --vtu-compressed TEXT       Write the result as a binary, zlib-compressed VTU written by VTK (needs a build with VTK)
   --hdf5 TEXT                 Write mesh and fields to an HDF5 file (needs a build with libhdf5)

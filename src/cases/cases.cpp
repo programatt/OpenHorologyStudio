@@ -143,7 +143,9 @@ PartCaseResult run_part_case(const PartCaseInput& in) {
     fea::Vec load = fea::Vec::Zero(r.model.dofs());
     const double a = in.shock_g * 9810.0;
     fea::add_gravity(r.model, load, in.in_plane_shock ? V3{-a, 0, 0} : V3{0, 0, -a});
-    r.solution = fea::solve_static(r.model, load);
+    fea::SolveOptions solve;
+    solve.solver = in.solver;
+    r.solution = fea::solve_static(r.model, load, solve);
     r.mass_g = mesh::volume(r.model.mesh) * in.material.density_t_mm3() * 1e6;  // tonne -> g
     for (std::size_t n = 0; n < r.model.mesh.nodes.size(); ++n) {
         r.max_displacement_mm = std::max(r.max_displacement_mm, r.solution.u.segment<3>(3 * n).norm());

@@ -9,6 +9,7 @@ Semantic Versioning, with the Python API and the plugin ABI versioned as describ
 Found by running the plan's gates on the real OM10 file.
 
 ### Added
+- `ohs fea --solver mfem`: MFEM solves the shock case's linear system; natural frequencies run on Netgen meshes.
 - `ohs tolerance --pmi` reads the dimensional tolerances of a STEP AP242 file into the tolerance table.
 - `cmake/superbuild`: Chrono and MFEM fetched and built at pinned commits (run on Linux, GCC 13); OHS finds a
   serial MFEM.

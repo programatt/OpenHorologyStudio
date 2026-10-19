@@ -53,6 +53,7 @@ struct PartCaseInput {
     double element_size{0.2};
     int layers{2};                 ///< Section mesher only
     Mesher mesher{Mesher::Section};
+    fea::Solver solver{fea::Solver::Direct};  ///< Mfem: MFEM solves the linear system instead of OHS's sparse Cholesky
     fea::Material material;
     double shock_g{5000};          ///< acceleration along -Z (end shake) in g, for the static case
     bool in_plane_shock{false};    ///< apply it along -X instead

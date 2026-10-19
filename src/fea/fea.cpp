@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "fea/fea.hpp"
+#include "fea/mfem_adapter.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -398,7 +399,13 @@ StaticResult solve_static(const Model& model, const Vec& load, const SolveOption
     }
 
     StaticResult r;
-    r.u = solve_reduced(K, f, is_fixed, prescribed);
+    if (opt.solver == Solver::Mfem) {
+        std::string note;
+        int iterations = 0;
+        if (!mfem_solve(model, load, r.u, iterations, note)) throw Error(note);
+    } else {
+        r.u = solve_reduced(K, f, is_fixed, prescribed);
+    }
     r.reaction = K * r.u - f;
     for (std::size_t i = 0; i < is_fixed.size(); ++i) {
         if (!is_fixed[i]) r.reaction[i] = 0.0;

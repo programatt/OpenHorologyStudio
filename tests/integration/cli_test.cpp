@@ -342,7 +342,26 @@ TEST_CASE("ohs structural commands end to end") {
             CHECK(n.exit_code == 2);
             CHECK(n.error.find("Netgen") != std::string::npos);
         }
+        if (n.exit_code == 0) {
+            // The natural frequencies come from the same mesh, so Netgen gives modes of the real 3D part too.
+            const auto sec = nlohmann::json::parse(run("--json fea " + proj + " --part escape_wheel --case shock --size 0.3 --modes 2", dir).output);
+            const auto net = nlohmann::json::parse(run("--json fea " + proj + " --part escape_wheel --case shock --size 0.3 --modes 2 --mesher netgen", dir).output);
+            REQUIRE(net["frequencies_hz"].size() == 2);
+            CHECK(net["frequencies_hz"][0].get<double>() == Approx(sec["frequencies_hz"][0].get<double>()).epsilon(0.15));
+        }
         CHECK(run("fea " + proj + " --part escape_wheel --case shock --mesher gmsh", dir).exit_code == 2);
+
+        // MFEM as the solver itself gives the same answer as the direct one.
+        const auto ms = run("--json fea " + proj + " --part escape_wheel --case shock --size 0.3 --g 1000 --solver mfem", dir);
+        if (ms.exit_code == 0) {
+            const auto sj = nlohmann::json::parse(ms.output);
+            CHECK(sj["solver"] == "mfem");
+            CHECK(sj["max_displacement_mm"].get<double>() == Approx(j["max_displacement_mm"].get<double>()).epsilon(1e-6));
+            CHECK(sj["max_von_mises_mpa"].get<double>() == Approx(j["max_von_mises_mpa"].get<double>()).epsilon(1e-5));
+        } else {
+            CHECK(ms.error.find("MFEM") != std::string::npos);
+        }
+        CHECK(run("fea " + proj + " --part escape_wheel --case shock --solver superlu", dir).exit_code == 2);
 
         // MFEM re-solves the real part (mesh from the section, clamped holes, gravity) with its own elements.
         const auto m = run("--json fea " + proj + " --part escape_wheel --case shock --size 0.3 --g 1000 --mfem", dir);
