@@ -33,6 +33,10 @@ class QTimer;
 class QThread;
 class QTreeWidget;
 class QTreeWidgetItem;
+class QAction;
+class QDockWidget;
+class QProgressBar;
+class QGroupBox;
 
 namespace ohs::gui {
 
@@ -147,9 +151,25 @@ private slots:
 
 private:
     void build_ui();
+    /// Remembers the built layout for View > Reset layout, then restores the one saved when the window last closed.
+    void restore_layout();
+    void closeEvent(QCloseEvent* event) override;
+    /// Shows the status bar's busy indicator while a project opens or jobs are queued or running.
+    void update_busy();
+    /// Puts the selected part into the status bar, the rig page's editor and the Analyse page.
+    void update_selection_ui();
     QWidget* build_rig_page();
     QWidget* build_animate_page();
-    QWidget* build_analysis_page(const QString& title, const std::vector<std::pair<QString, QStringList>>& commands);
+    /// One button of an analysis workspace: the `ohs` arguments it runs (with @project, @part and @report filled
+    /// in when clicked) and a line saying what it works out.
+    struct Analysis {
+        QString label;
+        QStringList args;
+        QString description;
+    };
+    QWidget* build_analysis_page(const QString& title, const QString& intro, const std::vector<Analysis>& analyses);
+    /// The Animate page's readouts: the movement time and the exploded amount.
+    void update_animate_labels();
     bool load_project(const QString& project, const QString& step);
     /// Re-reads the rig from the project file, keeping the geometry, view, visibility and selection.
     bool reload_rig();
@@ -203,6 +223,17 @@ private:
     bool importing_{false};
     bool in_command_{false};  ///< run_command is waiting for the queue or running; see run_command
     QThread* import_thread_{};  ///< the running load_async, if any; the destructor waits for it
+    QDockWidget* results_dock_{};
+    QGroupBox* selected_box_{};
+    QPushButton* apply_role_{};
+    QPushButton* declare_mesh_{};
+    QLabel* analyse_part_label_{};
+    QLabel* time_label_{};
+    QLabel* explode_label_{};
+    QLabel* selection_label_{};
+    QProgressBar* busy_{};
+    QAction* play_action_{};
+    QByteArray default_state_;  ///< the layout as built, for View > Reset layout
 };
 
 }  // namespace ohs::gui

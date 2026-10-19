@@ -6,7 +6,9 @@
 #include <memory>
 #include <set>
 
+#include <QAction>
 #include <QApplication>
+#include <QLabel>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
@@ -142,6 +144,19 @@ TEST_CASE("gui: clicking a part selects it and fills the Explain panel", "[gui]"
     CHECK_FALSE(w.explain_panel()->toPlainText().isEmpty());
     CHECK(w.explain_panel()->toPlainText().contains(QString::fromStdString(hit)));
 
+    // A selected part hidden behind others (the escape wheel, from above) still shows where it is: it is
+    // tinted over everything.
+    w.viewport()->set_view(35, -55);
+    w.select_part("");
+    const QImage none = w.viewport()->render(QSize(640, 480));
+    w.select_part("escape_wheel");
+    const QImage tinted = w.viewport()->render(QSize(640, 480));
+    int changed = 0;
+    for (int y = 0; y < none.height(); ++y)
+        for (int x = 0; x < none.width(); ++x) changed += none.pixel(x, y) != tinted.pixel(x, y);
+    CHECK(changed > 100);  // none without the tint: the wheel is wholly hidden from here
+    w.select_part(QString::fromStdString(hit));
+
     // A command does wait for the queue; one started from a click handled during that wait is refused rather
     // than run inside the first.
     int nested = -1;
@@ -188,7 +203,11 @@ TEST_CASE("gui: the timeline turns the train, explode and cut-away change the pi
     while (settle.elapsed() < 400) QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
     const QImage settled = v->grab().toImage().convertToFormat(QImage::Format_RGB32);
     CHECK(fast != settled);
-    CHECK(settled == v->render(v->size()).convertToFormat(QImage::Format_RGB32));
+    // Up to the controls hint along the bottom edge, which is drawn on screen only.
+    const QRect above_hint(0, 0, v->width(), v->height() - 40);
+    CHECK(settled.copy(above_hint) == v->render(v->size()).convertToFormat(QImage::Format_RGB32).copy(above_hint));
+    CHECK(settled.copy(QRect(0, v->height() - 40, v->width(), 40)) !=
+          v->render(v->size()).convertToFormat(QImage::Format_RGB32).copy(QRect(0, v->height() - 40, v->width(), 40)));
 
     // Exploded view lifts parts apart along the dial axis.
     const double z0 = [&] { double lo = 1e300; for (auto& tr : scene->draw_list().triangles) lo = std::min(lo, tr.a[2]); return lo; }();
@@ -740,6 +759,55 @@ TEST_CASE("gui: every project edit is undoable and undo restores the file exactl
     w.undo_stack()->redo();
     REQUIRE(w.open_project(w.project()));
     CHECK(w.undo_stack()->count() == 0);
+}
+
+TEST_CASE("gui: the editor follows the selection, playback controls agree, the analyses get the project", "[gui]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_demo(fresh_dir("ui-state")));
+    CHECK(w.windowTitle().startsWith("demo.hsproj"));
+
+    // The rig editor is off until a part is selected, then starts at that part's role.
+    auto* set_role = button(w, "Set role");
+    REQUIRE(set_role);
+    CHECK_FALSE(set_role->isEnabled());
+    w.select_part("third_wheel");
+    CHECK(set_role->isEnabled());
+    QComboBox* role_box = nullptr;
+    for (auto* c : w.workspaces()->findChildren<QComboBox*>())
+        if (c->findText("escape_wheel") >= 0 && c->findText("hairspring") >= 0) role_box = c;
+    REQUIRE(role_box);
+    CHECK(role_box->currentText() == "wheel");
+    w.select_part("");
+    CHECK_FALSE(set_role->isEnabled());
+
+    // The Animate page's Play button and the toolbar's are one control.
+    QAction* play = nullptr;
+    for (auto* a : w.findChildren<QAction*>())
+        if (a->isCheckable() && a->text() == "Play") play = a;
+    REQUIRE(play);
+    play->setChecked(true);
+    auto* play_button = button(w, "Pause");
+    REQUIRE(play_button);
+    CHECK(play_button->isChecked());
+    w.set_playing(false);
+    CHECK_FALSE(play->isChecked());
+    CHECK(play->text() == "Play");
+
+    // The readouts follow the controls.
+    w.timeline()->setValue(5000);
+    bool time_shown = false;
+    for (auto* l : w.workspaces()->findChildren<QLabel*>()) time_shown |= l->text() == "30.0 s of 60 s";
+    CHECK(time_shown);
+
+    // Every analysis that needs the project is given it (the model cross-check used to be run without one).
+    for (auto* b : w.workspaces()->findChildren<QPushButton*>()) {
+        const QStringList args = b->property("ohs_args").toStringList();
+        if (args.isEmpty() || args.first() == "materials") continue;
+        INFO(b->text().toStdString());
+        CHECK(args.contains("@project"));
+    }
 }
 
 TEST_CASE("gui: the right-click menu of the model tree and rig list shows and hides parts by role", "[gui]") {

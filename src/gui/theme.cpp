@@ -60,6 +60,7 @@ QPalette light_palette() {
     p.setColor(QPalette::Link, QColor(140, 100, 20));
     for (auto role : {QPalette::WindowText, QPalette::Text, QPalette::ButtonText})
         p.setColor(QPalette::Disabled, role, disabled);
+    p.setColor(QPalette::Disabled, QPalette::Highlight, QColor(200, 196, 188));  // a disabled slider is not filled in brass
     return p;
 }
 

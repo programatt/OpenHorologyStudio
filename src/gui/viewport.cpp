@@ -190,15 +190,30 @@ void Viewport::draw(QPainter& painter, const QSize& size, bool fast) const {
     painter.setRenderHint(QPainter::Antialiasing, !fast);
     if (fast) painter.setPen(Qt::NoPen);
     if (!scene_) {
+        // An empty state that says how to get started rather than only that there is nothing.
+        const QRect all(QPoint(0, 0), size);
+        QFont title = painter.font();
+        title.setPointSizeF(title.pointSizeF() * 1.4);
+        title.setWeight(QFont::DemiBold);
+        painter.setFont(title);
         painter.setPen(palette().text().color());
-        painter.drawText(QRect(QPoint(0, 0), size), Qt::AlignCenter, tr("Open a project to see the movement"));
+        painter.drawText(all.adjusted(0, 0, 0, -40), Qt::AlignCenter, tr("No movement open"));
+        painter.setFont(font());
+        painter.setPen(palette().placeholderText().color());
+        painter.drawText(all.adjusted(24, 30, -24, 0), Qt::AlignCenter | Qt::TextWordWrap,
+                         tr("Open a project, import a STEP file, or try the demonstration movement from the toolbar."));
         return;
     }
     const FieldOverlay* field = scene_->field();
+    // Cyan: the complement of the brass most parts are drawn in, and unlike the hairspring's blue.
+    const QColor selection(40, 200, 235);
+    std::vector<QPolygonF> selected_outline;  // the selected part's triangles, drawn again on top
     for (const Projected& p : project(size)) {
         QColor base = role_colour(scene_->parts()[p.part].role);
-        // Cyan: the complement of the brass most parts are drawn in, and unlike the hairspring's blue.
-        if (!selected_.empty() && scene_->parts()[p.part].name == selected_) base = QColor(40, 200, 235);
+        if (!selected_.empty() && scene_->parts()[p.part].name == selected_) {
+            base = selection;
+            selected_outline.push_back(QPolygonF({{p.x[0], p.y[0]}, {p.x[1], p.y[1]}, {p.x[2], p.y[2]}}));
+        }
         if (field && !std::isnan(p.value)) {
             const auto c = field_colour((p.value - field->lo) / (field->hi - field->lo));
             base = QColor(c[0], c[1], c[2]);
@@ -209,6 +224,15 @@ void Viewport::draw(QPainter& painter, const QSize& size, bool fast) const {
         painter.setBrush(col);
         const QPointF pts[3] = {{p.x[0], p.y[0]}, {p.x[1], p.y[1]}, {p.x[2], p.y[2]}};
         painter.drawPolygon(pts, 3);
+    }
+    // X-ray: a part selected from the tree or the list may be hidden behind others; a faint tint over
+    // everything shows where it is.
+    if (!selected_outline.empty()) {
+        QColor ghost = selection;
+        ghost.setAlpha(60);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(ghost);
+        for (const QPolygonF& poly : selected_outline) painter.drawPolygon(poly);
     }
     painter.setRenderHint(QPainter::Antialiasing, true);  // the overlays are few: always smooth
     draw_overlays(painter, size);
@@ -237,6 +261,15 @@ void Viewport::draw_legend(QPainter& painter, const QSize& size, const FieldOver
 void Viewport::paintEvent(QPaintEvent*) {
     QPainter painter(this);
     draw(painter, size(), fast_);
+    // How to move the view, on screen only: render() (snapshots, video) leaves it out.
+    if (scene_) {
+        QFont small = font();
+        small.setPointSizeF(small.pointSizeF() * 0.85);
+        painter.setFont(small);
+        painter.setPen(palette().placeholderText().color());
+        painter.drawText(rect().adjusted(10, 0, -10, -8), Qt::AlignLeft | Qt::AlignBottom,
+                         tr("Drag to orbit · right-drag to pan · wheel to zoom · click a part to select it"));
+    }
 }
 
 QImage Viewport::render(const QSize& size) const {
