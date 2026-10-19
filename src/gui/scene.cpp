@@ -95,6 +95,7 @@ Scene Scene::load(const std::filesystem::path& project, const std::filesystem::p
         }
         s.parts_.push_back(std::move(part));
     }
+    s.update_bounds();
     return s;
 }
 
@@ -133,6 +134,7 @@ bool Scene::reload_rig(const std::filesystem::path& project, double beat_rate_vp
         part.pivot_x = px;
         part.pivot_y = py;
     }
+    update_bounds();
     forces_.clear();
     if (has_field_) clear_field();
     return true;
@@ -148,7 +150,7 @@ bool Scene::visible(const std::string& part) const {
     return std::find(hidden_.begin(), hidden_.end(), part) == hidden_.end();
 }
 
-Point3 Scene::centre() const {
+void Scene::update_bounds() {
     Point3 lo{1e300, 1e300, 1e300}, hi{-1e300, -1e300, -1e300};
     for (const auto& part : parts_) {
         for (const auto& t : part.triangles) {
@@ -161,22 +163,17 @@ Point3 Scene::centre() const {
             }
         }
     }
-    if (lo[0] > hi[0]) return {0, 0, 0};
-    return {(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2};
-}
-
-double Scene::radius() const {
-    const Point3 c = centre();
-    double r = 1.0;
+    centre_ = lo[0] > hi[0] ? Point3{0, 0, 0} : Point3{(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2};
+    radius_ = 1.0;
     for (const auto& part : parts_) {
         for (const auto& t : part.triangles) {
             for (const Point3* p : {&t.a, &t.b, &t.c}) {
-                const double dx = (*p)[0] + part.pivot_x - c[0], dy = (*p)[1] + part.pivot_y - c[1], dz = (*p)[2] - c[2];
-                r = std::max(r, std::sqrt(dx * dx + dy * dy + dz * dz));
+                const double dx = (*p)[0] + part.pivot_x - centre_[0], dy = (*p)[1] + part.pivot_y - centre_[1],
+                             dz = (*p)[2] - centre_[2];
+                radius_ = std::max(radius_, std::sqrt(dx * dx + dy * dy + dz * dz));
             }
         }
     }
-    return r;
 }
 
 void Scene::compute_forces(double wind) {
@@ -254,7 +251,7 @@ std::vector<Scene::Trail> Scene::trails(int samples) const {
 Scene::Drawn Scene::draw_list() const {
     std::vector<double> angles(movement_.mobiles.size(), 0.0);
     if (can_animate()) angles = kinematics::mobile_angles(train_, time_, {stepped_, 0.2});
-    const double zc = centre()[2];
+    const double zc = centre_[2];
 
     Drawn out;
     for (std::size_t i = 0; i < parts_.size(); ++i) {

@@ -683,3 +683,41 @@ TEST_CASE("gui: every project edit is undoable and undo restores the file exactl
     REQUIRE(w.open_project(w.project()));
     CHECK(w.undo_stack()->count() == 0);
 }
+
+// Hidden (run with `ohs_gui_tests "[bench]"`): where the time goes on the demonstration movement.
+TEST_CASE("bench: scene load, frame and pick times of the demonstration movement", "[.][bench]") {
+    app();
+    const QString dir = fresh_dir("bench");
+    const QString step = QDir(dir).filePath("demo.step"), project = QDir(dir).filePath("demo.hsproj");
+    REQUIRE(ohs::cli::run_captured({"dev", "gen-movement", "-o", step.toStdString()}).exit_code == 0);
+    REQUIRE(ohs::cli::run_captured({"import", step.toStdString(), "-o", project.toStdString(), "--beat-rate", "28800"})
+                .exit_code == 0);
+    QElapsedTimer t;
+    t.start();
+    auto scene = std::make_shared<ohs::gui::Scene>(ohs::gui::Scene::load(project.toStdString(), step.toStdString()));
+    const qint64 load_ms = t.elapsed();
+    std::size_t triangles = 0;
+    for (const auto& p : scene->parts()) triangles += p.triangles.size();
+    ohs::gui::Viewport v;
+    v.resize(1024, 768);
+    v.set_scene(scene);
+    t.restart();
+    for (int i = 0; i < 20; ++i) (void)scene->centre();
+    const double centre_ms = t.elapsed() / 20.0;
+    auto frame = [&](const char* what) {
+        t.restart();
+        for (int i = 0; i < 5; ++i) {
+            scene->set_time(i * 0.1);
+            (void)v.render(QSize(1024, 768));
+        }
+        WARN(what << ": " << t.elapsed() / 5.0 << " ms per frame");
+    };
+    frame("plain");
+    scene->set_show_trails(true, 10.0);
+    frame("with trails");
+    scene->set_show_trails(false);
+    t.restart();
+    (void)v.pick(QPoint(512, 384));
+    const qint64 pick_ms = t.elapsed();
+    WARN("load " << load_ms << " ms, " << triangles << " triangles, centre() " << centre_ms << " ms, pick " << pick_ms << " ms");
+}

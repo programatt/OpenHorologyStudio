@@ -109,11 +109,14 @@ public:
     };
     Drawn draw_list() const;
 
-    /// Bounding box centre and radius of the assembled (unexploded) movement.
-    Point3 centre() const;
-    double radius() const;
+    /// Bounding box centre and radius of the assembled (unexploded) movement. Worked out once when the
+    /// geometry is loaded: the viewport asks for them for every point it projects.
+    const Point3& centre() const { return centre_; }
+    double radius() const { return radius_; }
 
 private:
+    void update_bounds();
+
     model::Movement movement_;
     kinematics::TrainAnalysis train_;
     std::vector<ScenePart> parts_;
@@ -129,6 +132,8 @@ private:
     bool show_forces_{false};
     bool show_trails_{false};
     double trail_seconds_{10.0};
+    Point3 centre_{0, 0, 0};
+    double radius_{1.0};
 };
 
 }  // namespace ohs::gui
