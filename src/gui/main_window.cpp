@@ -329,8 +329,11 @@ void MainWindow::build_ui() {
     auto* help = menuBar()->addMenu(tr("&Help"));
     help->addAction(tr("&Viewport controls"), this, [this] {
         QMessageBox::information(this, tr("Viewport controls"),
-                                 tr("<b>Left drag</b> orbits the movement.<br><b>Right or middle drag</b> pans.<br>"
-                                    "<b>Wheel</b> zooms.<br><b>Click</b> a part to select it and explain it.<br>"
+                                 tr("<b>Drag on a part</b> turns the movement about its central axis (up and down "
+                                    "tilts it).<br><b>Drag beside the movement</b>, or right or middle drag anywhere, "
+                                    "pans.<br><b>Wheel</b> zooms; with a part selected it zooms toward that part.<br>"
+                                    "<b>Click</b> a part to select it and explain it; click beside the movement to "
+                                    "clear the selection.<br>"
                                     "<b>Space</b> plays or pauses the animation.<br><b>Ctrl+1 to Ctrl+4</b> pick a view, "
                                     "<b>Ctrl+0</b> fits."));
     });

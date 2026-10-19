@@ -269,7 +269,8 @@ void Viewport::paintEvent(QPaintEvent*) {
         painter.setFont(small);
         painter.setPen(palette().placeholderText().color());
         painter.drawText(rect().adjusted(10, 0, -10, -8), Qt::AlignLeft | Qt::AlignBottom,
-                         tr("Drag to orbit · right-drag to pan · wheel to zoom · click a part to select it"));
+                         tr("Drag a part to turn the movement · drag beside it to pan · click to select · "
+                            "the wheel zooms toward the selected part"));
     }
 }
 
@@ -290,20 +291,40 @@ std::string Viewport::pick(const QPoint& pos) const {
     return {};
 }
 
+std::optional<QPointF> Viewport::screen_position(const std::string& part) const {
+    if (!scene_ || part.empty()) return std::nullopt;
+    double x = 0, y = 0;
+    int n = 0;
+    for (const Projected& p : project(size())) {
+        if (scene_->parts()[static_cast<std::size_t>(p.part)].name != part) continue;
+        x += p.x[0] + p.x[1] + p.x[2];
+        y += p.y[0] + p.y[1] + p.y[2];
+        n += 3;
+    }
+    if (n == 0) return std::nullopt;
+    return QPointF(x / n, y / n);
+}
+
 void Viewport::mousePressEvent(QMouseEvent* e) {
     last_ = press_ = e->pos();
     dragged_ = false;
+    // Left drag turns the movement when it starts on a part and pans when it starts beside it; the other
+    // buttons always pan.
+    if (e->button() == Qt::LeftButton) drag_ = scene_ && !pick(e->pos()).empty() ? Drag::Turn : Drag::Pan;
+    else if (e->button() == Qt::RightButton || e->button() == Qt::MiddleButton) drag_ = Drag::Pan;
+    setCursor(drag_ == Drag::Turn ? Qt::ClosedHandCursor : Qt::SizeAllCursor);
 }
 
 void Viewport::mouseMoveEvent(QMouseEvent* e) {
     const QPoint d = e->pos() - last_;
     last_ = e->pos();
     if ((e->pos() - press_).manhattanLength() > 3) dragged_ = true;
-    if (e->buttons() & Qt::LeftButton) {
+    if (drag_ == Drag::Turn) {
+        // Across turns the movement about its central (dial) axis; up and down tilts it.
         yaw_ -= d.x() * 0.5;
         pitch_ = std::clamp(pitch_ - d.y() * 0.5, -180.0, 0.0);
         interactive_update();
-    } else if (e->buttons() & (Qt::RightButton | Qt::MiddleButton)) {
+    } else if (drag_ == Drag::Pan) {
         pan_x_ += d.x();
         pan_y_ += d.y();
         interactive_update();
@@ -311,6 +332,8 @@ void Viewport::mouseMoveEvent(QMouseEvent* e) {
 }
 
 void Viewport::mouseReleaseEvent(QMouseEvent* e) {
+    drag_ = Drag::None;
+    unsetCursor();
     if (dragged_ || e->button() != Qt::LeftButton || !scene_) return;
     selected_ = pick(e->pos());
     update();
@@ -318,7 +341,18 @@ void Viewport::mouseReleaseEvent(QMouseEvent* e) {
 }
 
 void Viewport::wheelEvent(QWheelEvent* e) {
+    // With a part selected the zoom closes in on it: the part stays where it is on screen and the view
+    // grows or shrinks around it. Screen = centre + pan + scale * view, so keeping the point A fixed while
+    // the scale changes by f needs pan' = (A - centre) - f * (A - centre - pan). A is taken before zooming.
+    const auto anchor = screen_position(selected_);
+    const double before = zoom_;
     zoom_ = std::clamp(zoom_ * std::pow(1.0015, e->angleDelta().y()), 0.1, 50.0);
+    if (anchor) {
+        const double f = zoom_ / before;
+        const double cx = width() / 2.0, cy = height() / 2.0;
+        pan_x_ = (anchor->x() - cx) - f * (anchor->x() - cx - pan_x_);
+        pan_y_ = (anchor->y() - cy) - f * (anchor->y() - cy - pan_y_);
+    }
     interactive_update();
 }
 

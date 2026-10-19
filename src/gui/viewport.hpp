@@ -2,6 +2,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <QImage>
@@ -31,6 +32,13 @@ public:
     /// full quality.
     void interactive_update();
     const std::string& selected() const { return selected_; }
+    double yaw() const { return yaw_; }
+    double pitch() const { return pitch_; }
+    double zoom() const { return zoom_; }
+    QPointF pan() const { return {pan_x_, pan_y_}; }
+    /// Where a part is drawn (the mean of its visible triangles), in widget coordinates; empty when the
+    /// part is hidden or unknown.
+    std::optional<QPointF> screen_position(const std::string& part) const;
 
     /// Name of the part under `pos` (widget coordinates), or an empty string.
     std::string pick(const QPoint& pos) const;
@@ -71,6 +79,9 @@ private:
     QPoint last_;
     QPoint press_;
     bool dragged_{false};
+    /// What a drag does, decided where it starts: on a part it turns the movement, off it it pans.
+    enum class Drag { None, Turn, Pan };
+    Drag drag_{Drag::None};
     bool fast_{false};          ///< the next paint is an interactive one
     QTimer* settle_{};          ///< draws at full quality once the interaction pauses
 };

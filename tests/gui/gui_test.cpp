@@ -26,6 +26,8 @@
 #include <QTimer>
 #include <QTreeWidget>
 #include <QListWidget>
+#include <QMouseEvent>
+#include <QWheelEvent>
 #include <QMenu>
 #include <QUndoStack>
 #include <QTreeWidgetItemIterator>
@@ -759,6 +761,78 @@ TEST_CASE("gui: every project edit is undoable and undo restores the file exactl
     w.undo_stack()->redo();
     REQUIRE(w.open_project(w.project()));
     CHECK(w.undo_stack()->count() == 0);
+}
+
+TEST_CASE("gui: drag a part to turn the movement, drag beside it to pan, the wheel zooms toward the selection", "[gui]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_demo(fresh_dir("viewport-input")));
+    auto* v = w.viewport();
+    v->resize(640, 480);
+    v->set_view(35, -55);
+
+    const auto send = [&](QEvent::Type type, QPoint at, Qt::MouseButton button, Qt::MouseButtons held) {
+        QMouseEvent e(type, QPointF(at), QPointF(v->mapToGlobal(at)), button, held, Qt::NoModifier);
+        QCoreApplication::sendEvent(v, &e);
+    };
+    const auto drag = [&](QPoint from, QPoint to) {
+        send(QEvent::MouseButtonPress, from, Qt::LeftButton, Qt::LeftButton);
+        for (int i = 1; i <= 4; ++i) send(QEvent::MouseMove, from + (to - from) * i / 4, Qt::NoButton, Qt::LeftButton);
+        send(QEvent::MouseButtonRelease, to, Qt::LeftButton, Qt::NoButton);
+    };
+    const auto wheel = [&](int delta) {
+        QWheelEvent e(QPointF(320, 240), QPointF(v->mapToGlobal(QPoint(320, 240))), QPoint(), QPoint(0, delta), Qt::NoButton,
+                      Qt::NoModifier, Qt::NoScrollPhase, false);
+        QCoreApplication::sendEvent(v, &e);
+    };
+    const auto on_part = [&] {
+        for (int y = 120; y < 360; y += 6)
+            for (int x = 160; x < 480; x += 6)
+                if (!v->pick(QPoint(x, y)).empty()) return QPoint(x, y);
+        return QPoint(-1, -1);
+    };
+    const QPoint beside(8, 8);
+    REQUIRE(v->pick(beside).empty());
+
+    // Dragging from a part turns the movement about its axis and leaves the pan and the selection alone.
+    QPoint hit = on_part();
+    REQUIRE(hit.x() >= 0);
+    const QPointF pan0 = v->pan();
+    const double yaw0 = v->yaw();
+    drag(hit, hit + QPoint(60, 0));
+    CHECK(v->yaw() == Catch::Approx(yaw0 - 30));
+    CHECK(v->pan() == pan0);
+    CHECK(v->selected().empty());  // a drag is not a click
+
+    // Dragging from beside the movement pans and does not turn it.
+    drag(beside, beside + QPoint(40, 24));
+    CHECK(v->pan() == pan0 + QPointF(40, 24));
+    CHECK(v->yaw() == Catch::Approx(yaw0 - 30));
+
+    // A click on a part selects it; the wheel then zooms toward it: the part stays where it is on screen.
+    hit = on_part();
+    REQUIRE(hit.x() >= 0);
+    send(QEvent::MouseButtonPress, hit, Qt::LeftButton, Qt::LeftButton);
+    send(QEvent::MouseButtonRelease, hit, Qt::LeftButton, Qt::NoButton);
+    REQUIRE_FALSE(v->selected().empty());
+    CHECK(w.explain_panel()->toPlainText().contains(QString::fromStdString(v->selected())));
+    const auto at = v->screen_position(v->selected());
+    REQUIRE(at);
+    const double zoom0 = v->zoom();
+    wheel(240);
+    CHECK(v->zoom() > zoom0);
+    const auto after = v->screen_position(v->selected());
+    REQUIRE(after);
+    CHECK(std::hypot(after->x() - at->x(), after->y() - at->y()) < 1.0);
+
+    // A click beside the movement clears the selection, and the wheel zooms about the middle again.
+    send(QEvent::MouseButtonPress, beside, Qt::LeftButton, Qt::LeftButton);
+    send(QEvent::MouseButtonRelease, beside, Qt::LeftButton, Qt::NoButton);
+    CHECK(v->selected().empty());
+    const QPointF pan1 = v->pan();
+    wheel(-120);
+    CHECK(v->pan() == pan1);
 }
 
 TEST_CASE("gui: the editor follows the selection, playback controls agree, the analyses get the project", "[gui]") {
