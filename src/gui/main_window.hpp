@@ -59,7 +59,9 @@ public:
     bool is_loading() const { return importing_; }
     /// Runs `ohs <args>` in-process; logs the command and its output. Returns the exit code. Refused (exit
     /// code 2) while a project is being opened in the background: the project is about to be replaced, and
-    /// the command line runs one command at a time, so it would block the window until the load ends.
+    /// the command line runs one command at a time, so it would block the window until the load ends. Also
+    /// refused when called while another run_command is waiting for the job queue (from a click handled
+    /// during that wait).
     int run_command(const QStringList& args, QString* out = nullptr);
     /// Changes a part's role through `ohs rig set` and reloads. Not undoable; see change_role.
     bool set_role(const QString& part, const QString& role);
@@ -192,6 +194,7 @@ private:
     double time_{0};
     bool rebuilding_{false};
     bool importing_{false};
+    bool in_command_{false};  ///< run_command is waiting for the queue or running; see run_command
     QThread* import_thread_{};  ///< the running load_async, if any; the destructor waits for it
 };
 

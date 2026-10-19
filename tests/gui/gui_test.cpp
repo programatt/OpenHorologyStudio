@@ -19,6 +19,7 @@
 #include <QSlider>
 #include <QTableWidget>
 #include <QTabWidget>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QListWidget>
 #include <QUndoStack>
@@ -136,7 +137,15 @@ TEST_CASE("gui: clicking a part selects it and fills the Explain panel", "[gui]"
     CHECK(w.viewport()->selected() == hit);
     CHECK_FALSE(w.explain_panel()->toPlainText().isEmpty());
     CHECK(w.explain_panel()->toPlainText().contains(QString::fromStdString(hit)));
-    w.wait_for_jobs();
+
+    // A command does wait for the queue; one started from a click handled during that wait is refused rather
+    // than run inside the first.
+    int nested = -1;
+    QTimer::singleShot(0, &w, [&] { nested = w.run_command({"materials"}); });
+    CHECK(w.run_command({"materials"}) == 0);
+    CHECK(w.unfinished_jobs() == 0);
+    CHECK(nested == 2);
+    CHECK(w.run_command({"materials"}) == 0);  // and the next one runs
 }
 
 TEST_CASE("gui: the timeline turns the train, explode and cut-away change the picture", "[gui]") {

@@ -368,7 +368,18 @@ int MainWindow::run_command(const QStringList& args, QString* out) {
         statusBar()->showMessage(tr("Wait for the project to finish opening"), 4000);
         return 2;
     }
-    wait_for_jobs();  // the command line runs one command at a time
+    // Waiting for the queue keeps the window running, so a second click could start a command inside this
+    // one; it would interleave with this edit's undo snapshot, so it is refused instead.
+    if (in_command_) {
+        statusBar()->showMessage(tr("Another command is waiting for the queued jobs; try again when it has run"), 5000);
+        return 2;
+    }
+    in_command_ = true;
+    if (const int queued = unfinished_jobs(); queued > 0) {
+        statusBar()->showMessage(tr("Waiting for %1 queued job(s) to finish before running %2").arg(queued).arg(args.value(0)));
+        wait_for_jobs();  // the command line runs one command at a time
+        statusBar()->clearMessage();
+    }
     std::vector<std::string> a;
     for (const QString& s : args) a.push_back(s.toStdString());
     QStringList quoted;
@@ -383,6 +394,7 @@ int MainWindow::run_command(const QStringList& args, QString* out) {
     if (out) *out = text;
     if (!captured.err.empty()) append_log(QString::fromStdString(captured.err).trimmed());
     append_log(tr("exit code %1").arg(captured.exit_code));
+    in_command_ = false;
     return captured.exit_code;
 }
 
