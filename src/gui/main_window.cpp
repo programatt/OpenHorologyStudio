@@ -27,6 +27,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QMenu>
 #include <QMenuBar>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -208,6 +209,16 @@ void MainWindow::build_ui() {
     connect(viewport_, &Viewport::part_picked, this, &MainWindow::select_part);
     connect(tree_, &QTreeWidget::itemChanged, this, &MainWindow::on_tree_changed);
     connect(tree_, &QTreeWidget::itemSelectionChanged, this, &MainWindow::on_tree_selected);
+    // Right click in the model tree or the rig list: show or hide all the parts of one role.
+    for (QAbstractItemView* view : {static_cast<QAbstractItemView*>(tree_), static_cast<QAbstractItemView*>(rig_table_)}) {
+        view->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(view, &QWidget::customContextMenuRequested, this, [this, view](const QPoint& pos) {
+            if (!scene_) return;
+            QMenu* menu = visibility_menu(view);
+            menu->exec(view->viewport()->mapToGlobal(pos));
+            menu->deleteLater();
+        });
+    }
 }
 
 QWidget* MainWindow::build_rig_page() {
@@ -736,6 +747,51 @@ void MainWindow::select_part(const QString& name) {
         }
     }
     rebuilding_ = false;
+}
+
+bool MainWindow::set_role_visible(const QString& role, bool visible) {
+    if (!scene_) return false;
+    bool any = false;
+    for (const ScenePart& part : scene_->parts()) {
+        if (QString::fromUtf8(model::to_string(part.role).data()) != role) continue;
+        scene_->set_visible(part.name, visible);
+        any = true;
+    }
+    if (!any) return false;
+    {
+        const QSignalBlocker block(tree_);  // the scene is already set: no per-item round trip
+        for (QTreeWidgetItemIterator it(tree_); *it; ++it) {
+            if ((*it)->parent() && (*it)->text(1) == role)
+                (*it)->setCheckState(0, visible ? Qt::Checked : Qt::Unchecked);
+        }
+    }
+    viewport_->update();
+    return true;
+}
+
+QMenu* MainWindow::visibility_menu(QWidget* parent) {
+    auto* menu = new QMenu(parent);
+    menu->addSection(tr("Show parts by role"));
+    if (!scene_) return menu;
+    for (int r = static_cast<int>(model::Role::Unknown); r <= static_cast<int>(model::Role::Screw); ++r) {
+        const auto role = static_cast<model::Role>(r);
+        int count = 0, shown = 0;
+        for (const ScenePart& part : scene_->parts()) {
+            if (part.role != role) continue;
+            ++count;
+            if (scene_->visible(part.name)) ++shown;
+        }
+        if (count == 0) continue;
+        const QString name = QString::fromUtf8(model::to_string(role).data());
+        const QString label = shown == count || shown == 0 ? tr("%1 (%2)").arg(name).arg(count)
+                                                          : tr("%1 (%2 of %3 shown)").arg(name).arg(shown).arg(count);
+        QAction* action = menu->addAction(label);
+        action->setData(name);
+        action->setCheckable(true);
+        action->setChecked(shown == count);
+        connect(action, &QAction::toggled, this, [this, name](bool on) { set_role_visible(name, on); });
+    }
+    return menu;
 }
 
 void MainWindow::on_tree_selected() {

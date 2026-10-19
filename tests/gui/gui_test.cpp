@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Scripted flow of the desktop application on Qt's offscreen platform: demonstration movement,
 // rig list, picking and Explain, animation, exploded and cut-away views, analyses, report.
+#include <algorithm>
 #include <filesystem>
+#include <memory>
 #include <set>
 
 #include <QApplication>
@@ -22,6 +24,7 @@
 #include <QTimer>
 #include <QTreeWidget>
 #include <QListWidget>
+#include <QMenu>
 #include <QUndoStack>
 #include <QTreeWidgetItemIterator>
 #include <catch2/catch_approx.hpp>
@@ -736,6 +739,87 @@ TEST_CASE("gui: every project edit is undoable and undo restores the file exactl
     w.undo_stack()->redo();
     REQUIRE(w.open_project(w.project()));
     CHECK(w.undo_stack()->count() == 0);
+}
+
+TEST_CASE("gui: the right-click menu of the model tree and rig list shows and hides parts by role", "[gui]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_demo(fresh_dir("role-visibility")));
+    auto* scene = w.viewport()->scene();
+    for (QWidget* view : {static_cast<QWidget*>(w.model_tree()), static_cast<QWidget*>(w.rig_table())})
+        CHECK(view->contextMenuPolicy() == Qt::CustomContextMenu);
+
+    // One entry per role in the movement, ticked while every part of the role is shown.
+    std::unique_ptr<QMenu> menu(w.visibility_menu());
+    QAction* entry = nullptr;
+    std::set<QString> roles;
+    for (QAction* a : menu->actions()) {
+        if (!a->isCheckable()) continue;  // the section heading
+        roles.insert(a->data().toString());
+        CHECK(a->isChecked());
+        if (a->data().toString() == "plate") entry = a;
+    }
+    std::set<QString> expected;
+    for (const auto& p : scene->parts()) expected.insert(QString::fromUtf8(ohs::model::to_string(p.role).data()));
+    CHECK(roles == expected);
+    REQUIRE(entry);
+
+    auto role_of = [](const ohs::gui::ScenePart& p) { return QString::fromUtf8(ohs::model::to_string(p.role).data()); };
+    auto tree_ticked = [&](const std::string& name) {
+        for (QTreeWidgetItemIterator it(w.model_tree()); *it; ++it)
+            if ((*it)->parent() && (*it)->text(0).toStdString() == name) return (*it)->checkState(0) == Qt::Checked;
+        return false;
+    };
+
+    // Unticking hides every plate, and only the plates; the tree follows.
+    entry->setChecked(false);
+    for (const auto& p : scene->parts()) {
+        CHECK(scene->visible(p.name) == (role_of(p) != "plate"));
+        CHECK(tree_ticked(p.name) == scene->visible(p.name));
+    }
+    menu.reset(w.visibility_menu());
+    for (QAction* a : menu->actions())
+        if (a->isCheckable()) CHECK(a->isChecked() == (a->data().toString() != "plate"));
+
+    // Ticking it again shows the plates.
+    entry = nullptr;
+    for (QAction* a : menu->actions())
+        if (a->data().toString() == "plate") entry = a;
+    REQUIRE(entry);
+    entry->setChecked(true);
+    for (const auto& p : scene->parts()) CHECK((scene->visible(p.name) && tree_ticked(p.name)));
+
+    // A role with one part unticked in the tree is shown unticked in the menu and says how many are shown;
+    // ticking it shows all its parts again.
+    QString many;
+    std::size_t most = 0;
+    for (const QString& r : expected) {
+        const auto n = static_cast<std::size_t>(std::count_if(scene->parts().begin(), scene->parts().end(),
+                                                              [&](const auto& p) { return role_of(p) == r; }));
+        if (n > most) most = n, many = r;
+    }
+    REQUIRE(most > 1);
+    std::string one;
+    for (const auto& p : scene->parts())
+        if (role_of(p) == many) one = p.name;
+    for (QTreeWidgetItemIterator it(w.model_tree()); *it; ++it)
+        if ((*it)->parent() && (*it)->text(0).toStdString() == one) (*it)->setCheckState(0, Qt::Unchecked);
+    REQUIRE_FALSE(scene->visible(one));
+    menu.reset(w.visibility_menu());
+    entry = nullptr;
+    for (QAction* a : menu->actions())
+        if (a->data().toString() == many) entry = a;
+    REQUIRE(entry);
+    CHECK_FALSE(entry->isChecked());
+    CHECK(entry->text().contains(QString("%1 of %2 shown").arg(most - 1).arg(most)));
+    entry->setChecked(true);
+    for (const auto& p : scene->parts()) {
+        INFO(p.name << " (" << role_of(p).toStdString() << ")");
+        CHECK(scene->visible(p.name));
+        CHECK(tree_ticked(p.name));
+    }
+    CHECK_FALSE(w.set_role_visible("no such role", false));
 }
 
 TEST_CASE("gui: the menus open projects on a worker thread and the window keeps running", "[gui]") {

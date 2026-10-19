@@ -20,6 +20,7 @@
 class QCheckBox;
 class QComboBox;
 class QListWidget;
+class QMenu;
 class QUndoStack;
 class QDoubleSpinBox;
 class QLabel;
@@ -104,6 +105,12 @@ public:
     QComboBox* field_box() const { return field_box_; }
 
     void select_part(const QString& name);
+    /// Shows or hides every part with this role (as `ohs` names it, e.g. "plate"), ticking the model tree to
+    /// match. Returns false when no part has the role.
+    bool set_role_visible(const QString& role, bool visible);
+    /// The right-click menu of the model tree and the rig list: one checkable entry per role in the movement,
+    /// ticked when every part of that role is shown. Ticking shows them all, unticking hides them all.
+    QMenu* visibility_menu(QWidget* parent = nullptr);
     void set_time(double seconds);
     void set_playing(bool playing);
 
