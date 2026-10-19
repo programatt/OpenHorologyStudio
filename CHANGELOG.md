@@ -9,6 +9,8 @@ Semantic Versioning, with the Python API and the plugin ABI versioned as describ
 Found by running the plan's gates on the real OM10 file.
 
 ### Added
+- `ohs-gui`: undo and redo for every project edit, by snapshots of the project file (so undo restores
+  the file byte for byte), with *declare mesh* as a second undoable edit and an Edit history dock.
 - Cycloidal gear profiles: `ohs gear --profile cycloidal --rolling-radius`, a cycloid flank fit on
   import (`profile = "cycloidal"` and `rolling_radius` in the project file), Explain, DFM undercut
   and the tooth-bending case follow the profile.

@@ -28,7 +28,11 @@ ohs-gui movement.hsproj
   a job on a worker thread, so the window stays responsive; jobs run one at a time and the Jobs dock
   lists them (double-click a queued job to cancel it). Results show in the Results dock, with a plot
   of rate against amplitude after Timekeeping, and the commands and their messages in the Log dock.
-- **Edit, Undo and Redo** step through role changes made with *Set role of the selected part*.
+- **Edit, Undo and Redo** step through every change to the project made in the window: *Set role of
+  the selected part* and *Declare that the selected part meshes with this one*. Undo puts the project
+  file back exactly as it was (the history is snapshots of the file), and the Edit history dock lists
+  the steps; click one to return to that state. Opening or importing another project starts a new
+  history. Analyses, views and the timeline change no project data and are not part of it.
 - **File, Save session as script** writes every command you ran as a shell script that repeats it.
 
 ## Not in the window

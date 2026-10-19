@@ -6,6 +6,7 @@
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDir>
 #include <QFile>
 #include <QPlainTextEdit>
@@ -287,4 +288,67 @@ TEST_CASE("gui: role changes can be undone and redone", "[gui]") {
     // The same role again is not a change.
     REQUIRE(w.change_role(part, QString::fromUtf8(ohs::model::to_string(original).data())));
     CHECK(w.undo_stack()->count() == 1);
+}
+
+TEST_CASE("gui: every project edit is undoable and undo restores the file exactly", "[gui]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_demo(fresh_dir("undo-all")));
+    const auto read = [&] {
+        QFile f(w.project());
+        REQUIRE(f.open(QIODevice::ReadOnly));
+        return f.readAll();
+    };
+    const auto movement = [&]() -> const ohs::model::Movement& { return w.viewport()->scene()->movement(); };
+    const QByteArray original = read();
+    REQUIRE(w.undo_stack()->count() == 0);  // opening a project starts a fresh history
+
+    // The escape wheel and the barrel are not meshed by the geometry.
+    const QString a = "escape_wheel", b = "barrel";
+    REQUIRE(movement().find_component(a.toStdString()) >= 0);
+    REQUIRE(movement().find_component(b.toStdString()) >= 0);
+    const auto manual_meshes = [&] {
+        int n = 0;
+        for (const auto& j : movement().meshes) n += j.manual ? 1 : 0;
+        return n;
+    };
+    REQUIRE(manual_meshes() == 0);
+
+    REQUIRE(w.declare_mesh(a, b));
+    CHECK(manual_meshes() == 1);
+    CHECK(w.undo_stack()->count() == 1);
+    CHECK(w.undo_stack()->undoText().contains("Mesh escape_wheel with barrel"));
+    const QByteArray with_mesh = read();
+    CHECK(with_mesh != original);
+
+    // A role change on top, then both undone one at a time.
+    REQUIRE(w.change_role("center_wheel", "plate"));
+    CHECK(w.undo_stack()->count() == 2);
+    w.undo_stack()->undo();
+    CHECK(read() == with_mesh);  // byte for byte, including role_source and confidence
+    CHECK(manual_meshes() == 1);
+    w.undo_stack()->undo();
+    CHECK(read() == original);
+    CHECK(manual_meshes() == 0);
+    CHECK_FALSE(w.undo_stack()->canUndo());
+
+    // Redo replays the edits; jumping about the way the history view does lands on the same states.
+    w.undo_stack()->redo();
+    CHECK(manual_meshes() == 1);
+    w.undo_stack()->setIndex(2);
+    CHECK(movement().components[static_cast<std::size_t>(movement().find_component("center_wheel"))].role == ohs::model::Role::Plate);
+    w.undo_stack()->setIndex(0);
+    CHECK(read() == original);
+
+    // A failing command changes nothing and adds nothing to the history.
+    CHECK_FALSE(w.declare_mesh(a, "no such part"));
+    CHECK(read() == original);
+    CHECK(w.undo_stack()->index() == 0);
+
+    // The partner list holds the toothed parts, and the history belongs to one project.
+    CHECK(w.mesh_partner_box()->findText("barrel") >= 0);
+    w.undo_stack()->redo();
+    REQUIRE(w.open_project(w.project()));
+    CHECK(w.undo_stack()->count() == 0);
 }

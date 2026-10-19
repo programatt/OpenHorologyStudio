@@ -12,6 +12,7 @@
 #include <QThread>
 #include <QUndoCommand>
 #include <QUndoStack>
+#include <QUndoView>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QRegularExpression>
 #include <QTreeWidgetItemIterator>
@@ -56,19 +57,30 @@ QString shell_quote(const QString& s) {
     return "'" + q + "'";
 }
 
-/// Changing a part's role, undoable: redo applies the new role, undo puts the old one back.
-class RoleCommand : public QUndoCommand {
+QByteArray read_file(const QString& path) {
+    QFile f(path);
+    return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray();
+}
+
+/// An edit of the project file made by an `ohs` command. The command has already run when the
+/// command is pushed, so the first redo does nothing; later ones put the written text back.
+class ProjectEdit : public QUndoCommand {
 public:
-    RoleCommand(MainWindow* w, QString part, QString from, QString to)
-        : QUndoCommand(QObject::tr("Role of %1: %2 to %3").arg(part, from, to)),
-          w_(w), part_(std::move(part)), from_(std::move(from)), to_(std::move(to)) {}
-    void redo() override { ok = w_->set_role(part_, to_); }
-    void undo() override { w_->set_role(part_, from_); }
-    bool ok{false};
+    ProjectEdit(MainWindow* w, const QString& label, QByteArray before, QByteArray after)
+        : QUndoCommand(label), w_(w), before_(std::move(before)), after_(std::move(after)) {}
+    void redo() override {
+        if (first_) {
+            first_ = false;
+            return;
+        }
+        w_->restore_project(after_);
+    }
+    void undo() override { w_->restore_project(before_); }
 
 private:
     MainWindow* w_;
-    QString part_, from_, to_;
+    QByteArray before_, after_;
+    bool first_{true};
 };
 
 }  // namespace
@@ -143,6 +155,10 @@ void MainWindow::build_ui() {
     connect(jobs_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem*) { cancel_job(jobs_->currentRow()); });
 
     undo_ = new QUndoStack(this);
+    auto* history_dock = new QDockWidget(tr("Edit history"), this);
+    history_dock->setObjectName("history_dock");
+    history_dock->setWidget(new QUndoView(undo_, this));  // click an entry to go back to that state
+    addDockWidget(Qt::BottomDockWidgetArea, history_dock);
     auto* edit = menuBar()->addMenu(tr("&Edit"));
     edit->addAction(undo_->createUndoAction(this, tr("&Undo")));
     edit->addAction(undo_->createRedoAction(this, tr("&Redo")));
@@ -204,6 +220,13 @@ QWidget* MainWindow::build_rig_page() {
     role_row->addWidget(role_box_);
     role_row->addWidget(apply, 1);
     layout->addLayout(role_row);
+    auto* mesh_row = new QHBoxLayout;
+    mesh_box_ = new QComboBox;
+    auto* declare = new QPushButton(tr("Declare that the selected part meshes with this one (undoable)"));
+    mesh_row->addWidget(mesh_box_);
+    mesh_row->addWidget(declare, 1);
+    layout->addLayout(mesh_row);
+    connect(declare, &QPushButton::clicked, this, &MainWindow::on_declare_mesh);
     connect(apply, &QPushButton::clicked, this, &MainWindow::on_apply_role);
     connect(rig_table_, &QTableWidget::itemSelectionChanged, this, [this] {
         const auto rows = rig_table_->selectionModel()->selectedRows();
@@ -317,6 +340,11 @@ bool MainWindow::save_script(const QString& path) const {
 }
 
 bool MainWindow::open_project(const QString& project, const QString& step) {
+    undo_->clear();  // the history belongs to one project
+    return load_project(project, step);
+}
+
+bool MainWindow::load_project(const QString& project, const QString& step) {
     try {
         scene_ = std::make_shared<Scene>(Scene::load(project.toStdString(), step.toStdString()));
     } catch (const std::exception& e) {
@@ -355,7 +383,33 @@ bool MainWindow::open_demo(const QString& dir) {
 bool MainWindow::set_role(const QString& part, const QString& role) {
     if (project_.isEmpty()) return false;
     if (run_command({"rig", "set", project_, part, "--role", role}) != 0) return false;
-    return open_project(project_, step_);
+    return load_project(project_, step_);
+}
+
+bool MainWindow::restore_project(const QByteArray& text) {
+    if (project_.isEmpty()) return false;
+    QFile f(project_);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        append_log(tr("Cannot write %1").arg(project_));
+        return false;
+    }
+    f.write(text);
+    f.close();
+    history_ << "# the project file was restored by undo or redo";
+    return load_project(project_, step_);
+}
+
+bool MainWindow::edit_project(const QString& label, const QStringList& args) {
+    if (project_.isEmpty()) return false;
+    const QByteArray before = read_file(project_);
+    if (run_command(args) != 0) return false;
+    const QByteArray after = read_file(project_);
+    if (!load_project(project_, step_)) {
+        restore_project(before);
+        return false;
+    }
+    if (after != before) undo_->push(new ProjectEdit(this, label, before, after));
+    return true;
 }
 
 void MainWindow::refresh_panels() {
@@ -394,6 +448,12 @@ void MainWindow::refresh_panels() {
         rig_table_->setItem(static_cast<int>(row), 2, new QTableWidgetItem(QString::number(c.role_confidence, 'f', 2)));
         rig_table_->setItem(static_cast<int>(row), 3, new QTableWidgetItem(QString::fromStdString(c.role_source)));
     }
+    const QString partner = mesh_box_->currentText();
+    mesh_box_->clear();
+    for (const auto& c : m.components) {
+        if (c.features.teeth > 0) mesh_box_->addItem(QString::fromStdString(c.features.name));
+    }
+    if (const int keep = mesh_box_->findText(partner); keep >= 0) mesh_box_->setCurrentIndex(keep);
     rebuilding_ = false;
 
     QString s = tr("%1 | %2 parts").arg(QFileInfo(project_).fileName()).arg(m.components.size());
@@ -505,9 +565,20 @@ bool MainWindow::change_role(const QString& part, const QString& role) {
     if (index < 0) return false;
     const QString from = QString::fromUtf8(model::to_string(scene_->movement().components[index].role).data());
     if (from == role) return true;
-    auto* cmd = new RoleCommand(this, part, from, role);
-    undo_->push(cmd);  // runs redo()
-    return cmd->ok;
+    return edit_project(tr("Role of %1: %2 to %3").arg(part, from, role), {"rig", "set", project_, part, "--role", role});
+}
+
+bool MainWindow::declare_mesh(const QString& a, const QString& b) {
+    if (!scene_ || a == b) return false;
+    return edit_project(tr("Mesh %1 with %2").arg(a, b), {"rig", "mesh", project_, a, b});
+}
+
+void MainWindow::on_declare_mesh() {
+    if (viewport_->selected().empty() || mesh_box_->currentText().isEmpty()) {
+        statusBar()->showMessage(tr("Select a part and a partner first"), 4000);
+        return;
+    }
+    declare_mesh(QString::fromStdString(viewport_->selected()), mesh_box_->currentText());
 }
 
 void MainWindow::on_apply_role() {

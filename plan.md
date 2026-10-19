@@ -345,7 +345,8 @@ Six milestones to 1.0, each usable on its own and closed by a gate you check.
 - [x] CalculiX cross-check run against a real `ccx` (clamped block, within 1e-3)
 - [x] Chrono half of the M2 gate, on the real OM10 file (0.33 % amplitude, 0.04 s/day)
 - [ ] OpenCASCADE OpenGL / VTK viewport, PBR, motion trails, force arrows, field plots, MP4 export
-- [ ] Worker-process job queue that survives restarts and cancels running jobs; undo beyond role changes
+- [x] GUI undo of every project edit (role changes and declared meshes, by file snapshots; views are not undoable)
+- [ ] Worker-process job queue that survives restarts and cancels running jobs
 - [ ] MFEM, Netgen and VTK adapters (packages installed, not linked); a general 3D volume mesher
 - [ ] Chrono for the whole train, rigid bodies with collision geometry, shock transients
 - [x] HDF5 results for the structural fields (`ohs fea --hdf5`; JSON, CSV and VTU as before)
@@ -409,7 +410,7 @@ OM10 is the running example from M0 onward, and each milestone adds a guided les
 - [Gmsh licence (GPL-2-or-later)](https://gitlab.onelab.info/lrp/gmsh/-/commit/d4b25ed90cd6d5900c06a05e30960fc44a7e499d)
 - [Gmsh mailing list on non-linked use](https://onelab.info/pipermail/gmsh/2019/013348.html)
 
-- **Desktop application (added after M5)**: `ohs-gui` (Qt 6 Widgets, `-DOHS_BUILD_GUI=ON`, `cmake --preset gui`) gives the M0/M1 viewer gate its window: a 3D viewport with orbit, pan, zoom and picking, exploded and cut-away views, a model tree with visibility, the rig confidence list, the Explain dock, the animation timeline (smooth or stepped), one button per analysis, a log console and "save session as script". Verified by a scripted offscreen test (`gui_scripted_flow`, 151/151 with the GUI build, Qt 6.8.3 on Linux). **Also in the window:** a job queue on a worker thread with a Jobs dock (queued jobs can be cancelled), a rate-against-amplitude plot, and undo/redo of role changes. **Still not delivered:** the OpenCASCADE OpenGL/VTK viewport (the viewport is Qt-painter based), PBR, motion trails, force arrows, further plots, MP4 export, a worker-process job queue that survives restarts and cancels running jobs; and the human-run gates (someone opening OM10 in the viewer, a physical timegrapher trend, machining a part, finishing the OM10 study) remain unperformed. Windows and macOS remain configured, not exercised.
+- **Desktop application (added after M5)**: `ohs-gui` (Qt 6 Widgets, `-DOHS_BUILD_GUI=ON`, `cmake --preset gui`) gives the M0/M1 viewer gate its window: a 3D viewport with orbit, pan, zoom and picking, exploded and cut-away views, a model tree with visibility, the rig confidence list, the Explain dock, the animation timeline (smooth or stepped), one button per analysis, a log console and "save session as script". Verified by a scripted offscreen test (`gui_scripted_flow`, 151/151 with the GUI build, Qt 6.8.3 on Linux). **Also in the window:** a job queue on a worker thread with a Jobs dock (queued jobs can be cancelled), a rate-against-amplitude plot, and undo/redo of project edits (role changes, declared meshes). **Still not delivered:** the OpenCASCADE OpenGL/VTK viewport (the viewport is Qt-painter based), PBR, motion trails, force arrows, further plots, MP4 export, a worker-process job queue that survives restarts and cancels running jobs; and the human-run gates (someone opening OM10 in the viewer, a physical timegrapher trend, machining a part, finishing the OM10 study) remain unperformed. Windows and macOS remain configured, not exercised.
 
 **Gate runs on the real OM10 file** (`om10-00001_20220701_va_01_3.stp`, run by Claude, not by a person; results as measured):
 

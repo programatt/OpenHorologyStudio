@@ -52,7 +52,16 @@ public:
     bool set_role(const QString& part, const QString& role);
     /// The undoable role change the rig page uses: pushes onto the undo stack.
     bool change_role(const QString& part, const QString& role);
+    /// Declares that two toothed parts mesh (`ohs rig mesh`), undoable.
+    bool declare_mesh(const QString& part_a, const QString& part_b);
+    /// Runs `ohs <args>`, a command that rewrites the project file, as one undoable edit: undo puts the
+    /// project file back exactly as it was and reloads it, redo restores what the command wrote. Returns
+    /// false (and changes nothing) when the command fails or the result cannot be opened.
+    bool edit_project(const QString& label, const QStringList& args);
+    /// Replaces the project file's text and reloads it; what the undo stack uses.
+    bool restore_project(const QByteArray& text);
     QUndoStack* undo_stack() const { return undo_; }
+    QComboBox* mesh_partner_box() const { return mesh_box_; }
 
     /// Queues `ohs <args>` to run on a worker thread so the window stays responsive. Jobs run one at
     /// a time in order; a job that has not started yet can be cancelled.
@@ -96,12 +105,14 @@ private slots:
     void on_run_analysis();
     void on_job_finished();
     void on_apply_role();
+    void on_declare_mesh();
 
 private:
     void build_ui();
     QWidget* build_rig_page();
     QWidget* build_animate_page();
     QWidget* build_analysis_page(const QString& title, const std::vector<std::pair<QString, QStringList>>& commands);
+    bool load_project(const QString& project, const QString& step);
     void refresh_panels();
     QStringList with_project(QStringList args) const;
     void append_log(const QString& text);
@@ -134,6 +145,7 @@ private:
     QListWidget* jobs_{};
     PlotWidget* plot_{};
     QComboBox* role_box_{};
+    QComboBox* mesh_box_{};
     std::vector<Job> job_log_;                       ///< every job, in submission order (the list shows these)
     QFutureWatcher<cli::Captured> watcher_;
     int running_job_{-1};
