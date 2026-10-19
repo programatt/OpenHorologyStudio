@@ -14,7 +14,7 @@ namespace {
 constexpr double kPi = std::numbers::pi;
 constexpr double kDeg = kPi / 180.0;
 
-enum Zone { kFree = 0, kUnlock = 1, kImpulse = 2 };
+enum Zone { kFree = 0, kUnlock = 1, kImpulse = 2, kPass = 3 };
 
 double crown_phase(Position p) {
     switch (p) {
@@ -30,6 +30,7 @@ double crown_phase(Position p) {
 struct Model {
     double inertia, wheel_inertia, stiffness, rest, damping, friction;
     double gravity_torque, gravity_phase, lead;
+    EscapementType type;
     EscapementGeometry esc;
 
     Model(const Calibre& c, double wheel_torque, Position p)
@@ -42,11 +43,15 @@ struct Model {
           gravity_torque(is_vertical(p) ? c.unpoise_torque() : 0.0),
           gravity_phase(c.unpoise_angle_deg * kDeg + crown_phase(p)),
           lead(c.impulse_lead_deg * kDeg),
+          type(c.escapement),
           esc(escapement_geometry(c, wheel_torque)) {}
 
     /// Zone of the escapement for a swing in direction s at angle theta.
     Zone zone(double theta, int s) const {
         const double u = s * theta + lead;
+        // Detent: only the swing in the positive direction unlocks and takes an impulse. On the return swing the
+        // roller brushes the passing spring aside over the unlocking angle, centred on the dead point.
+        if (type == EscapementType::Detent && s < 0) return std::abs(u) <= esc.unlock / 2 ? kPass : kFree;
         if (u >= esc.lift / 2) return kFree;
         if (u >= -esc.lift / 2) return kImpulse;
         if (u >= -(esc.lift / 2 + esc.unlock)) return kUnlock;
@@ -62,6 +67,7 @@ struct Model {
         torque -= gravity_torque * std::sin(theta + gravity_phase);
         if (z == kImpulse) torque += s * esc.impulse_torque;
         if (z == kUnlock) torque -= s * esc.unlock_torque;
+        if (z == kPass) torque -= s * esc.passing_torque;
         return torque / effective_inertia(z);
     }
 };
@@ -88,11 +94,12 @@ EscapementGeometry escapement_geometry(const Calibre& c, double wheel_torque_nm)
     g.lift = c.lift_angle_deg * kDeg;
     g.unlock = c.unlock_angle_deg * kDeg;
     g.drop = c.drop_angle_deg * kDeg;
-    g.wheel_step = kPi / c.escape_teeth;
+    g.wheel_step = (c.escapement == EscapementType::Detent ? 2.0 : 1.0) * kPi / c.escape_teeth;
     g.ratio = (g.wheel_step - g.drop) / g.lift;
     const double ideal = wheel_torque_nm * g.ratio;
     g.impulse_torque = c.impulse_efficiency * ideal;
     g.unlock_torque = c.unlock_friction_ratio * ideal;
+    g.passing_torque = c.escapement == EscapementType::Detent ? c.passing_spring_ratio * ideal : 0.0;
     return g;
 }
 
@@ -102,13 +109,17 @@ double estimate_amplitude_deg(const Calibre& c, double wheel_torque_nm, Position
     const double a2 = 0.5 * kPi * m.damping * w0;  // viscous loss per beat = a2 * A^2
     const double b = 2.0 * m.friction;             // Coulomb loss per beat = b * A
     const double half = 0.5 * m.esc.lift;
-    // Net energy per beat against amplitude. The wheel's pick-up grows with speed and the losses
-    // with the swing, so it falls monotonically and bisection finds its zero.
+    // Net energy per oscillation against amplitude: the impulses (two for the lever, one for the detent)
+    // against two swings of Coulomb and viscous loss and, for the detent, the passing spring. The wheel's
+    // pick-up grows with speed and the losses with the swing, so it falls monotonically and bisection
+    // finds its zero.
+    const double impulses = c.impulses_per_oscillation();
+    const double passing_work = m.esc.passing_torque * m.esc.unlock;
     auto net = [&](double amp) {
         const double wh2 = w0 * w0 * std::max(amp * amp - half * half, 0.0);
         const double gain = m.esc.impulse_torque * m.esc.lift - m.esc.unlock_torque * m.esc.unlock -
                             m.wheel_inertia * m.esc.ratio * m.esc.ratio * wh2;  // picked up and dropped
-        return gain - a2 * amp * amp - b * amp;
+        return impulses * gain - 2.0 * (a2 * amp * amp + b * amp) - passing_work;
     };
     double lo = half, hi = 4.0 * kPi;
     if (net(lo) <= 0) return 0.0;
@@ -224,13 +235,16 @@ Measurement measure(const std::vector<Event>& events, const Calibre& c, double t
             sxy += x * beats[i];
         }
         const double mean = (n * sxy - sx * sy) / (n * sxx - sx * sx);
-        r.period_s = 2.0 * mean;
-        r.rate_s_per_day = (c.beat_period_s() / mean - 1.0) * 86400.0;
-        double sum = 0.0;
-        for (std::size_t i = 0; i + 2 < beats.size(); ++i) {
-            sum += std::abs((beats[i + 1] - beats[i]) - (beats[i + 2] - beats[i + 1])) / 2.0;
+        r.period_s = c.impulses_per_oscillation() * mean;
+        r.rate_s_per_day = (c.nominal_impulse_interval_s() / mean - 1.0) * 86400.0;
+        // Tick and tock exist only when every swing gives an impulse (the lever).
+        if (c.escapement == EscapementType::SwissLever) {
+            double sum = 0.0;
+            for (std::size_t i = 0; i + 2 < beats.size(); ++i) {
+                sum += std::abs((beats[i + 1] - beats[i]) - (beats[i + 2] - beats[i + 1])) / 2.0;
+            }
+            r.beat_error_ms = sum / static_cast<double>(beats.size() - 2) * 1e3;
         }
-        r.beat_error_ms = sum / static_cast<double>(beats.size() - 2) * 1e3;
     }
     return r;
 }

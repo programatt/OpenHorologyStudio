@@ -49,7 +49,8 @@ struct PositionalResult {
 
 PositionalResult positional_error(const Calibre& calibre, const TorqueChain& chain, double wind);
 
-/// Where the energy goes in one beat at a state of wind, from the model's own balance.
+/// Where the energy goes in one impulse (one beat for the lever, one oscillation for the detent) at a
+/// state of wind, from the model's own balance.
 struct EnergyBudget {
     double wheel_work_j{};       ///< torque at the wheel times the wheel step
     double delivered_j{};        ///< to the balance
@@ -57,6 +58,7 @@ struct EnergyBudget {
     double lost_wheel_hit_j{};   ///< kinetic energy of the wheel, taken at pick-up and lost at the drop
     double lost_friction_j{};    ///< pivots
     double lost_air_j{};
+    double lost_passing_j{};     ///< detent: the passing spring's drag on the return swing (0 for the lever)
     double efficiency{};         ///< (delivered - unlock - hit) / wheel_work
 };
 

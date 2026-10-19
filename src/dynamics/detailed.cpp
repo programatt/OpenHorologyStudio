@@ -117,6 +117,9 @@ Bodies advance(const World& w, const Bodies& y, double h, int s) {
 }  // namespace
 
 RunSummary simulate_detailed(const Calibre& c, const DetailedConditions& cond, const EventSink& sink) {
+    if (c.escapement != EscapementType::SwissLever) {
+        throw Error("the detailed (contact) model covers the Swiss lever only; use the reduced model for the detent escapement");
+    }
     const World w(c, cond.wheel_torque_nm, cond.position);
     const double h = cond.step_s > 0 ? cond.step_s : 0.1 / (2.0 * kPi * c.contact_frequency_hz);
     const double threshold = w.esc.lift / 2 + w.esc.unlock - w.lead;

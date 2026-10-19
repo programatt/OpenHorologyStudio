@@ -118,8 +118,12 @@ EnergyBudget energy_budget(const Calibre& c, double wheel_torque_nm, double ampl
     const double half = 0.5 * g.lift;
     const double hit_speed2 = w0 * w0 * std::max(amp * amp - half * half, 0.0);
     b.lost_wheel_hit_j = c.escape_wheel_inertia() * g.ratio * g.ratio * hit_speed2;  // picked up, then dropped
-    b.lost_friction_j = 2.0 * c.friction_torque(position) * amp;
-    b.lost_air_j = 0.5 * kPi * c.air_damping_nms * w0 * amp * amp;
+    // The lever has an impulse every swing; the detent only every second one, so its balance loses two swings
+    // of friction and air between impulses.
+    const double swings = 2.0 / c.impulses_per_oscillation();
+    b.lost_friction_j = swings * 2.0 * c.friction_torque(position) * amp;
+    b.lost_air_j = swings * 0.5 * kPi * c.air_damping_nms * w0 * amp * amp;
+    b.lost_passing_j = g.passing_torque * g.unlock;
     b.efficiency = b.wheel_work_j > 0 ? (b.delivered_j - b.lost_unlock_j - b.lost_wheel_hit_j) / b.wheel_work_j : 0.0;
     return b;
 }

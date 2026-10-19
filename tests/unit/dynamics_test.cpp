@@ -3,6 +3,7 @@
 #include <cmath>
 #include <numbers>
 #include <random>
+#include <set>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -455,6 +456,139 @@ TEST_CASE("virtual timegrapher noise is seeded and averages out") {
     // Over 560 beats, 200 us rms of jitter moves the fitted rate by only a few s/day.
     CHECK(std::abs(a.reading.rate_s_per_day - clean.reading.rate_s_per_day) < 5.0);
     CHECK(a.reading.beat_error_ms > clean.reading.beat_error_ms);
+}
+
+namespace {
+
+// A chronometer-like spring detent calibre: 14,400 vph, so the oscillation lasts 0.5 s and the detent
+// gives one impulse in each of them.
+Calibre detent_calibre() {
+    Calibre c = default_calibre(14400);
+    c.escapement = EscapementType::Detent;
+    c.lift_angle_deg = 40;
+    c.unlock_angle_deg = 4;
+    return c;
+}
+
+}  // namespace
+
+TEST_CASE("detent escapement: one impulse per oscillation, in one swing only, one tooth per impulse") {
+    const Calibre c = detent_calibre();
+    CHECK(c.impulses_per_oscillation() == 1);
+    CHECK(default_calibre().impulses_per_oscillation() == 2);
+    CHECK(c.nominal_impulse_interval_s() == Approx(0.5));
+
+    const EscapementGeometry g = escapement_geometry(c, 5e-8);
+    const EscapementGeometry lever = escapement_geometry(default_calibre(14400), 5e-8);
+    CHECK(g.wheel_step == Approx(2 * std::numbers::pi / 15));  // a whole tooth per impulse
+    CHECK(lever.wheel_step == Approx(std::numbers::pi / 15));
+    CHECK(g.passing_torque == Approx(c.passing_spring_ratio * 5e-8 * g.ratio));
+    CHECK(lever.passing_torque == 0.0);
+
+    RunConditions cond;
+    cond.wheel_torque_nm = 5e-8;
+    cond.duration_s = 40;
+    const auto events = run_events(c, cond);
+    int impulses = 0, turns = 0;
+    std::set<int> directions;
+    for (const Event& e : events) {
+        if (e.type == EventType::ImpulseStart) {
+            ++impulses;
+            directions.insert(e.direction);
+        }
+        if (e.type == EventType::Turn) ++turns;
+    }
+    CHECK(directions == std::set<int>{1});  // never in the return swing
+    CHECK(std::abs(2 * impulses - turns) <= 2);  // half as many impulses as swings
+
+    // The lever of the same calibre taps in both swings.
+    Calibre lever_cal = c;
+    lever_cal.escapement = EscapementType::SwissLever;
+    int lever_impulses = 0;
+    for (const Event& e : run_events(lever_cal, cond)) lever_impulses += e.type == EventType::ImpulseStart ? 1 : 0;
+    CHECK(lever_impulses > 1.8 * impulses);
+}
+
+TEST_CASE("detent escapement: the oscillation keeps the nominal period and the energy balance predicts the amplitude") {
+    const Calibre c = detent_calibre();
+    for (double torque : {2e-8, 5e-8}) {
+        const SteadyState ss = steady_state(c, torque);
+        INFO("wheel torque " << torque);
+        REQUIRE_FALSE(ss.stalled);
+        // Independent of the time stepping: a closed energy balance per oscillation.
+        CHECK(ss.m.amplitude_deg == Approx(estimate_amplitude_deg(c, torque, Position::DialUp)).epsilon(0.005));
+        CHECK(ss.m.period_s == Approx(0.5).epsilon(2e-3));
+        CHECK(std::abs(ss.m.rate_s_per_day) < 10.0);
+        CHECK(ss.m.beat_error_ms == 0.0);  // tick and tock do not exist with one impulse per oscillation
+        CHECK(ss.m.beats > 30);
+
+        // The budget closes at the settled amplitude (impulse energy against unlocking, the wheel's pick-up,
+        // two swings of pivot and air loss and the passing spring).
+        const EnergyBudget b = energy_budget(c, torque, ss.m.amplitude_deg, Position::DialUp);
+        const double net = b.delivered_j - b.lost_unlock_j - b.lost_wheel_hit_j - b.lost_friction_j - b.lost_air_j - b.lost_passing_j;
+        CHECK(std::abs(net) < 0.02 * b.delivered_j);
+        CHECK(b.lost_passing_j > 0);
+        CHECK(b.wheel_work_j == Approx(torque * 2 * std::numbers::pi / 15));
+    }
+}
+
+TEST_CASE("detent escapement: the passing spring costs amplitude, and a drive too weak for it stalls") {
+    Calibre c = detent_calibre();
+    const double torque = 2e-8;
+    double previous = 1e9;
+    for (double ratio : {0.0, 0.25, 0.6}) {
+        c.passing_spring_ratio = ratio;
+        const SteadyState ss = steady_state(c, torque);
+        INFO("passing spring ratio " << ratio);
+        REQUIRE_FALSE(ss.stalled);
+        CHECK(ss.m.amplitude_deg < previous);
+        previous = ss.m.amplitude_deg;
+    }
+    CHECK(parameter(c, "passing_spring_ratio") == Approx(0.6));
+    // The lever has no passing spring: the parameter changes nothing for it.
+    Calibre lever = c;
+    lever.escapement = EscapementType::SwissLever;
+    const double a = steady_state(lever, torque).m.amplitude_deg;
+    lever.passing_spring_ratio = 0.0;
+    CHECK(steady_state(lever, torque).m.amplitude_deg == Approx(a));
+    c.passing_spring_ratio = 0.25;
+    CHECK(steady_state(c, 2e-9).stalled);
+}
+
+TEST_CASE("detent escapement: the virtual timegrapher hears one tick per oscillation") {
+    const Calibre c = detent_calibre();
+    RunConditions cond;
+    cond.wheel_torque_nm = 5e-8;
+    cond.duration_s = 140;
+    const auto events = run_events(c, cond);
+    const Measurement truth = measure(events, c, 120, 140);
+    const TimegrapherTrace tr = virtual_timegrapher(events, c, 120, 140);
+    CHECK(tr.reading.beats == truth.beats);
+    CHECK(tr.reading.beats > 30);
+    CHECK(tr.reading.rate_s_per_day == Approx(truth.rate_s_per_day).margin(0.05));
+    CHECK(tr.reading.amplitude_deg == Approx(truth.amplitude_deg).epsilon(0.05));
+    CHECK(tr.reading.beat_error_ms == 0.0);
+    for (const auto& b : tr.beats) CHECK_FALSE(b.tock);
+    CHECK(tr.beats[5].interval_ms == Approx(500.0).epsilon(2e-3));  // one tick every 0.5 s, not every 0.25 s
+}
+
+TEST_CASE("detent escapement: calibre files carry it, and the contact models refuse it") {
+    const Calibre c = calibre_from_toml("[calibre]\nescapement = \"detent\"\npassing_spring_ratio = 0.4\nbeat_rate_vph = 14400\n");
+    CHECK(c.escapement == EscapementType::Detent);
+    CHECK(c.passing_spring_ratio == Approx(0.4));
+    const Calibre back = calibre_from_toml(to_toml(c));
+    CHECK(back.escapement == EscapementType::Detent);
+    CHECK(back.passing_spring_ratio == Approx(0.4));
+    CHECK(calibre_from_toml("[calibre]\nbeat_rate_vph = 21600\n").escapement == EscapementType::SwissLever);
+    CHECK_THROWS_AS(calibre_from_toml("[calibre]\nescapement = \"cylinder\"\n"), Error);
+    CHECK_THROWS_AS(calibre_from_toml("[calibre]\nescapement = 3\n"), Error);
+    CHECK(std::string(to_string(EscapementType::Detent)) == "detent");
+
+    DetailedConditions dc;
+    dc.wheel_torque_nm = 5e-8;
+    dc.duration_s = 1;
+    CHECK_THROWS_AS(simulate_detailed(c, dc, [](const Event&) {}), Error);
+    CHECK_THROWS_AS(simulate_chrono(c, dc, [](const Event&) {}), Error);
 }
 
 TEST_CASE("verification: detailed contact model agrees with the reduced model") {

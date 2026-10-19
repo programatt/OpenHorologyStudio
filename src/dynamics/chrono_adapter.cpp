@@ -113,6 +113,7 @@ bool chrono_available() { return true; }
 const char* chrono_version() { return CHRONO_VERSION; }
 
 RunSummary simulate_chrono(const Calibre& c, const DetailedConditions& cond, const EventSink& sink) {
+    if (c.escapement != EscapementType::SwissLever) throw Error("the Chrono model covers the Swiss lever only; use the reduced model for the detent escapement");
     Escapement e;
     e.esc = escapement_geometry(c, cond.wheel_torque_nm);
     e.lead = c.impulse_lead_deg * kDeg;

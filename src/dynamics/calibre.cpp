@@ -47,6 +47,7 @@ const std::vector<Field>& fields() {
         {"drop_angle_deg", &Calibre::drop_angle_deg},
         {"impulse_efficiency", &Calibre::impulse_efficiency},
         {"unlock_friction_ratio", &Calibre::unlock_friction_ratio},
+        {"passing_spring_ratio", &Calibre::passing_spring_ratio},
         {"escape_wheel_inertia_mgcm2", &Calibre::escape_wheel_inertia_mgcm2},
         {"contact_damping_ratio", &Calibre::contact_damping_ratio},
         {"contact_frequency_hz", &Calibre::contact_frequency_hz},
@@ -81,6 +82,14 @@ const std::vector<Position>& all_positions() {
     static const std::vector<Position> v = {Position::DialUp,   Position::DialDown,  Position::CrownUp,
                                             Position::CrownDown, Position::CrownLeft, Position::CrownRight};
     return v;
+}
+
+const char* to_string(EscapementType e) { return e == EscapementType::Detent ? "detent" : "swiss_lever"; }
+
+EscapementType escapement_from_string(const std::string& text) {
+    if (text == "swiss_lever") return EscapementType::SwissLever;
+    if (text == "detent") return EscapementType::Detent;
+    throw Error("unknown escapement '" + text + "' (swiss_lever or detent)");
 }
 
 bool is_vertical(Position p) { return p != Position::DialUp && p != Position::DialDown; }
@@ -165,6 +174,12 @@ Calibre calibre_from_toml(const std::string& text) {
             if (auto s = value.value<std::string>()) c.name = *s;
             continue;
         }
+        if (k == "escapement") {
+            const auto s = value.value<std::string>();
+            if (!s) throw Error("calibre file: 'escapement' must be swiss_lever or detent");
+            c.escapement = escapement_from_string(*s);
+            continue;
+        }
         if (k == "torque_curve") {
             const toml::array* a = value.as_array();
             if (!a) throw Error("calibre file: torque_curve must be an array of [wind, torque] pairs");
@@ -205,6 +220,7 @@ std::string to_toml(const Calibre& calibre) {
     Calibre c = calibre;
     toml::table cal;
     cal.insert("name", c.name);
+    cal.insert("escapement", std::string(to_string(c.escapement)));
     for (const Field& f : fields()) cal.insert(f.name, c.*(f.member));
     toml::array curve;
     for (const auto& [w, t] : c.torque_curve) curve.push_back(toml::array{w, t});

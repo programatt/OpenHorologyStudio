@@ -126,7 +126,8 @@ std::string explain_change(const Change& ch, const Calibre& base, const Calibre&
         return os.str();
     }
     if (in(ch.parameter, {"barrel_torque_nmm", "mesh_efficiency", "escape_teeth", "impulse_efficiency", "drop_angle_deg",
-                          "lift_angle_deg", "escape_pivot_loss_nmm", "unlock_friction_ratio", "unlock_angle_deg"})) {
+                          "lift_angle_deg", "escape_pivot_loss_nmm", "unlock_friction_ratio", "unlock_angle_deg",
+                          "passing_spring_ratio"})) {
         const double eb = tb.budget.delivered_j - tb.budget.lost_unlock_j - tb.budget.lost_wheel_hit_j;
         const double em = tm.budget.delivered_j - tm.budget.lost_unlock_j - tm.budget.lost_wheel_hit_j;
         os << "this changes the energy each beat puts into the balance, from " << num(eb * 1e9) << " nJ to "

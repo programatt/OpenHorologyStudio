@@ -32,10 +32,12 @@ struct EscapementGeometry {
     double lift{};          ///< balance angle of the impulse, rad
     double unlock{};        ///< balance angle of the unlocking, rad
     double drop{};          ///< escape wheel angle lost to drop, rad
-    double wheel_step{};    ///< wheel angle advanced per beat: pi / teeth, rad
+    double wheel_step{};    ///< wheel angle advanced per impulse: pi / teeth for the lever (two per tooth),
+                            ///< 2 pi / teeth for the detent (one per tooth), rad
     double ratio{};         ///< wheel angle per balance angle during the impulse: (step - drop) / lift
     double impulse_torque{};   ///< torque on the balance during the impulse, N·m
     double unlock_torque{};    ///< resisting torque on the balance while unlocking, N·m
+    double passing_torque{};   ///< detent: drag of the passing spring on the return swing, N·m (0 for the lever)
 };
 
 EscapementGeometry escapement_geometry(const Calibre& c, double wheel_torque_nm);

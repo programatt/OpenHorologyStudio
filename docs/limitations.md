@@ -29,7 +29,9 @@ know where to be careful.
 - **Cycloidal gears** are generated and fitted (one rolling circle for both flanks), but the Lewis
   hand calculation and the tolerance stack-up's contact ratio use involute formulas, and a cycloid
   fit is only tried for flanks the involute fit rejects.
-- **Escapements:** the Swiss lever only. The architecture is ready for others.
+- **Escapements:** the Swiss lever and, in the reduced model only, a spring detent (chronometer) escapement
+  described by calibre parameters. There is no co-axial, Robin, cylinder, verge or other escapement, no
+  contact model of the detent, and the rig does not recognise escapement geometry in CAD.
 - **No STEP PMI tolerances:** they come from a TOML table. HDF5 (`ohs fea --hdf5`) holds the
   structural fields only; the timekeeping results are JSON and CSV.
 - **IGES and DXF import are plain.** IGES files carry no assembly names, so parts are called `part`,

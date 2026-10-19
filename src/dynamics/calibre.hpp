@@ -18,6 +18,16 @@ Position position_from_string(const std::string& text);  // throws ohs::Error
 const std::vector<Position>& all_positions();
 bool is_vertical(Position p);
 
+/// The escapement the reduced model describes.
+enum class EscapementType {
+    SwissLever,  ///< an impulse in every swing of the balance: two beats per oscillation, tick and tock
+    Detent,      ///< spring detent (chronometer): one impulse per oscillation, in one swing only; on the
+                 ///< other swing the roller brushes a passing spring aside and the wheel stays locked
+};
+
+const char* to_string(EscapementType e);
+EscapementType escapement_from_string(const std::string& text);  // "swiss_lever" or "detent"; throws ohs::Error
+
 /// Everything the dynamics models need beyond the geometry in the rig. Units are what a
 /// watchmaker reads on a data sheet; the models convert to SI internally.
 struct Calibre {
@@ -47,7 +57,8 @@ struct Calibre {
     double pivot_friction_flat_nm = 8.0e-10; ///< Coulomb friction torque on the balance, dial up/down
     double vertical_friction_factor = 1.3;   ///< multiplier in the hanging positions
 
-    // Escapement (Swiss lever)
+    // Escapement
+    EscapementType escapement = EscapementType::SwissLever;
     double escape_teeth = 15;                ///< escape wheel teeth (one tooth passes per two beats)
     double impulse_lead_deg = 4.0;           ///< impulse starts this far before the dead point (balance angle)
     double lift_angle_deg = 50.0;           ///< balance angle during which the lever pushes it
@@ -55,6 +66,9 @@ struct Calibre {
     double drop_angle_deg = 1.0;             ///< escape wheel angle lost to drop and run
     double impulse_efficiency = 0.92;        ///< share of the wheel's work that reaches the balance
     double unlock_friction_ratio = 0.30;     ///< unlocking resistance as a share of the impulse torque
+    /// Detent only: the drag of the passing spring on the balance during the return swing, over the
+    /// unlocking angle, as a share of the impulse torque.
+    double passing_spring_ratio = 0.25;
     double escape_wheel_inertia_mgcm2 = 0.05;
     double contact_damping_ratio = 0.8;      ///< detailed model: damping of the wheel/pallet contact
     double contact_frequency_hz = 12000.0;   ///< detailed model: stiffness of the wheel/pallet contact
@@ -71,6 +85,10 @@ struct Calibre {
     double mainspring_torque_nmm(double wind) const;  ///< 0 <= wind <= 1
     double friction_torque(Position p) const;
     double beat_period_s() const { return 3600.0 / beat_rate_vph; }
+    /// Impulses the escapement gives in one oscillation (two beats): 2 for the lever, 1 for the detent.
+    int impulses_per_oscillation() const { return escapement == EscapementType::Detent ? 1 : 2; }
+    /// The time between impulses at the nominal beat rate.
+    double nominal_impulse_interval_s() const { return 2.0 * beat_period_s() / impulses_per_oscillation(); }
 };
 
 /// A calibre with the hairspring length chosen so the free frequency is half the beat rate.

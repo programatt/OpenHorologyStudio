@@ -39,6 +39,12 @@ The defaults describe a typical lever calibre. To use your own, write the number
 ohs calibre init -o mine.toml                 # edit it, then add --calibre mine.toml to any command
 ```
 
+A calibre can also describe a **spring detent (chronometer) escapement** instead of the Swiss lever:
+set `escapement = "detent"` in the file. The balance then takes one impulse per oscillation, in one
+swing only, advancing the escape wheel a whole tooth each time, and brushes a passing spring aside on the
+return swing (`passing_spring_ratio` is its drag as a share of the impulse torque). The timegrapher
+hears one tick every two beats and there is no tick and tock, so no beat error. See [Timekeeping](timekeeping.md).
+
 ## 4. Ask what if
 
 ```

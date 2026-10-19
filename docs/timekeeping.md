@@ -56,6 +56,20 @@ Each change gets a sentence with the relation behind it and, for frequency chang
 and simulated rate shifts side by side. `--verify` also checks both designs with the detailed
 model. Parameters are the field names of the calibre file.
 
+## Escapements
+
+The calibre's `escapement` is `swiss_lever` (the default) or `detent`, a spring detent as in a marine
+chronometer. In the reduced model the lever pushes the balance in every swing, two beats per
+oscillation, with tick and tock. The detent pushes it once per oscillation, in the positive swing
+only: the escape wheel is released by the discharging pallet, advances a whole tooth (2 pi / teeth, not
+pi / teeth) through the impulse, and is locked again; on the return swing the roller only brushes the
+passing spring aside, which costs the balance `passing_spring_ratio` times the impulse torque over
+the unlocking angle. Everything else, the train, the mainspring and the hairspring, is shared. Its
+checks: the settled amplitude agrees with an independent energy balance per oscillation to 0.5 %, the
+oscillation keeps the nominal period, and the energy budget closes. The detailed contact model and the
+Chrono adapter model the Swiss lever only and refuse a detent calibre. The detent is a model of the
+escapement's behaviour: nothing in the rig recognises detent geometry in a CAD file.
+
 ## Calibrating against your timegrapher
 
 ```

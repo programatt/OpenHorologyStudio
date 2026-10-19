@@ -23,7 +23,7 @@ user guide.
 
 Not in 1.0: the full graphical interface (`ohs-gui` is a first, basic one: [`docs/desktop.md`](docs/desktop.md)), VTK (OHS's own solvers stand in for it; MFEM is linked only as an independent
 cross-check, `ohs fea --mfem`, Netgen is an optional out-of-process 3D mesher, `--mesher netgen`, and Chrono is an
-optional adapter for the escapement, `-DOHS_WITH_CHRONO=ON`) and escapements other than the Swiss lever. [`docs/limitations.md`](docs/limitations.md) is the full list.
+optional adapter for the escapement, `-DOHS_WITH_CHRONO=ON`) and escapements other than the Swiss lever and the spring detent (reduced model). [`docs/limitations.md`](docs/limitations.md) is the full list.
 
 ## Build
 

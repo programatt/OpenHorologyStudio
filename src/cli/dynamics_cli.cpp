@@ -259,7 +259,8 @@ int cmd_timekeeping(const DynOptions& o, bool as_json) {
         j["energy_per_beat_j"] = {{"wheel_work", t.budget.wheel_work_j}, {"delivered", t.budget.delivered_j},
                                   {"lost_unlock", t.budget.lost_unlock_j}, {"lost_wheel_hit", t.budget.lost_wheel_hit_j},
                                   {"lost_friction", t.budget.lost_friction_j}, {"lost_air", t.budget.lost_air_j},
-                                  {"efficiency", t.budget.efficiency}};
+                                  {"lost_passing_spring", t.budget.lost_passing_j}, {"efficiency", t.budget.efficiency}};
+        j["escapement"] = to_string(s.calibre.escapement);
         std::cout << j.dump(2) << '\n';
         return kExitOk;
     }
@@ -278,10 +279,11 @@ int cmd_timekeeping(const DynOptions& o, bool as_json) {
                   << " s/day\n";
     }
     std::cout << "positional spread " << t.positions.spread_s_per_day << " s/day\n"
-              << std::setprecision(2) << "energy per beat at full wind: wheel " << t.budget.wheel_work_j * 1e9
+              << std::setprecision(2) << "energy per " << (s.calibre.escapement == EscapementType::Detent ? "oscillation (one impulse)" : "beat") << " at full wind: wheel " << t.budget.wheel_work_j * 1e9
               << " nJ, balance gets " << t.budget.delivered_j * 1e9 << " nJ, unlocking " << t.budget.lost_unlock_j * 1e9
               << ", wheel pick-up " << t.budget.lost_wheel_hit_j * 1e9 << ", pivots " << t.budget.lost_friction_j * 1e9
-              << ", air " << t.budget.lost_air_j * 1e9 << " nJ (wheel to balance " << t.budget.efficiency * 100 << " %)\n";
+              << ", air " << t.budget.lost_air_j * 1e9 << (t.budget.lost_passing_j > 0 ? ", passing spring " + std::to_string(t.budget.lost_passing_j * 1e9).substr(0, 5) : std::string())
+              << " nJ (wheel to balance " << t.budget.efficiency * 100 << " %)\n";
     return kExitOk;
 }
 

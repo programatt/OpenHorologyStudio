@@ -9,6 +9,10 @@ Semantic Versioning, with the Python API and the plugin ABI versioned as describ
 Found by running the plan's gates on the real OM10 file.
 
 ### Added
+- A spring detent (chronometer) escapement in the reduced timekeeping model (`escapement = "detent"` and
+  `passing_spring_ratio` in a calibre): one impulse per oscillation, a passing spring on the return
+  swing, a timegrapher that hears one tick per oscillation. Checked against an energy balance per
+  oscillation; the detailed and Chrono models refuse it.
 - `ohs-gui` viewport: a colour field plot of a shock result on its part (von Mises or displacement, with a
   scale), tooth force arrows at the meshes of the train, and motion trails.
 - `fea::read_vtu`, the reader for the VTU files `ohs fea --vtu` writes.

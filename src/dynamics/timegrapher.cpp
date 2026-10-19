@@ -51,7 +51,8 @@ TimegrapherTrace virtual_timegrapher(const std::vector<Event>& events, const Cal
     out.reading.beats = n;
     if (n < 3) return out;
 
-    const double nominal = c.beat_period_s();
+    const double nominal = c.nominal_impulse_interval_s();  // a detent ticks once per oscillation, not once per beat
+    const bool alternates = c.escapement == EscapementType::SwissLever;  // tick and tock only exist when every swing gives an impulse
     // Least-squares line through tick time against beat number: its slope is the beat interval.
     double sx = 0, sy = 0, sxx = 0, sxy = 0;
     for (int i = 0; i < n; ++i) {
@@ -70,19 +71,19 @@ TimegrapherTrace virtual_timegrapher(const std::vector<Event>& events, const Cal
     for (int i = 0; i < n; ++i) {
         TimegrapherBeat& b = out.beats[i];
         b.index = i;
-        b.tock = (i % 2) == 1;
+        b.tock = alternates && (i % 2) == 1;
         b.deviation_ms = (b.time_s - (offset + nominal * i)) * 1e3;
         if (i > 0) {
             b.interval_ms = (b.time_s - out.beats[i - 1].time_s) * 1e3;
-            (b.tock ? odd : even) += b.interval_ms;
-            ++(b.tock ? no : ne);
+            ((i % 2) == 1 ? odd : even) += b.interval_ms;
+            ++((i % 2) == 1 ? no : ne);
         }
         lift += b.lift_time_ms;
     }
     out.reading.rate_s_per_day = (nominal / slope - 1.0) * 86400.0;
-    if (ne > 0 && no > 0) out.reading.beat_error_ms = std::abs(even / ne - odd / no) / 2.0;
+    if (alternates && ne > 0 && no > 0) out.reading.beat_error_ms = std::abs(even / ne - odd / no) / 2.0;
 
-    const double period = 2.0 * slope;
+    const double period = c.impulses_per_oscillation() * slope;
     const double ratio = std::clamp((lift / n * 1e-3) / period, 1e-6, 0.5);
     out.reading.amplitude_deg = c.lift_angle_deg / (2.0 * std::sin(std::numbers::pi * ratio));
     return out;

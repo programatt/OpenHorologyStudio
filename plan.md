@@ -358,7 +358,8 @@ Six milestones to 1.0, each usable on its own and closed by a gate you check.
 - [x] IGES and DXF import (`ohs import x.igs|x.dxf`; DXF is a flat drawing, extruded)
 - [ ] STEP PMI tolerances
 - [x] Cycloidal gear profiles (generated, fitted, meshing-checked; Lewis and contact-ratio formulas stay involute)
-- [ ] Escapements other than the Swiss lever; coil-contact mainspring and hairspring models
+- [x] Spring detent (chronometer) escapement in the reduced model (calibre `escapement = "detent"`)
+- [ ] Escapements other than the Swiss lever and the detent (co-axial, Robin, cylinder, verge), and a contact model of the detent; coil-contact mainspring and hairspring models
 - [ ] Windows and macOS builds, installers and CI run (configured only); Fusion 360 and SolidWorks add-in runs
 - [x] TSan (clean under `setarch -R`), coverage and static-analysis CI jobs (TSan run locally; coverage and clang-tidy jobs are configured, not run here)
 - [ ] vcpkg superbuild of Chrono, MFEM and Netgen at pinned commits
