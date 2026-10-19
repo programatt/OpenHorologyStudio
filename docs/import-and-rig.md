@@ -76,6 +76,31 @@ ohs rig mesh movement.hsproj "barrel gear" "centre pinion"
 Both parts need a role that rotates and a tooth count. A declared mesh is kept when the rig is
 re-inferred, and is marked `manual` in the project file.
 
+`rig check` ends with the train: the chain of mobiles from the barrel to the escape wheel, or, when no
+mesh joins them, the two pieces with the gap marked `[no mesh]`, and a warning that the train is broken.
+The animation and the simulations need it connected.
+
+## Rig again, and find what is left
+
+```
+ohs rig auto movement.hsproj           # classify and rig every part again
+ohs rig auto movement.hsproj --reset   # ... and forget the roles you set and the meshes you declared
+ohs rig suggest movement.hsproj        # pairs that probably mesh but failed the strict test
+ohs rig suggest movement.hsproj --apply --min-confidence 0.3
+```
+
+`rig auto` runs the classification and the mesh inference again from the part features stored in the
+project, without re-importing the CAD file. Roles you set (`user`) or a preset gave, and meshes you
+declared, are kept; every other role is decided afresh, so a part that is newly recognised joins its mobile
+and the meshes it makes. It lists the roles that changed. `--coaxial-tolerance` (mm) loosens the test for
+parts of one mobile.
+
+`rig suggest` lists toothed parts on different mobiles that overlap in height and whose tip circles are
+close to those of a meshing pair for the module their centre distance gives, but that the strict test
+rejected, with a likelihood of at most 0.5. Only pairs in which a part meshes with nothing yet are offered.
+`--apply` declares them (like `rig mesh`); confirm them by eye first, or in the desktop app's Rig tab,
+where they are drawn over the movement.
+
 Without a barrel in the rig, the train starts at the far end of the gear chain from the escape
 wheel and `kinematics` says so; pass `--root` to choose another start.
 

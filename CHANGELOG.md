@@ -9,6 +9,14 @@ Semantic Versioning, with the Python API and the plugin ABI versioned as describ
 Found by running the plan's gates on the real OM10 file.
 
 ### Added
+- Seeing and finishing the rig. `ohs rig auto` runs the classification and mesh inference again on an imported
+  project (roles you set and meshes you declared are kept; `--reset` forgets them), `ohs rig suggest [--apply]`
+  lists, and declares, pairs of toothed parts that probably mesh although the strict test rejected them, and
+  `ohs rig check` ends with the train from the barrel to the escape wheel, says where it breaks and warns
+  when it does. `ohs-gui`'s Rig tab shows the train, a To do list, the suggested meshes and *Re-run auto-rig*
+  (all undoable), and *Show the rig* colours each mobile and draws the meshes (green where the barrel feeds
+  them), the suggestions and the parts to check over the viewport. `rigging::re_rig`, `suggest_meshes`,
+  `train_chain` and `describe_chain` are the library calls.
 - Four roles for parts that had no type: `stem` (the winding stem), `spring` (click, jumper and setting springs,
   of wire or plate), `lever` (clicks, pawls, jumpers, setting levers, yokes) and `bearing` (brass tubes and
   bushes in plates). They are recognised by name ("winding stem", "click spring", "setting lever", "bush", ...;

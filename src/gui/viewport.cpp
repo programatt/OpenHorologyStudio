@@ -5,6 +5,9 @@
 #include <cmath>
 #include <numbers>
 
+#include <iterator>
+
+#include <QFontMetrics>
 #include <QLinearGradient>
 #include <QMouseEvent>
 #include <QPainter>
@@ -35,6 +38,9 @@ QColor role_colour(model::Role role) {
         default: return QColor(201, 163, 76);
     }
 }
+
+/// The colour of a mobile when the rig is shown: one hue each, spread round the wheel.
+QColor mobile_colour(int mobile) { return QColor::fromHsv((mobile * 67 + 20) % 360, 150, 225); }
 
 }  // namespace
 
@@ -74,6 +80,11 @@ void Viewport::fit() {
     update();
 }
 
+void Viewport::set_show_rig(bool on) {
+    show_rig_ = on;
+    update();
+}
+
 void Viewport::select(const std::string& part) {
     selected_ = part;
     update();
@@ -89,8 +100,96 @@ QPointF Viewport::to_screen(const Point3& p, const QSize& size) const {
     return {size.width() / 2.0 + pan_x_ + scale * x1, size.height() / 2.0 + pan_y_ - scale * y2};
 }
 
+void Viewport::draw_rig(QPainter& painter, const QSize& size) const {
+    const model::Movement& m = scene_->movement();
+    const auto& review = scene_->review();
+    const bool dark = palette().window().color().lightness() < 128;
+    const QColor fed(60, 200, 110), unfed(120, 150, 210), manual(190, 120, 235), check(240, 170, 40);
+    const auto centre = [&m](int component) {
+        const model::PartFeatures& f = m.components[static_cast<std::size_t>(component)].features;
+        return Point3{f.center.x, f.center.y, 0.5 * (f.z_min + f.z_max)};
+    };
+
+    // Meshes, over a dark edge so they read on every part colour.
+    for (const model::MeshJoint& j : m.meshes) {
+        const int ma = m.mobile_of(j.a), mb = m.mobile_of(j.b);
+        const bool powered = ma >= 0 && mb >= 0 && review.chain.fed.size() > static_cast<std::size_t>(std::max(ma, mb)) &&
+                             review.chain.fed[static_cast<std::size_t>(ma)] && review.chain.fed[static_cast<std::size_t>(mb)];
+        QColor ink = powered ? fed : unfed;
+        if (j.manual) ink = manual;
+        if (j.confidence < 0.6) ink = check;
+        const QPointF a = to_screen(centre(j.a), size), b = to_screen(centre(j.b), size);
+        painter.setPen(QPen(QColor(0, 0, 0, 130), 6.0, Qt::SolidLine, Qt::RoundCap));
+        painter.drawLine(a, b);
+        painter.setPen(QPen(ink, 3.4, j.manual ? Qt::DashLine : Qt::SolidLine, Qt::RoundCap));
+        painter.drawLine(a, b);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(ink);
+        painter.drawEllipse(a, 4.0, 4.0);
+        painter.drawEllipse(b, 4.0, 4.0);
+    }
+
+    // Meshes worth declaring.
+    QFont small = painter.font();
+    small.setPointSizeF(small.pointSizeF() * 0.9);
+    painter.setFont(small);
+    for (const rigging::MeshSuggestion& s : review.suggestions) {
+        const QPointF a = to_screen(centre(s.a), size), b = to_screen(centre(s.b), size);
+        painter.setPen(QPen(QColor(0, 0, 0, 110), 5.0, Qt::SolidLine, Qt::RoundCap));
+        painter.drawLine(a, b);
+        painter.setPen(QPen(check, 3.0, Qt::DotLine, Qt::RoundCap));
+        painter.drawLine(a, b);
+        painter.setPen(dark ? QColor(250, 215, 140) : QColor(120, 70, 0));
+        painter.drawText((a + b) / 2.0 + QPointF(6, -5), tr("? %1").arg(s.confidence, 0, 'f', 2));
+    }
+
+    // A ring round each part a warning or an error is about.
+    for (const rigging::Issue& issue : review.issues) {
+        if (issue.severity == rigging::Severity::Info) continue;
+        for (const std::string& name : issue.parts) {
+            const int c = m.find_component(name);
+            if (c < 0) continue;
+            const Point3 at = centre(c);
+            const double outer = m.components[static_cast<std::size_t>(c)].features.outer_radius;
+            const QPointF p = to_screen(at, size), edge = to_screen({at[0] + outer, at[1], at[2]}, size);
+            const double radius = std::max(10.0, std::hypot(edge.x() - p.x(), edge.y() - p.y()) + 4.0);
+            painter.setPen(QPen(issue.severity == rigging::Severity::Error ? QColor(235, 70, 60) : check, 2.6, Qt::DashLine));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawEllipse(p, radius, radius);
+        }
+    }
+
+    // What the colours mean.
+    struct Key {
+        QColor ink;
+        Qt::PenStyle style;
+        QString text;
+    };
+    const Key keys[] = {{fed, Qt::SolidLine, tr("mesh fed from the barrel")},
+                        {unfed, Qt::SolidLine, tr("mesh the barrel does not reach")},
+                        {manual, Qt::DashLine, tr("mesh you declared")},
+                        {check, Qt::SolidLine, tr("low confidence, or a part to check (ring)")},
+                        {check, Qt::DotLine, tr("? possible mesh to confirm")}};
+    const QFontMetrics fm(painter.font());
+    const int row = fm.height() + 4;
+    const QRect box(10, 10, 14 + 30 + fm.horizontalAdvance(tr("low confidence, or a part to check (ring)")) + 12,
+                    row * static_cast<int>(std::size(keys)) + 10);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(dark ? QColor(26, 28, 32, 200) : QColor(236, 234, 228, 215));
+    painter.drawRoundedRect(box, 5, 5);
+    int y = box.top() + 5 + row / 2;
+    for (const Key& k : keys) {
+        painter.setPen(QPen(k.ink, 3.0, k.style, Qt::RoundCap));
+        painter.drawLine(box.left() + 8, y, box.left() + 36, y);
+        painter.setPen(palette().text().color());
+        painter.drawText(box.left() + 44, y + fm.ascent() / 2 - 1, k.text);
+        y += row;
+    }
+}
+
 void Viewport::draw_overlays(QPainter& painter, const QSize& size) const {
     const bool lifted = scene_->explode() > 0;  // the overlays follow the assembled positions only
+    if (show_rig_ && !lifted) draw_rig(painter, size);
     if (scene_->show_trails() && !lifted) {
         const auto trails = scene_->trails();
         for (std::size_t i = 0; i < trails.size(); ++i) {
@@ -214,8 +313,19 @@ void Viewport::draw(QPainter& painter, const QSize& size, bool fast) const {
     // Cyan: the complement of the brass most parts are drawn in, and unlike the hairspring's blue.
     const QColor selection(40, 200, 235);
     std::vector<QPolygonF> selected_outline;  // the selected part's triangles, drawn again on top
+    const QColor backdrop = palette().window().color().lightness() < 128 ? QColor(26, 28, 32) : QColor(226, 224, 218);
     for (const Projected& p : project(size)) {
         QColor base = role_colour(scene_->parts()[p.part].role);
+        if (show_rig_) {
+            // Each mobile in a hue of its own; what does not turn is faded back so the train stands out.
+            const int mobile = scene_->parts()[p.part].mobile;
+            if (mobile >= 0) {
+                base = mobile_colour(mobile);
+            } else {
+                base = QColor((base.red() * 2 + backdrop.red() * 3) / 5, (base.green() * 2 + backdrop.green() * 3) / 5,
+                              (base.blue() * 2 + backdrop.blue() * 3) / 5);
+            }
+        }
         if (!selected_.empty() && scene_->parts()[p.part].name == selected_) {
             base = selection;
             selected_outline.push_back(QPolygonF({{p.x[0], p.y[0]}, {p.x[1], p.y[1]}, {p.x[2], p.y[2]}}));

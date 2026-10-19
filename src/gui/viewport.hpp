@@ -32,6 +32,12 @@ public:
     /// full quality.
     void interactive_update();
     const std::string& selected() const { return selected_; }
+    /// Colours each mobile of the train and draws the rig over the parts: a line for every gear mesh (green
+    /// where the barrel feeds it, grey-blue where it does not reach, dashed where you declared it, amber where
+    /// the confidence is low), dotted amber lines for meshes worth declaring, and a ring round every part that
+    /// needs a look.
+    void set_show_rig(bool on);
+    bool show_rig() const { return show_rig_; }
     double yaw() const { return yaw_; }
     double pitch() const { return pitch_; }
     double zoom() const { return zoom_; }
@@ -69,6 +75,7 @@ private:
     void draw(QPainter& painter, const QSize& size, bool fast = false) const;
     void draw_legend(QPainter& painter, const QSize& size, const FieldOverlay& field) const;
     void draw_overlays(QPainter& painter, const QSize& size) const;  ///< force arrows and motion trails
+    void draw_rig(QPainter& painter, const QSize& size) const;       ///< meshes, suggestions and warnings
     QPointF to_screen(const Point3& p, const QSize& size) const;
 
     std::shared_ptr<Scene> scene_;
@@ -82,6 +89,7 @@ private:
     /// What a drag does, decided where it starts: on a part it turns the movement, off it it pans.
     enum class Drag { None, Turn, Pan };
     Drag drag_{Drag::None};
+    bool show_rig_{false};
     bool fast_{false};          ///< the next paint is an interactive one
     QTimer* settle_{};          ///< draws at full quality once the interaction pauses
 };

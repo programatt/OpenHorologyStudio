@@ -77,7 +77,21 @@ public:
     /// Runs `ohs <args>`, a command that rewrites the project file, as one undoable edit: undo puts the
     /// project file back exactly as it was and reloads it, redo restores what the command wrote. Returns
     /// false (and changes nothing) when the command fails or the result cannot be opened.
-    bool edit_project(const QString& label, const QStringList& args);
+    bool edit_project(const QString& label, const QStringList& args, QString* out = nullptr);
+    /// Runs the auto-rig again on the open project (`ohs rig auto`), undoable: parts that are newly recognised join
+    /// their mobiles and meshes, while the roles you set and the meshes you declared stay. With `reset` those are
+    /// decided afresh too. The summary goes to the log and the status bar.
+    bool rerig(bool reset = false);
+    /// Declares every mesh the rig page suggests (`ohs rig suggest --apply`) as one undoable edit. Returns false when
+    /// there is none to declare.
+    bool accept_suggested_meshes();
+    /// Colours the mobiles and draws the meshes, suggestions and warnings over the viewport.
+    void set_show_rig(bool on);
+    QCheckBox* rig_overlay_check() const { return rig_overlay_; }
+    QLabel* chain_label() const { return chain_label_; }
+    QTabWidget* rig_tabs() const { return rig_tabs_; }
+    QListWidget* issue_list() const { return issue_list_; }
+    QListWidget* suggestion_list() const { return suggestion_list_; }
     /// Replaces the project file's text and reloads it; what the undo stack uses.
     bool restore_project(const QByteArray& text);
     QUndoStack* undo_stack() const { return undo_; }
@@ -148,6 +162,7 @@ private slots:
     void on_run_analysis();
     void on_apply_role();
     void on_declare_mesh();
+    void on_accept_suggestion();
 
 private:
     void build_ui();
@@ -180,6 +195,8 @@ private:
                     const QString& step);
     void attach_job_journal();
     void refresh_panels();
+    /// Fills the rig page's train line, to-do list and suggested meshes from the scene's review.
+    void refresh_rig_review();
     QStringList with_project(QStringList args) const;
     void append_log(const QString& text);
     void on_job_changed(int index);
@@ -227,6 +244,15 @@ private:
     QGroupBox* selected_box_{};
     QPushButton* apply_role_{};
     QPushButton* declare_mesh_{};
+    QLabel* chain_label_{};
+    QCheckBox* rig_overlay_{};
+    QAction* rig_overlay_action_{};
+    QTabWidget* rig_tabs_{};
+    QListWidget* issue_list_{};
+    QListWidget* suggestion_list_{};
+    QPushButton* rerig_button_{};
+    QPushButton* accept_suggestion_{};
+    QPushButton* accept_all_{};
     QLabel* analyse_part_label_{};
     QLabel* time_label_{};
     QLabel* explode_label_{};

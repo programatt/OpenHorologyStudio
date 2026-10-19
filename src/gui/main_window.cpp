@@ -300,6 +300,16 @@ void MainWindow::build_ui() {
     redo->setShortcut(QKeySequence::Redo);
     edit->addAction(undo);
     edit->addAction(redo);
+    edit->addSeparator();
+    edit->addAction(tr("Re-run auto-&rig"), this, [this] { rerig(false); })
+        ->setToolTip(tr("Classify and rig the parts again, keeping the roles you set and the meshes you declared"));
+    edit->addAction(tr("Re-rig from &scratch..."), this, [this] {
+        if (!scene_) return;
+        if (QMessageBox::question(this, tr("Re-rig from scratch"),
+                                  tr("Decide every role and mesh afresh, forgetting the roles you set and the meshes you "
+                                     "declared? This can be undone.")) == QMessageBox::Yes)
+            rerig(true);
+    });
 
     auto* view = menuBar()->addMenu(tr("&View"));
     struct Preset {
@@ -321,6 +331,10 @@ void MainWindow::build_ui() {
     QAction* fit = view->addAction(tr("Fit"), this, [this] { viewport_->fit(); });
     fit->setShortcut(QKeySequence(tr("Ctrl+0")));
     fit->setToolTip(tr("Reset zoom and pan (%1)").arg(fit->shortcut().toString(QKeySequence::NativeText)));
+    rig_overlay_action_ = view->addAction(tr("Show the &rig"));
+    rig_overlay_action_->setCheckable(true);
+    rig_overlay_action_->setToolTip(tr("Colour the mobiles and draw the gear meshes, suggested meshes and parts to check"));
+    connect(rig_overlay_action_, &QAction::toggled, this, [this](bool on) { rig_overlay_->setChecked(on); });
     view->addSeparator();
     auto* panels = view->addMenu(tr("&Panels"));
     for (QDockWidget* d : {tree_dock, explain_dock, results_dock_, log_dock, jobs_dock, history_dock}) panels->addAction(d->toggleViewAction());
@@ -408,10 +422,35 @@ void MainWindow::update_busy() {
 QWidget* MainWindow::build_rig_page() {
     auto* page = new QWidget;
     auto* layout = new QVBoxLayout(page);
-    layout->addWidget(make_hint(new QLabel(tr("The parts found in the imported file, least certain first. Check the top "
-                                              "rows: select a part, then correct its role or say which part it meshes "
-                                              "with. Every change can be undone."))));
+    layout->addWidget(make_hint(new QLabel(tr("Roles, mobiles and gear meshes are found automatically. What is left to "
+                                              "rig is listed under To do; a mesh the geometry does not show can be "
+                                              "suggested or declared. Every change can be undone."))));
 
+    // Whether the going train is joined up from the barrel to the escape wheel: the condition for the animation
+    // and the simulations.
+    auto* train_box = new QGroupBox(tr("Train"));
+    auto* train_layout = new QVBoxLayout(train_box);
+    chain_label_ = new QLabel(tr("No movement open"));
+    chain_label_->setWordWrap(true);
+    chain_label_->setTextFormat(Qt::RichText);
+    chain_label_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    train_layout->addWidget(chain_label_);
+    auto* train_row = new QHBoxLayout;
+    rig_overlay_ = new QCheckBox(tr("Show the rig in the viewport"));
+    rig_overlay_->setToolTip(tr("Colour each mobile, draw the gear meshes (green where the barrel feeds them), the "
+                                "suggested meshes and a ring round the parts to check"));
+    rerig_button_ = new QPushButton(tr("Re-run auto-rig"));
+    rerig_button_->setToolTip(tr("Classify and rig the parts again: newly recognised parts join their mobiles and "
+                                 "meshes. The roles you set and the meshes you declared are kept (undoable)"));
+    train_row->addWidget(rig_overlay_, 1);
+    train_row->addWidget(rerig_button_);
+    train_layout->addLayout(train_row);
+    layout->addWidget(train_box);
+    connect(rig_overlay_, &QCheckBox::toggled, this, [this](bool on) { set_show_rig(on); });
+    connect(rerig_button_, &QPushButton::clicked, this, [this] { rerig(false); });
+
+    rig_tabs_ = new QTabWidget;
+    rig_tabs_->setDocumentMode(true);
     rig_table_ = new QTableWidget(0, 4, page);
     rig_table_->setHorizontalHeaderLabels({tr("Part"), tr("Role"), tr("Confidence"), tr("Decided by")});
     rig_table_->verticalHeader()->hide();
@@ -422,7 +461,47 @@ QWidget* MainWindow::build_rig_page() {
     rig_table_->setSelectionMode(QAbstractItemView::SingleSelection);
     rig_table_->setAlternatingRowColors(true);
     rig_table_->setShowGrid(false);
-    layout->addWidget(rig_table_, 1);
+    rig_tabs_->addTab(rig_table_, tr("Parts"));
+
+    issue_list_ = new QListWidget;
+    issue_list_->setWordWrap(true);
+    issue_list_->setToolTip(tr("Click an entry to select the part it is about"));
+    rig_tabs_->addTab(issue_list_, tr("To do"));
+
+    auto* suggestions_page = new QWidget;
+    auto* suggestions_layout = new QVBoxLayout(suggestions_page);
+    suggestions_layout->setContentsMargins(0, 4, 0, 0);
+    suggestion_list_ = new QListWidget;
+    suggestion_list_->setToolTip(tr("Toothed parts that probably mesh but did not pass the strict test. Click one to "
+                                    "select the pair; the number is how likely it is (at most 0.5)"));
+    suggestions_layout->addWidget(suggestion_list_, 1);
+    auto* suggestion_row = new QHBoxLayout;
+    accept_suggestion_ = new QPushButton(tr("Declare selected"));
+    accept_suggestion_->setToolTip(tr("Say that the selected pair meshes (undoable)"));
+    accept_all_ = new QPushButton(tr("Declare all"));
+    accept_all_->setToolTip(tr("Say that every suggested pair meshes, as one undoable edit"));
+    suggestion_row->addStretch(1);
+    suggestion_row->addWidget(accept_suggestion_);
+    suggestion_row->addWidget(accept_all_);
+    suggestions_layout->addLayout(suggestion_row);
+    rig_tabs_->addTab(suggestions_page, tr("Suggested meshes"));
+    layout->addWidget(rig_tabs_, 1);
+
+    connect(issue_list_, &QListWidget::currentRowChanged, this, [this](int row) {
+        if (row < 0 || rebuilding_) return;
+        const QStringList parts = issue_list_->item(row)->data(Qt::UserRole).toStringList();
+        if (parts.isEmpty()) return;
+        select_part(parts.first());
+        if (parts.size() > 1 && mesh_box_->findText(parts.at(1)) >= 0) mesh_box_->setCurrentText(parts.at(1));
+    });
+    connect(suggestion_list_, &QListWidget::currentRowChanged, this, [this](int row) {
+        if (row < 0 || rebuilding_) return;
+        const QStringList pair = suggestion_list_->item(row)->data(Qt::UserRole).toStringList();
+        select_part(pair.value(0));
+        if (mesh_box_->findText(pair.value(1)) >= 0) mesh_box_->setCurrentText(pair.value(1));
+    });
+    connect(accept_suggestion_, &QPushButton::clicked, this, &MainWindow::on_accept_suggestion);
+    connect(accept_all_, &QPushButton::clicked, this, [this] { accept_suggested_meshes(); });
 
     // The editor works on the selected part, so it says which part that is and is off until there is one.
     selected_box_ = new QGroupBox(tr("Selected part"));
@@ -840,10 +919,10 @@ bool MainWindow::restore_project(const QByteArray& text) {
     return reload_rig();
 }
 
-bool MainWindow::edit_project(const QString& label, const QStringList& args) {
+bool MainWindow::edit_project(const QString& label, const QStringList& args, QString* out) {
     if (project_.isEmpty()) return false;
     const QByteArray before = read_file(project_);
-    if (run_command(args) != 0) return false;
+    if (run_command(args, out) != 0) return false;
     const QByteArray after = read_file(project_);
     if (!reload_rig()) {
         restore_project(before);
@@ -851,6 +930,96 @@ bool MainWindow::edit_project(const QString& label, const QStringList& args) {
     }
     if (after != before) undo_->push(new ProjectEdit(this, label, before, after));
     return true;
+}
+
+void MainWindow::set_show_rig(bool on) {
+    viewport_->set_show_rig(on);
+    if (rig_overlay_->isChecked() != on) {
+        const QSignalBlocker block(rig_overlay_);
+        rig_overlay_->setChecked(on);
+    }
+    if (rig_overlay_action_->isChecked() != on) {
+        const QSignalBlocker block(rig_overlay_action_);
+        rig_overlay_action_->setChecked(on);
+    }
+}
+
+bool MainWindow::rerig(bool reset) {
+    if (!scene_) return false;
+    QString out;
+    QStringList args{"rig", "auto", project_};
+    if (reset) args << "--reset";
+    if (!edit_project(reset ? tr("Re-rig from scratch") : tr("Re-run auto-rig"), args, &out)) return false;
+    append_log(out.trimmed());
+    statusBar()->showMessage(out.section('\n', 0, 0), 8000);
+    return true;
+}
+
+bool MainWindow::accept_suggested_meshes() {
+    if (!scene_ || scene_->review().suggestions.empty()) {
+        statusBar()->showMessage(tr("No suggested meshes to declare"), 4000);
+        return false;
+    }
+    QString out;
+    const int n = static_cast<int>(scene_->review().suggestions.size());
+    if (!edit_project(tr("Declare %n suggested mesh(es)", nullptr, n), {"rig", "suggest", project_, "--apply"}, &out)) return false;
+    statusBar()->showMessage(out.trimmed().section('\n', -1), 6000);
+    return true;
+}
+
+void MainWindow::on_accept_suggestion() {
+    const int row = suggestion_list_->currentRow();
+    if (row < 0) {
+        statusBar()->showMessage(tr("Select a suggested mesh first"), 4000);
+        return;
+    }
+    const QStringList pair = suggestion_list_->item(row)->data(Qt::UserRole).toStringList();
+    declare_mesh(pair.value(0), pair.value(1));
+}
+
+void MainWindow::refresh_rig_review() {
+    const Scene::RigReview& review = scene_->review();
+    const model::Movement& m = scene_->movement();
+    const QSignalBlocker issues_block(issue_list_), suggestions_block(suggestion_list_);
+
+    // The train, as a line a person can read.
+    const rigging::TrainChain& chain = review.chain;
+    QString text = QString::fromStdString(rigging::describe_chain(m, chain)).toHtmlEscaped();
+    text.replace("-&gt;", QString::fromUtf8("→"));
+    text.replace("[no mesh]", QString::fromUtf8("<b><span style='color:#f0aa28'>✗ no mesh</span></b>"));
+    const QString dot = chain.connected ? "<span style='color:#3cc86e'>&#9679;</span> " : "<span style='color:#f0aa28'>&#9679;</span> ";
+    chain_label_->setText(dot + (chain.connected ? tr("<b>Connected</b> from the barrel to the escape wheel: ")
+                                                 : tr("<b>Not connected</b> from the barrel to the escape wheel: ")) + text);
+
+    issue_list_->clear();
+    int to_do = 0;
+    for (const rigging::Issue& issue : review.issues) {
+        QStringList parts;
+        for (const std::string& p : issue.parts) parts << QString::fromStdString(p);
+        const bool info = issue.severity == rigging::Severity::Info;
+        auto* item = new QListWidgetItem((info ? tr("Note: ") : issue.severity == rigging::Severity::Error ? tr("Error: ") : tr("Warning: ")) +
+                                         QString::fromStdString(issue.message).replace("->", QString::fromUtf8("→")).replace("[no mesh]", QString::fromUtf8("✗ no mesh")));
+        item->setData(Qt::UserRole, parts);
+        if (info) item->setForeground(palette().placeholderText());
+        else item->setForeground(issue.severity == rigging::Severity::Error ? QColor(225, 95, 80) : QColor(220, 165, 60));
+        issue_list_->addItem(item);
+        to_do += info ? 0 : 1;
+    }
+    if (issue_list_->count() == 0) issue_list_->addItem(tr("Nothing left to check."));
+
+    suggestion_list_->clear();
+    for (const rigging::MeshSuggestion& s : review.suggestions) {
+        const QString a = QString::fromStdString(m.components[static_cast<std::size_t>(s.a)].features.name);
+        const QString b = QString::fromStdString(m.components[static_cast<std::size_t>(s.b)].features.name);
+        auto* item = new QListWidgetItem(tr("%1  ↔  %2   (module %3, likelihood %4)").arg(a, b).arg(s.module, 0, 'f', 3).arg(s.confidence, 0, 'f', 2));
+        item->setData(Qt::UserRole, QStringList{a, b});
+        suggestion_list_->addItem(item);
+    }
+    accept_suggestion_->setEnabled(!review.suggestions.empty());
+    accept_all_->setEnabled(!review.suggestions.empty());
+
+    rig_tabs_->setTabText(1, to_do > 0 ? tr("To do (%1)").arg(to_do) : tr("To do"));
+    rig_tabs_->setTabText(2, review.suggestions.empty() ? tr("Suggested meshes") : tr("Suggested meshes (%1)").arg(review.suggestions.size()));
 }
 
 void MainWindow::refresh_panels() {
@@ -908,13 +1077,18 @@ void MainWindow::refresh_panels() {
         if (c.features.teeth > 0) mesh_box_->addItem(QString::fromStdString(c.features.name));
     }
     if (const int keep = mesh_box_->findText(partner); keep >= 0) mesh_box_->setCurrentIndex(keep);
+    refresh_rig_review();
     tree_->setUpdatesEnabled(true);
     rig_table_->setUpdatesEnabled(true);
     rebuilding_ = false;
 
     QString s = tr("%1 | %2 parts").arg(QFileInfo(project_).fileName()).arg(m.components.size());
     if (!scene_->train_error().empty()) append_log(tr("Train not analysed: %1").arg(QString::fromStdString(scene_->train_error())));
-    if (!scene_->can_animate()) s += tr(" | the animation is off (no train or no beat rate)");
+    if (!scene_->can_animate()) {
+        s += scene_->review().chain.connected ? tr(" | the animation is off (no beat rate)")
+                                              : tr(" | the animation is off: the train is not connected from the barrel to the "
+                                                   "escape wheel (see the Rig tab)");
+    }
     status_->setText(s);
     timeline_->setEnabled(scene_->can_animate());
     play_->setEnabled(scene_->can_animate());

@@ -409,9 +409,188 @@ Movement auto_rig(std::string movement_name, std::vector<PartFeatures> parts, co
     return m;
 }
 
+RerigReport re_rig(Movement& m, const RigOptions& options, bool keep_user) {
+    RerigReport report;
+    report.mobiles_before = static_cast<int>(m.mobiles.size());
+    report.meshes_before = static_cast<int>(m.meshes.size());
+    std::vector<Role> before;
+    for (Component& c : m.components) {
+        before.push_back(c.role);
+        // A preset is not stored in the project, so a role it gave is a choice to keep like the user's own.
+        if (keep_user && (c.role_source == "user" || c.role_source == "preset")) continue;
+        const Classification k = classify(c.features, options);
+        c.role = k.role;
+        c.role_confidence = k.confidence;
+        c.role_source = k.source;
+    }
+    if (!keep_user) {
+        m.meshes.erase(std::remove_if(m.meshes.begin(), m.meshes.end(), [](const model::MeshJoint& j) { return j.manual; }),
+                       m.meshes.end());
+    }
+    spot_rotors(m.components);
+    spot_small_parts(m.components);
+    infer_structure(m, options);
+    for (std::size_t i = 0; i < m.components.size(); ++i) {
+        const Component& c = m.components[i];
+        if (c.role != before[i]) report.role_changes.push_back({c.features.name, before[i], c.role, c.role_confidence});
+    }
+    report.mobiles_after = static_cast<int>(m.mobiles.size());
+    report.meshes_after = static_cast<int>(m.meshes.size());
+    return report;
+}
+
+std::vector<MeshSuggestion> suggest_meshes(const Movement& m, const RigOptions& o) {
+    const std::size_t n = m.components.size();
+    std::vector<bool> meshed(n, false);
+    for (const model::MeshJoint& j : m.meshes) meshed[static_cast<std::size_t>(j.a)] = meshed[static_cast<std::size_t>(j.b)] = true;
+    const auto already = [&m](int a, int b) {
+        return std::any_of(m.meshes.begin(), m.meshes.end(), [a, b](const model::MeshJoint& j) {
+            return (j.a == a && j.b == b) || (j.a == b && j.b == a);
+        });
+    };
+    std::vector<MeshSuggestion> out;
+    for (std::size_t i = 0; i < n; ++i) {
+        const Component& ci = m.components[i];
+        if (!model::is_toothed_role(ci.role) || !is_toothed(ci.features, o) || m.mobile_of(static_cast<int>(i)) < 0) continue;
+        for (std::size_t j = i + 1; j < n; ++j) {
+            const Component& cj = m.components[j];
+            if (!model::is_toothed_role(cj.role) || !is_toothed(cj.features, o) || m.mobile_of(static_cast<int>(j)) < 0) continue;
+            if (meshed[i] && meshed[j]) continue;  // nothing is left to rig for either
+            if (m.mobile_of(static_cast<int>(i)) == m.mobile_of(static_cast<int>(j))) continue;
+            if (already(static_cast<int>(i), static_cast<int>(j))) continue;
+            const PartFeatures& fi = ci.features;
+            const PartFeatures& fj = cj.features;
+            if (std::min(fi.z_max, fj.z_max) - std::max(fi.z_min, fj.z_min) <= 0.0) continue;
+            const double centre = distance(fi.center, fj.center);
+            if (centre <= 0.0) continue;
+            // The strict test failed, so only ask that each gear's tips sit a tooth height or so from where
+            // the module of the centre distance puts them.
+            const double module = 2.0 * centre / (fi.teeth + fj.teeth);
+            const double ai = fi.outer_radius / module - fi.teeth / 2.0;
+            const double aj = fj.outer_radius / module - fj.teeth / 2.0;
+            if (ai < 0.4 || ai > 2.2 || aj < 0.4 || aj > 2.2) continue;
+            const double off = std::max(std::abs(ai - 1.0), std::abs(aj - 1.0));
+            out.push_back({static_cast<int>(i), static_cast<int>(j), centre, module, std::clamp(0.5 * (1.0 - off / 1.2), 0.05, 0.5)});
+        }
+    }
+    std::stable_sort(out.begin(), out.end(), [](const MeshSuggestion& a, const MeshSuggestion& b) { return a.confidence > b.confidence; });
+    return out;
+}
+
+namespace {
+
+// Breadth-first from `start` over the meshes between mobiles: the parent of each mobile reached (start's
+// is itself), -1 for the others, and the deepest mobile reached.
+struct Reach {
+    std::vector<int> parent;
+    int deepest{-1};
+};
+
+Reach reach_from(const std::vector<std::vector<int>>& adjacent, int start) {
+    Reach r;
+    r.parent.assign(adjacent.size(), -1);
+    if (start < 0) return r;
+    std::vector<int> depth(adjacent.size(), 0), queue{start};
+    r.parent[static_cast<std::size_t>(start)] = start;
+    r.deepest = start;
+    for (std::size_t head = 0; head < queue.size(); ++head) {
+        const int at = queue[head];
+        for (int next : adjacent[static_cast<std::size_t>(at)]) {
+            if (r.parent[static_cast<std::size_t>(next)] >= 0) continue;
+            r.parent[static_cast<std::size_t>(next)] = at;
+            depth[static_cast<std::size_t>(next)] = depth[static_cast<std::size_t>(at)] + 1;
+            if (depth[static_cast<std::size_t>(next)] > depth[static_cast<std::size_t>(r.deepest)]) r.deepest = next;
+            queue.push_back(next);
+        }
+    }
+    return r;
+}
+
+// The way from the start of a search to `to`, start first.
+std::vector<int> way_to(const Reach& r, int to) {
+    std::vector<int> way;
+    if (to < 0 || r.parent[static_cast<std::size_t>(to)] < 0) return way;
+    for (int at = to;; at = r.parent[static_cast<std::size_t>(at)]) {
+        way.push_back(at);
+        if (r.parent[static_cast<std::size_t>(at)] == at) break;
+    }
+    std::reverse(way.begin(), way.end());
+    return way;
+}
+
+}  // namespace
+
+TrainChain train_chain(const Movement& m) {
+    TrainChain chain;
+    const std::size_t nm = m.mobiles.size();
+    for (std::size_t i = 0; i < nm; ++i) {
+        for (int idx : m.mobiles[i].components) {
+            const Role role = m.components[static_cast<std::size_t>(idx)].role;
+            if (role == Role::Barrel && chain.barrel < 0) chain.barrel = static_cast<int>(i);
+            if (role == Role::EscapeWheel && chain.escape < 0) chain.escape = static_cast<int>(i);
+        }
+    }
+    std::vector<std::vector<int>> adjacent(nm);
+    for (const model::MeshJoint& j : m.meshes) {
+        const int a = m.mobile_of(j.a), b = m.mobile_of(j.b);
+        if (a < 0 || b < 0 || a == b) continue;
+        adjacent[static_cast<std::size_t>(a)].push_back(b);
+        adjacent[static_cast<std::size_t>(b)].push_back(a);
+    }
+    const Reach from_barrel = reach_from(adjacent, chain.barrel);
+    const Reach from_escape = reach_from(adjacent, chain.escape);
+    chain.fed.assign(nm, 0);
+    for (std::size_t i = 0; i < nm; ++i) chain.fed[i] = from_barrel.parent[i] >= 0;
+    if (chain.barrel >= 0 && chain.escape >= 0 && chain.fed[static_cast<std::size_t>(chain.escape)]) {
+        chain.connected = true;
+        chain.path = way_to(from_barrel, chain.escape);
+        return chain;
+    }
+    chain.from_barrel = way_to(from_barrel, from_barrel.deepest);
+    chain.from_escape = way_to(from_escape, from_escape.deepest);
+    std::reverse(chain.from_escape.begin(), chain.from_escape.end());  // ends at the escape wheel
+    for (std::size_t i = 0; i < nm; ++i) {
+        if (from_barrel.parent[i] >= 0 || from_escape.parent[i] >= 0) continue;
+        const bool geared = std::any_of(m.mobiles[i].components.begin(), m.mobiles[i].components.end(), [&m](int idx) {
+            const Component& c = m.components[static_cast<std::size_t>(idx)];
+            return model::is_toothed_role(c.role) && c.features.teeth > 0;
+        });
+        if (geared) chain.unreached.push_back(static_cast<int>(i));
+    }
+    return chain;
+}
+
+std::string describe_mobile(const Movement& m, int mobile) {
+    const model::Mobile& mob = m.mobiles[static_cast<std::size_t>(mobile)];
+    for (int idx : mob.components) {
+        const Component& c = m.components[static_cast<std::size_t>(idx)];
+        if (model::is_toothed_role(c.role)) return mob.name + " (" + c.features.name + ")";
+    }
+    return mob.name;
+}
+
+std::string describe_chain(const Movement& m, const TrainChain& chain) {
+    if (chain.barrel < 0) return "no barrel found, so the train has no driving root";
+    if (chain.escape < 0) return "no escape wheel found";
+    const auto join = [&m](const std::vector<int>& way) {
+        std::string s;
+        for (int mobile : way) s += (s.empty() ? "" : " -> ") + describe_mobile(m, mobile);
+        return s;
+    };
+    if (chain.connected) return join(chain.path);
+    std::string s = join(chain.from_barrel) + "  [no mesh]  " + join(chain.from_escape);
+    if (!chain.unreached.empty()) {
+        s += "; joined to neither end:";
+        for (int mobile : chain.unreached) s += " " + describe_mobile(m, mobile);
+    }
+    return s;
+}
+
 std::vector<Issue> check_rig(const Movement& m, double low_confidence) {
     std::vector<Issue> issues;
-    auto add = [&issues](Severity s, std::string msg) { issues.push_back({s, std::move(msg)}); };
+    auto add = [&issues](Severity s, std::string msg, std::vector<std::string> parts = {}) {
+        issues.push_back({s, std::move(msg), std::move(parts)});
+    };
 
     if (m.components.empty()) add(Severity::Error, "the movement has no components");
 
@@ -422,10 +601,10 @@ std::vector<Issue> check_rig(const Movement& m, double low_confidence) {
         has_barrel |= c.role == Role::Barrel;
         has_escape |= c.role == Role::EscapeWheel;
         if (c.role == Role::Unknown) {
-            add(Severity::Warning, "'" + name + "' could not be classified");
+            add(Severity::Warning, "'" + name + "' could not be classified", {name});
         } else if (c.role_confidence < low_confidence) {
             add(Severity::Warning, "'" + name + "' classified as " + std::string(to_string(c.role)) +
-                                       " with low confidence " + std::to_string(c.role_confidence));
+                                       " with low confidence " + std::to_string(c.role_confidence), {name});
         }
     }
     if (!has_barrel) add(Severity::Warning, "no barrel found; the train has no driving root");
@@ -437,33 +616,55 @@ std::vector<Issue> check_rig(const Movement& m, double low_confidence) {
         if (j.confidence < low_confidence) {
             add(Severity::Warning, "mesh '" + m.components[j.a].features.name + "' / '" +
                                        m.components[j.b].features.name + "' has low confidence " +
-                                       std::to_string(j.confidence));
+                                       std::to_string(j.confidence),
+                {m.components[j.a].features.name, m.components[j.b].features.name});
         }
     }
     if (m.meshes.empty()) add(Severity::Error, "no gear meshes were inferred");
     for (const Component& c : m.components) {
         if (c.role == Role::DateRing && c.features.inner_teeth <= 0 && c.features.teeth <= 0) {
-            add(Severity::Warning, "date ring '" + c.features.name + "' shows no teeth, so its step is assumed to be 1/31 of a turn");
+            add(Severity::Warning, "date ring '" + c.features.name + "' shows no teeth, so its step is assumed to be 1/31 of a turn",
+                {c.features.name});
         }
     }
     for (std::size_t i = 0; i < m.components.size(); ++i) {
         const Component& c = m.components[i];
         const int index = static_cast<int>(i);
         if (c.role == Role::Lever && !model::lever_contact(m.components, index)) {
-            add(Severity::Info, "lever '" + c.features.name + "' rests on no toothed part, so it is drawn at rest");
+            add(Severity::Info, "lever '" + c.features.name + "' rests on no toothed part, so it is drawn at rest", {c.features.name});
         } else if (c.role == Role::Spring && !model::spring_flex(m.components, index)) {
-            add(Severity::Info, "spring '" + c.features.name + "' presses on no lever or toothed part, so it is drawn at rest");
+            add(Severity::Info, "spring '" + c.features.name + "' presses on no lever or toothed part, so it is drawn at rest",
+                {c.features.name});
         } else if (c.role == Role::Stem && c.features.length <= 0.0) {
-            add(Severity::Info, "stem '" + c.features.name + "' has no recorded axis (re-import the file), so it is drawn at rest");
+            add(Severity::Info, "stem '" + c.features.name + "' has no recorded axis (re-import the file), so it is drawn at rest",
+                {c.features.name});
         }
     }
     for (std::size_t i = 0; i < m.components.size(); ++i) {
         const Component& c = m.components[i];
         if (!model::is_toothed_role(c.role) || meshed[i]) continue;
         if (c.role == Role::EscapeWheel) {  // its partner is the pallet fork, not inferred yet
-            add(Severity::Info, "escape wheel '" + c.features.name + "' has no pallet fork joint (not inferred in M0)");
+            add(Severity::Info, "escape wheel '" + c.features.name + "' has no pallet fork joint (not inferred in M0)",
+                {c.features.name});
         } else {
-            add(Severity::Warning, "toothed part '" + c.features.name + "' meshes with nothing");
+            add(Severity::Warning, "toothed part '" + c.features.name + "' meshes with nothing", {c.features.name});
+        }
+    }
+    if (has_barrel && has_escape) {
+        const TrainChain chain = train_chain(m);
+        if (!chain.connected) {
+            std::vector<std::string> parts;
+            for (int mobile : {chain.from_barrel.empty() ? -1 : chain.from_barrel.back(),
+                               chain.from_escape.empty() ? -1 : chain.from_escape.front()}) {
+                if (mobile < 0) continue;
+                for (int idx : m.mobiles[static_cast<std::size_t>(mobile)].components) {
+                    if (model::is_toothed_role(m.components[static_cast<std::size_t>(idx)].role)) {
+                        parts.push_back(m.components[static_cast<std::size_t>(idx)].features.name);
+                        break;
+                    }
+                }
+            }
+            add(Severity::Warning, "the train is broken: " + describe_chain(m, chain), std::move(parts));
         }
     }
     return issues;

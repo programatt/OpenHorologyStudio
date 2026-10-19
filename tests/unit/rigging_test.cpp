@@ -215,3 +215,110 @@ TEST_CASE("a date ring with no teeth found is flagged") {
         return i.message.find("date ring 'date wheel'") != std::string::npos;
     }));
 }
+
+TEST_CASE("the train chain runs from the barrel to the escape wheel, and shows where it breaks") {
+    const auto good = rigging::auto_rig("train", test::synthetic_train(), {});
+    const auto chain = rigging::train_chain(good);
+    REQUIRE(chain.connected);
+    CHECK(chain.path.size() == 5);
+    CHECK(chain.path.front() == chain.barrel);
+    CHECK(chain.path.back() == chain.escape);
+    CHECK(std::all_of(chain.fed.begin(), chain.fed.end(), [](char f) { return f == 1; }));
+    CHECK(rigging::describe_chain(good, chain).find(" -> ") != std::string::npos);
+
+    // Move the centre mobile off its mesh with the barrel and with the third pinion.
+    auto parts = test::synthetic_train();
+    for (auto& p : parts) {
+        if (p.name == "center_pinion" || p.name == "center_wheel" || p.name == "center_arbor") p.center.x += 0.5;
+    }
+    const auto broken = rigging::auto_rig("moved", parts, {});
+    const auto split = rigging::train_chain(broken);
+    CHECK_FALSE(split.connected);
+    CHECK(split.path.empty());
+    REQUIRE_FALSE(split.from_barrel.empty());
+    CHECK(split.from_barrel.front() == split.barrel);
+    REQUIRE_FALSE(split.from_escape.empty());
+    CHECK(split.from_escape.back() == split.escape);
+    CHECK(split.fed[static_cast<std::size_t>(split.barrel)] == 1);
+    CHECK(split.fed[static_cast<std::size_t>(split.escape)] == 0);
+    CHECK(rigging::describe_chain(broken, split).find("[no mesh]") != std::string::npos);
+
+    // check_rig says so, and names the parts at the two ends of the break so that a viewer can select them.
+    const auto issues = rigging::check_rig(broken);
+    const auto it = std::find_if(issues.begin(), issues.end(), [](const rigging::Issue& i) {
+        return i.message.find("the train is broken") != std::string::npos;
+    });
+    REQUIRE(it != issues.end());
+    CHECK(it->severity == rigging::Severity::Warning);
+    CHECK(it->parts.size() == 2);
+}
+
+TEST_CASE("meshes that just missed the strict test are suggested, and declaring them joins the train") {
+    auto parts = test::synthetic_train();
+    for (auto& p : parts) {
+        if (p.name == "center_pinion" || p.name == "center_wheel" || p.name == "center_arbor") p.center.x += 0.05;
+    }
+    auto m = rigging::auto_rig("nudged", parts, {});
+    REQUIRE_FALSE(rigging::train_chain(m).connected);
+
+    const auto suggestions = rigging::suggest_meshes(m, {});
+    REQUIRE_FALSE(suggestions.empty());
+    for (const auto& s : suggestions) {
+        CHECK(s.confidence > 0.0);
+        CHECK(s.confidence <= 0.5);
+    }
+    CHECK(std::is_sorted(suggestions.begin(), suggestions.end(),
+                         [](const auto& a, const auto& b) { return a.confidence > b.confidence; }));
+    const auto offers = [&](const char* a, const char* b) {
+        return std::any_of(suggestions.begin(), suggestions.end(), [&](const rigging::MeshSuggestion& s) {
+            const auto& na = m.components[static_cast<std::size_t>(s.a)].features.name;
+            const auto& nb = m.components[static_cast<std::size_t>(s.b)].features.name;
+            return (na == a && nb == b) || (na == b && nb == a);
+        });
+    };
+    CHECK(offers("barrel", "center_pinion"));
+    CHECK_FALSE(offers("barrel", "center_wheel"));  // not at that height
+
+    for (const auto& s : suggestions) {
+        rigging::add_manual_mesh(m, m.components[static_cast<std::size_t>(s.a)].features.name,
+                                 m.components[static_cast<std::size_t>(s.b)].features.name, {});
+    }
+    CHECK(rigging::train_chain(m).connected);
+    CHECK(rigging::suggest_meshes(m, {}).empty());  // what was declared is not offered again
+
+    // A properly rigged train has nothing to suggest.
+    CHECK(rigging::suggest_meshes(rigging::auto_rig("train", test::synthetic_train(), {}), {}).empty());
+}
+
+TEST_CASE("re-running the auto-rig recognises parts again but keeps what the user decided") {
+    auto m = rigging::auto_rig("train", test::synthetic_train(), {});
+    const std::size_t meshes = m.meshes.size();
+    const int third = m.find_component("third_wheel");
+    REQUIRE(third >= 0);
+
+    // A part whose role is stale (decided by name or geometry) is decided afresh.
+    m.components[static_cast<std::size_t>(third)].role = Role::Unknown;
+    m.components[static_cast<std::size_t>(third)].role_confidence = 0.0;
+    rigging::infer_structure(m, {});
+    REQUIRE(m.meshes.size() < meshes);
+    const auto report = rigging::re_rig(m, {});
+    REQUIRE(report.role_changes.size() == 1);
+    CHECK(report.role_changes[0].part == "third_wheel");
+    CHECK(report.role_changes[0].from == Role::Unknown);
+    CHECK(report.role_changes[0].to == Role::Wheel);
+    CHECK(report.meshes_before < report.meshes_after);
+    CHECK(m.meshes.size() == meshes);
+    CHECK(rigging::re_rig(m, {}).role_changes.empty());  // nothing more to find
+
+    // A role the user set stays, and so does a mesh the user declared; resetting forgets both.
+    rigging::set_role(m, "third_wheel", Role::Plate, {});
+    rigging::add_manual_mesh(m, "barrel", "fourth_pinion", {});
+    CHECK(rigging::re_rig(m, {}).role_changes.empty());
+    CHECK(m.components[static_cast<std::size_t>(third)].role == Role::Plate);
+    CHECK(std::any_of(m.meshes.begin(), m.meshes.end(), [](const model::MeshJoint& j) { return j.manual; }));
+    const auto reset = rigging::re_rig(m, {}, false);
+    REQUIRE(reset.role_changes.size() == 1);
+    CHECK(m.components[static_cast<std::size_t>(third)].role == Role::Wheel);
+    CHECK(m.components[static_cast<std::size_t>(third)].role_source != "user");
+    CHECK(std::none_of(m.meshes.begin(), m.meshes.end(), [](const model::MeshJoint& j) { return j.manual; }));
+}

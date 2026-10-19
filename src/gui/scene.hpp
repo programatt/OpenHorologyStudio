@@ -12,6 +12,7 @@
 #include "geometry/step_io.hpp"
 #include "kinematics/kinematics.hpp"
 #include "model/model.hpp"
+#include "rigging/rigging.hpp"
 
 namespace ohs::gui {
 
@@ -47,6 +48,15 @@ public:
     /// rig edit does not re-import the STEP file. Returns false when the parts themselves changed (a different
     /// part list or dial axis); then the scene is left as it was and a full load() is needed.
     bool reload_rig(const std::filesystem::path& project, double beat_rate_vph = 0.0);
+
+    /// What is left to rig, worked out whenever the rig is loaded: the issues `ohs rig check` reports, how
+    /// the gear chain runs from the barrel to the escape wheel, and meshes worth declaring.
+    struct RigReview {
+        std::vector<rigging::Issue> issues;
+        rigging::TrainChain chain;
+        std::vector<rigging::MeshSuggestion> suggestions;
+    };
+    const RigReview& review() const { return review_; }
 
     const model::Movement& movement() const { return movement_; }
     const kinematics::TrainAnalysis& train() const { return train_; }
@@ -119,7 +129,9 @@ public:
 
 private:
     void update_bounds();
+    void update_review();
 
+    RigReview review_;
     model::Movement movement_;
     kinematics::TrainAnalysis train_;
     std::vector<ScenePart> parts_;

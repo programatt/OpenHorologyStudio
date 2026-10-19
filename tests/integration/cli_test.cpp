@@ -107,6 +107,28 @@ TEST_CASE("ohs CLI end to end") {
         CHECK(nlohmann::json::parse(run("--json rig check " + proj, dir).output)["components"].size() == 15);
         CHECK(run("kinematics " + proj, dir).output.find("warning") != std::string::npos);
         CHECK(run("rig set " + proj + " fourth_wheel --role sprocket", dir).exit_code == 2);
+
+        // The wheel is a screw by the user's choice: the train is broken, and `rig auto` keeps the choice but
+        // `--reset` finds the wheel again.
+        const auto broken = run("--json rig check " + proj, dir);
+        CHECK_FALSE(nlohmann::json::parse(broken.output)["train"]["connected"].get<bool>());
+        CHECK(run("rig check " + proj, dir).output.find("train is broken") != std::string::npos);
+        const auto kept = run("--json rig auto " + proj, dir);
+        CHECK(kept.exit_code == 0);
+        CHECK(nlohmann::json::parse(kept.output)["role_changes"].empty());
+        CHECK_FALSE(nlohmann::json::parse(run("--json rig check " + proj, dir).output)["train"]["connected"].get<bool>());
+        const auto reset = run("--json rig auto " + proj + " --reset", dir);
+        CHECK(reset.exit_code == 0);
+        const auto changes = nlohmann::json::parse(reset.output)["role_changes"];
+        REQUIRE(changes.size() == 1);
+        CHECK(changes[0]["part"] == "fourth_wheel");
+        CHECK(changes[0]["to"] == "wheel");
+        CHECK(nlohmann::json::parse(reset.output)["train"]["connected"].get<bool>());
+
+        // Nothing is left to suggest in a rig the geometry fully explains; --apply on nothing changes nothing.
+        CHECK(run("rig suggest " + proj, dir).output.find("no mesh to suggest") != std::string::npos);
+        CHECK(run("rig suggest " + proj + " --apply", dir).exit_code == 0);
+        CHECK(nlohmann::json::parse(run("--json rig suggest " + proj, dir).output).empty());
     }
 
     SECTION("error handling and exit codes") {

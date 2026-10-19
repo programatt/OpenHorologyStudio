@@ -20,6 +20,7 @@
 #include "geometry/cad_io.hpp"
 #include "geometry/features.hpp"
 #include "model/rig_io.hpp"
+#include "rigging/rigging.hpp"
 
 namespace ohs::gui {
 
@@ -107,7 +108,14 @@ Scene Scene::load(const std::filesystem::path& project, const std::filesystem::p
         s.parts_.push_back(std::move(part));
     }
     s.update_bounds();
+    s.update_review();
     return s;
+}
+
+void Scene::update_review() {
+    review_.issues = rigging::check_rig(movement_);
+    review_.chain = rigging::train_chain(movement_);
+    review_.suggestions = rigging::suggest_meshes(movement_, {});
 }
 
 bool Scene::reload_rig(const std::filesystem::path& project, double beat_rate_vph) {
@@ -147,6 +155,7 @@ bool Scene::reload_rig(const std::filesystem::path& project, double beat_rate_vp
         part.pivot_y = py;
     }
     update_bounds();
+    update_review();
     forces_.clear();
     if (has_field_) clear_field();
     return true;

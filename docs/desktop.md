@@ -18,8 +18,21 @@ ohs-gui movement.hsproj
 - **Explain dock.** Select a part (in the viewport, the tree or the rig list) and it shows what the
   part does, with the numbers of your movement.
 - **Import and Rig.** Open a project, import a STEP file, or open the built-in demonstration
-  movement. The rig list shows every part's role, how sure OHS is and what decided it, least sure
-  first.
+  movement. The Rig tab shows what is left to rig for the animation and the simulations to work:
+  a **Train** line says whether meshes join the barrel to the escape wheel, and where it breaks if
+  not. Under it, **Parts** lists every part's role, how sure OHS is and what decided it, least sure
+  first; **To do** lists what to check (parts that could not be classified or are unsure, toothed
+  parts that mesh with nothing, a broken train), and clicking an entry selects the part; **Suggested
+  meshes** lists pairs of toothed parts that probably mesh although the strict test did not accept
+  them, with how likely each is, and *Declare selected* or *Declare all* makes them meshes.
+  *Re-run auto-rig* (also under Edit) classifies and rigs the parts again, so newly recognised parts
+  join their mobiles and meshes; the roles you set and the meshes you declared are kept
+  (*Re-rig from scratch* in the Edit menu forgets those too).
+- **Show the rig** (the check box on the Rig tab, or View > Show the rig) colours each mobile and
+  draws the rig over the movement: a line for every gear mesh, green where the barrel feeds it and
+  blue-grey where it does not reach (so the break in a train is where green turns to blue), dashed
+  violet where you declared it, amber where the confidence is low; dotted amber lines with a `?` for
+  suggested meshes; and a ring round the parts that need a look. Parts that do not turn are faded.
 - **Animate.** Play or scrub the going train over 60 seconds of movement time, at any speed, smooth
   or one escapement step per beat. An exploded view and a cut-away plane help you see inside.
 - **Simulate, Analyse, Manufacture, Report.** One button per analysis: torque chain, timekeeping,
@@ -33,7 +46,8 @@ ohs-gui movement.hsproj
   show in the Results dock, with a plot of rate against amplitude after Timekeeping, and the commands
   and their messages in the Log dock.
 - **Edit, Undo and Redo** step through every change to the project made in the window: *Set role of
-  the selected part* and *Declare that the selected part meshes with this one*. Undo puts the project
+  the selected part*, *Declare that the selected part meshes with this one*, *Declare all* suggested
+  meshes and *Re-run auto-rig*. Undo puts the project
   file back exactly as it was (the history is snapshots of the file), and the Edit history dock lists
   the steps; click one to return to that state. Opening or importing another project starts a new
   history. Analyses, views and the timeline change no project data and are not part of it.

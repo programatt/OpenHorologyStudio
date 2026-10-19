@@ -67,6 +67,16 @@ json movement_summary(const ohs::model::Movement& m) {
     return j;
 }
 
+json train_json(const ohs::model::Movement& m) {
+    const auto chain = ohs::rigging::train_chain(m);
+    json j;
+    j["connected"] = chain.connected;
+    j["description"] = ohs::rigging::describe_chain(m, chain);
+    j["path"] = json::array();
+    for (int mobile : chain.path) j["path"].push_back(m.mobiles[static_cast<std::size_t>(mobile)].name);
+    return j;
+}
+
 struct Options {
     bool json_output = false;
     bool verbose = false;
@@ -86,6 +96,12 @@ struct Options {
     // rig set
     std::string part_name, part_b, role_name;
 
+    // rig auto / suggest
+    bool apply = false;
+    bool reset = false;
+    double min_confidence = 0.0;
+    double coaxial_tolerance = 0.05;
+
     // animate
     std::string step_override, glb_out;
     double duration = 10.0, fps = 30.0, time_scale = 600.0;
@@ -101,6 +117,13 @@ struct Options {
     // thirdparty
     std::vector<std::string> om10_args;
 };
+
+ohs::rigging::RigOptions rig_options(const Options& o) {
+    ohs::rigging::RigOptions rig;
+    rig.min_teeth = o.min_teeth;
+    rig.coaxial_tolerance = o.coaxial_tolerance;
+    return rig;
+}
 
 ohs::geometry::Axis parse_axis(const std::string& up);
 ohs::geometry::Axis parse_axis(const std::string& up, const ohs::model::Movement& m) {
@@ -150,9 +173,12 @@ int cmd_rig_check(const Options& o) {
     if (o.json_output) {
         json j = movement_summary(m);
         j["issues"] = json::array();
-        for (const auto& i : issues) j["issues"].push_back({{"severity", severity_name(i.severity)}, {"message", i.message}});
+        for (const auto& i : issues) {
+            j["issues"].push_back({{"severity", severity_name(i.severity)}, {"message", i.message}, {"parts", i.parts}});
+        }
         j["errors"] = errors;
         j["warnings"] = warnings;
+        j["train"] = train_json(m);
         std::cout << j.dump(2) << '\n';
     } else {
         for (const auto& c : m.components) {
@@ -167,9 +193,82 @@ int cmd_rig_check(const Options& o) {
             std::cout << '\n';
         }
         for (const auto& i : issues) std::cout << severity_name(i.severity) << ": " << i.message << '\n';
+        const auto chain = ohs::rigging::train_chain(m);
+        std::cout << "train: " << (chain.connected ? "connected, " : "") << ohs::rigging::describe_chain(m, chain) << '\n';
+        const auto suggestions = ohs::rigging::suggest_meshes(m, rig_options(o));
+        if (!suggestions.empty()) {
+            std::cout << suggestions.size() << " possible mesh(es) to confirm: run 'ohs rig suggest " << o.project << "'\n";
+        }
         std::cout << errors << " error(s), " << warnings << " warning(s)\n";
     }
     return (errors > 0 || (o.strict && warnings > 0)) ? kExitCheckFailed : kExitOk;
+}
+
+int cmd_rig_auto(const Options& o) {
+    ohs::model::Movement m = ohs::model::load_rig(o.project);
+    ohs::rigging::RigOptions rig = rig_options(o);
+    const auto report = ohs::rigging::re_rig(m, rig, !o.reset);
+    ohs::model::save_rig(m, o.project);
+    const auto chain = ohs::rigging::train_chain(m);
+    if (o.json_output) {
+        json j = movement_summary(m);
+        j["role_changes"] = json::array();
+        for (const auto& c : report.role_changes) {
+            j["role_changes"].push_back({{"part", c.part},
+                                         {"from", std::string(to_string(c.from))},
+                                         {"to", std::string(to_string(c.to))},
+                                         {"confidence", c.confidence}});
+        }
+        j["meshes_before"] = report.meshes_before;
+        j["train"] = train_json(m);
+        std::cout << j.dump(2) << '\n';
+        return kExitOk;
+    }
+    std::cout << "re-rigged " << m.components.size() << " parts: " << report.role_changes.size() << " role(s) changed, "
+              << report.mobiles_before << " -> " << report.mobiles_after << " mobiles, " << report.meshes_before << " -> "
+              << report.meshes_after << " meshes\n";
+    for (const auto& c : report.role_changes) {
+        std::cout << "  " << c.part << ": " << to_string(c.from) << " -> " << to_string(c.to) << " (confidence " << std::fixed
+                  << std::setprecision(2) << c.confidence << ")\n";
+    }
+    std::cout << "train: " << (chain.connected ? "connected, " : "") << ohs::rigging::describe_chain(m, chain) << '\n';
+    return kExitOk;
+}
+
+int cmd_rig_suggest(const Options& o) {
+    ohs::model::Movement m = ohs::model::load_rig(o.project);
+    const ohs::rigging::RigOptions rig = rig_options(o);
+    std::vector<ohs::rigging::MeshSuggestion> suggestions;
+    for (const auto& s : ohs::rigging::suggest_meshes(m, rig)) {
+        if (s.confidence >= o.min_confidence) suggestions.push_back(s);
+    }
+    const auto name = [&m](int component) { return m.components[static_cast<std::size_t>(component)].features.name; };
+    if (o.apply) {
+        for (const auto& s : suggestions) ohs::rigging::add_manual_mesh(m, name(s.a), name(s.b), rig);
+        ohs::model::save_rig(m, o.project);
+    }
+    if (o.json_output) {
+        json j = json::array();
+        for (const auto& s : suggestions) {
+            j.push_back({{"a", name(s.a)}, {"b", name(s.b)}, {"centre_distance", s.centre_distance}, {"module", s.module},
+                         {"confidence", s.confidence}});
+        }
+        std::cout << j.dump(2) << '\n';
+        return kExitOk;
+    }
+    for (const auto& s : suggestions) {
+        std::cout << std::left << std::setw(24) << name(s.a) << " <-> " << std::setw(24) << name(s.b) << " centre distance "
+                  << std::fixed << std::setprecision(3) << s.centre_distance << " mm, module " << s.module << ", confidence "
+                  << std::setprecision(2) << s.confidence << '\n';
+    }
+    if (o.apply) {
+        std::cout << "declared " << suggestions.size() << " mesh(es); " << m.meshes.size() << " meshes in all\n";
+    } else if (suggestions.empty()) {
+        std::cout << "no mesh to suggest\n";
+    } else {
+        std::cout << suggestions.size() << " suggestion(s); add --apply to declare them, or 'ohs rig mesh' for one\n";
+    }
+    return kExitOk;
 }
 
 int cmd_kinematics(const Options& o) {
@@ -421,6 +520,22 @@ int ohs::cli::run(int argc, char** argv) {
     mesh->add_option("part", o.part_name, "First part")->required();
     mesh->add_option("part_b", o.part_b, "Second part")->required();
     mesh->callback(pick(cmd_rig_mesh));
+
+    auto* autorig = rig->add_subcommand("auto", "Run the auto-rig again on an imported project: roles, mobiles and meshes");
+    autorig->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);
+    autorig->add_flag("--reset", o.reset, "Also forget the roles you set and the meshes you declared");
+    autorig->add_option("--min-teeth", o.min_teeth, "Fewest teeth to call a part toothed")->capture_default_str();
+    autorig->add_option("--coaxial-tolerance", o.coaxial_tolerance, "Largest centre offset in mm for parts of one mobile")
+        ->capture_default_str();
+    autorig->callback(pick(cmd_rig_auto));
+
+    auto* suggest = rig->add_subcommand("suggest", "List toothed parts that probably mesh but were not accepted, and optionally declare them");
+    suggest->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);
+    suggest->add_flag("--apply", o.apply, "Declare the suggested meshes (as 'ohs rig mesh' does)");
+    suggest->add_option("--min-confidence", o.min_confidence, "Leave out suggestions below this confidence (0 to 0.5)")
+        ->capture_default_str();
+    suggest->add_option("--min-teeth", o.min_teeth, "Fewest teeth to call a part toothed")->capture_default_str();
+    suggest->callback(pick(cmd_rig_suggest));
 
     auto* anim = app.add_subcommand("animate", "Export the running train as an animated binary glTF (.glb) or OpenUSD text file (.usda)");
     anim->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);

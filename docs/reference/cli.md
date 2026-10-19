@@ -75,6 +75,8 @@ Subcommands:
   check                       Validate a project's rig
   set                         Override a part's role and re-infer mobiles and meshes
   mesh                        Declare that two toothed parts mesh although the geometry does not show it
+  auto                        Run the auto-rig again on an imported project: roles, mobiles and meshes
+  suggest                     List toothed parts that probably mesh but were not accepted, and optionally declare them
 ```
 
 #### `ohs rig check`
@@ -120,6 +122,39 @@ Positionals:
 
 Options:
   -h,--help                   Print this help message and exit
+```
+
+#### `ohs rig auto`
+
+```text
+Run the auto-rig again on an imported project: roles, mobiles and meshes
+Usage: ohs rig auto [OPTIONS] project
+
+Positionals:
+  project TEXT:FILE REQUIRED  Project file
+
+Options:
+  -h,--help                   Print this help message and exit
+  --reset                     Also forget the roles you set and the meshes you declared
+  --min-teeth INT [6]         Fewest teeth to call a part toothed
+  --coaxial-tolerance FLOAT [0.05] 
+                              Largest centre offset in mm for parts of one mobile
+```
+
+#### `ohs rig suggest`
+
+```text
+List toothed parts that probably mesh but were not accepted, and optionally declare them
+Usage: ohs rig suggest [OPTIONS] project
+
+Positionals:
+  project TEXT:FILE REQUIRED  Project file
+
+Options:
+  -h,--help                   Print this help message and exit
+  --apply                     Declare the suggested meshes (as 'ohs rig mesh' does)
+  --min-confidence FLOAT [0]  Leave out suggestions below this confidence (0 to 0.5)
+  --min-teeth INT [6]         Fewest teeth to call a part toothed
 ```
 
 ### `ohs animate`
@@ -432,6 +467,7 @@ Options:
 
 Subcommands:
   init                        Write the default calibre parameters to edit
+  hairspring                  Fit a calibre's hairspring from a beam model of a flat spiral: stiffness and the cubic term
 ```
 
 #### `ohs calibre init`
@@ -444,6 +480,26 @@ Options:
   -h,--help                   Print this help message and exit
   -o,--output TEXT            File to write (default: stdout)
   --beat-rate FLOAT [0]       Beat rate in vph
+```
+
+#### `ohs calibre hairspring`
+
+```text
+Fit a calibre's hairspring from a beam model of a flat spiral: stiffness and the cubic term
+Usage: ohs calibre hairspring [OPTIONS]
+
+Options:
+  -h,--help                   Print this help message and exit
+  --calibre TEXT:FILE         Start from this calibre (default: the reference one)
+  --youngs FLOAT [210]        Young's modulus in GPa
+  --width FLOAT [0.14]        Strip height along the staff in mm
+  --thickness FLOAT [0.025]   Strip radial thickness in mm
+  --inner-radius FLOAT [0.6]  Radius of the inner end, mm
+  --pitch FLOAT [0.12]        Distance between coils, mm
+  --turns FLOAT [12]          Number of coils
+  --amplitude FLOAT [300]     Amplitude to fit over, degrees
+  --beat-rate FLOAT [0]       Beat rate in vph for the rest of the calibre
+  -o,--output TEXT            Write the calibre with the fitted spring as TOML
 ```
 
 ### `ohs materials`

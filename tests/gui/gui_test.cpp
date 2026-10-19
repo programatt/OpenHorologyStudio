@@ -45,6 +45,8 @@
 #include "gui/theme.hpp"
 #include "geometry/step_io.hpp"
 #include "keyless_parts.hpp"
+#include "model/rig_io.hpp"
+#include "rigging/rigging.hpp"
 
 namespace fs = std::filesystem;
 
@@ -1124,6 +1126,102 @@ TEST_CASE("bench: scene load, frame and pick times of the demonstration movement
     WARN("load " << load_ms << " ms, " << triangles << " triangles, centre() " << centre_ms << " ms, pick " << pick_ms << " ms");
 }
 
+TEST_CASE("gui: the rig page shows the train, what is left to rig and suggested meshes, and re-runs the auto-rig", "[gui][rig]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_demo(fresh_dir("rig-review")));
+    const auto movement = [&]() -> const ohs::model::Movement& { return w.viewport()->scene()->movement(); };
+    const auto role_of = [&](const char* part) {
+        return movement().components[static_cast<std::size_t>(movement().find_component(part))].role;
+    };
+    const auto green_pixels = [](const QImage& image) {
+        std::size_t n = 0;
+        for (int y = 0; y < image.height(); ++y)
+            for (int x = 0; x < image.width(); ++x)
+                if (image.pixel(x, y) == qRgb(60, 200, 110)) ++n;
+        return n;
+    };
+
+    // A rigged train is connected and has nothing to suggest.
+    CHECK(w.chain_label()->text().contains("Connected"));
+    CHECK_FALSE(w.chain_label()->text().contains("Not connected"));
+    CHECK(w.suggestion_list()->count() == 0);
+
+    // The rig is drawn over the movement on request: the meshes the barrel feeds are green.
+    const QImage plain = w.viewport()->render(QSize(640, 480));
+    CHECK(green_pixels(plain) == 0);
+    w.rig_overlay_check()->setChecked(true);
+    CHECK(w.viewport()->show_rig());
+    const QImage rigged = w.viewport()->render(QSize(640, 480));
+    CHECK(green_pixels(rigged) > 40);
+    w.rig_overlay_check()->setChecked(false);
+    CHECK_FALSE(w.viewport()->show_rig());
+    CHECK(green_pixels(w.viewport()->render(QSize(640, 480))) == 0);
+
+    // Taking a wheel out of the train breaks it, says where, and lists it as a thing to do.
+    REQUIRE(w.change_role("center_wheel", "plate"));
+    CHECK(w.chain_label()->text().contains("Not connected"));
+    CHECK(w.rig_tabs()->tabText(1).startsWith("To do ("));
+    int broken = -1;
+    for (int row = 0; row < w.issue_list()->count(); ++row)
+        if (w.issue_list()->item(row)->text().contains("the train is broken")) broken = row;
+    REQUIRE(broken >= 0);
+    w.issue_list()->setCurrentRow(broken);
+    CHECK_FALSE(w.viewport()->selected().empty());  // a part at one end of the break is selected
+    CHECK_FALSE(w.viewport()->scene()->can_animate());
+    w.rig_overlay_check()->setChecked(true);
+    CHECK(green_pixels(w.viewport()->render(QSize(640, 480))) > 0);  // still fed as far as the break
+    w.rig_overlay_check()->setChecked(false);
+
+    // Re-running the auto-rig keeps the role that was set; starting from scratch forgets it. Both can be undone.
+    const int edits = w.undo_stack()->count();
+    REQUIRE(w.rerig());
+    CHECK(role_of("center_wheel") == ohs::model::Role::Plate);
+    CHECK(w.undo_stack()->count() == edits);  // nothing changed, so nothing to undo
+    REQUIRE(w.rerig(true));
+    CHECK(role_of("center_wheel") == ohs::model::Role::Wheel);
+    CHECK(w.chain_label()->text().contains("Connected"));
+    CHECK(w.undo_stack()->count() == edits + 1);
+    CHECK(w.undo_stack()->undoText().contains("scratch"));
+    w.undo_stack()->undo();
+    CHECK(role_of("center_wheel") == ohs::model::Role::Plate);
+    CHECK(w.chain_label()->text().contains("Not connected"));
+    w.undo_stack()->undo();
+    CHECK(role_of("center_wheel") == ohs::model::Role::Wheel);
+
+    // Nudge the centre mobile off its mesh with the barrel: the strict test fails, the pair is suggested.
+    CHECK_FALSE(w.accept_suggested_meshes());  // nothing to declare yet
+    auto m = ohs::model::load_rig(w.project().toStdString());
+    for (auto& c : m.components) {
+        const std::string& n = c.features.name;
+        if (n == "center_pinion" || n == "center_wheel" || n == "center_arbor") c.features.center.x += 0.05;
+    }
+    ohs::rigging::infer_structure(m, {});
+    ohs::model::save_rig(m, w.project().toStdString());
+    REQUIRE(w.open_project(w.project()));
+    CHECK(w.chain_label()->text().contains("Not connected"));
+    REQUIRE(w.suggestion_list()->count() >= 1);
+    CHECK(w.rig_tabs()->tabText(2).startsWith("Suggested meshes ("));
+    bool barrel_pair = false;
+    for (int row = 0; row < w.suggestion_list()->count(); ++row) {
+        const QString text = w.suggestion_list()->item(row)->text();
+        barrel_pair |= text.contains("barrel") && text.contains("center_pinion");
+    }
+    CHECK(barrel_pair);
+    w.suggestion_list()->setCurrentRow(0);  // selects the pair: the first part in the viewport, the second as the partner
+    CHECK_FALSE(w.viewport()->selected().empty());
+    CHECK_FALSE(w.mesh_partner_box()->currentText().isEmpty());
+
+    REQUIRE(w.accept_suggested_meshes());
+    CHECK(w.chain_label()->text().contains("Connected"));
+    CHECK(w.suggestion_list()->count() == 0);
+    CHECK(w.undo_stack()->undoText().contains("suggested mesh"));
+    w.undo_stack()->undo();
+    CHECK(w.chain_label()->text().contains("Not connected"));
+    CHECK(w.suggestion_list()->count() >= 1);
+}
+
 // Hidden (run with `ohs_gui_tests "[screenshots]"`): the whole window on each workspace, written to
 // $OHS_SCREENSHOT_DIR (default: the temporary directory), for reviewing the layout.
 TEST_CASE("screenshots: the window on each workspace", "[.][screenshots]") {
@@ -1148,4 +1246,11 @@ TEST_CASE("screenshots: the window on each workspace", "[.][screenshots]") {
         pump();
         w.grab().save(QDir(out).filePath(QString("%1-%2.png").arg(i + 1, 2, 10, QChar('0')).arg(w.workspaces()->tabText(i).remove('&').replace(' ', '-').toLower())));
     }
+    // The rig page with the rig drawn over a train that is broken at the centre wheel.
+    w.workspaces()->setCurrentIndex(0);
+    REQUIRE(w.change_role("center_wheel", "plate"));
+    w.rig_overlay_check()->setChecked(true);
+    w.rig_tabs()->setCurrentIndex(1);
+    pump();
+    w.grab().save(QDir(out).filePath("90-rig-overlay.png"));
 }
