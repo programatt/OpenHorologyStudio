@@ -425,7 +425,7 @@ QWidget* MainWindow::build_rig_page() {
     selected_box_ = new QGroupBox(tr("Selected part"));
     auto* form = new QGridLayout(selected_box_);
     role_box_ = new QComboBox;
-    for (int r = static_cast<int>(model::Role::Unknown); r <= static_cast<int>(model::Role::Screw); ++r)
+    for (int r = static_cast<int>(model::Role::Unknown); r <= static_cast<int>(model::kLastRole); ++r)
         role_box_->addItem(QString::fromUtf8(model::to_string(static_cast<model::Role>(r)).data()));
     apply_role_ = new QPushButton(tr("Set role"));
     apply_role_->setToolTip(tr("Give the selected part this role and re-rig the movement (undoable)"));
@@ -1044,7 +1044,7 @@ QMenu* MainWindow::visibility_menu(QWidget* parent) {
     auto* menu = new QMenu(parent);
     menu->addSection(tr("Show parts by role"));
     if (!scene_) return menu;
-    for (int r = static_cast<int>(model::Role::Unknown); r <= static_cast<int>(model::Role::Screw); ++r) {
+    for (int r = static_cast<int>(model::Role::Unknown); r <= static_cast<int>(model::kLastRole); ++r) {
         const auto role = static_cast<model::Role>(r);
         int count = 0, shown = 0;
         for (const ScenePart& part : scene_->parts()) {

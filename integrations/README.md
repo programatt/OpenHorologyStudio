@@ -14,7 +14,8 @@ and versioned separately from the OHS core.
 
 Set a custom property (SolidWorks) or attribute (Fusion 360, group `OHS`, name `role`) called
 `OHS_ROLE` on the part. Valid roles: `plate`, `bridge`, `barrel`, `mainspring`, `arbor`, `wheel`,
-`pinion`, `escape_wheel`, `pallet_fork`, `balance`, `hairspring`, `roller`, `jewel`, `screw`.
+`pinion`, `escape_wheel`, `pallet_fork`, `balance`, `hairspring`, `roller`, `jewel`, `screw`, `rotor`
+(the oscillating weight of an automatic).
 Parts without a role are classified from their names (`escape wheel`, `third pinion`, `main plate`,
 ...). The preset matches each part by its exact name, so keep part names unique and stable.
 

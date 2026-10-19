@@ -30,7 +30,13 @@ enum class Role {
     Roller,
     Jewel,
     Screw,
+    /// The oscillating weight of an automatic movement. It turns about the movement's centre, but its
+    /// winding is not modelled yet, so it is not a rotating role: it joins no mobile and is drawn still.
+    Rotor,
 };
+
+/// The last role, for going through every role (`Role::Unknown` is the first).
+inline constexpr Role kLastRole = Role::Rotor;
 
 std::string_view to_string(Role role);
 std::optional<Role> role_from_string(std::string_view text);

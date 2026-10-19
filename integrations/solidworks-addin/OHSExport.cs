@@ -22,7 +22,7 @@ namespace OpenHorologyStudio
     public static class OhsExport
     {
         static readonly string[] Roles = { "plate", "bridge", "barrel", "mainspring", "arbor", "wheel", "pinion", "escape_wheel",
-                                           "pallet_fork", "balance", "hairspring", "roller", "jewel", "screw" };
+                                           "pallet_fork", "balance", "hairspring", "roller", "jewel", "screw", "rotor" };
 
         // Name fragments in the order the OHS classifier uses; the first hit wins.
         static readonly (string Pattern, string Role)[] NameRules =
@@ -30,7 +30,7 @@ namespace OpenHorologyStudio
             ("escape", "escape_wheel"), ("pallet|lever|fork", "pallet_fork"), ("hairspring|balance[_ ]?spring", "hairspring"),
             ("balance", "balance"), ("roller|impulse", "roller"), ("main[_ ]?spring", "mainspring"), ("barrel", "barrel"),
             ("jewel|ruby|sapphire", "jewel"), ("screw|bolt", "screw"), ("arbor|staff|axle|shaft", "arbor"), ("pinion", "pinion"),
-            ("bridge|cock", "bridge"), ("plate|mainplate|base", "plate"), ("wheel|gear", "wheel"),
+            ("bridge|cock", "bridge"), ("rotor|oscillating", "rotor"), ("plate|mainplate|base", "plate"), ("wheel|gear", "wheel"),
         };
 
         public static string GuessRole(string name)

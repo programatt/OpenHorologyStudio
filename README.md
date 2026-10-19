@@ -88,6 +88,18 @@ directory and imports it. OM10 files are CC BY-SA 3.0 and are never committed he
 (`.gitignore` blocks `*.stp`/`*.step`). The [OM10 tutorial](docs/om10.md) walks through a whole
 modification study with the guided lessons.
 
+## Future enhancements
+
+- **Automatic winding: rotor animation and simulation.** OHS recognises the rotor (oscillating
+  weight) of an automatic movement, from its name or from its place in the movement, and gives
+  it the `rotor` role. It does not model the winding yet: the rotor is drawn but does not move.
+  The plan is to:
+  - animate the rotor turning about the movement's centre;
+  - simulate the winding chain (reverser or pawl wheels, reduction gearing, the barrel ratchet)
+    from wrist motion to mainspring torque;
+  - report winding efficiency and how much wear is needed to keep the movement at full power
+    reserve.
+
 ## Licence
 
 Apache-2.0. See [`LICENSE.md`](LICENSE.md) and [`CHANGELOG.md`](CHANGELOG.md).

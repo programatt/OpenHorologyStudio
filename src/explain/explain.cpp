@@ -38,6 +38,7 @@ std::string_view summary_for(Role role) {
         case Role::Roller: return "The roller carries the impulse jewel that couples the balance to the pallet fork.";
         case Role::Jewel: return "A jewel is a low-friction bearing for a pivot.";
         case Role::Screw: return "A screw fixes a plate or bridge.";
+        case Role::Rotor: return "The rotor (oscillating weight) winds the mainspring of an automatic movement: it swings about the movement's centre as the wrist moves, and the reverser and reduction wheels turn that into winding of the barrel. Its winding is not simulated yet, so it is drawn but does not move.";
         case Role::Unknown: break;
     }
     return "This part has not been classified; set its role with `ohs rig set`.";

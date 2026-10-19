@@ -20,6 +20,7 @@ class RoleLogic(unittest.TestCase):
             "Escape Wheel": "escape_wheel", "third_pinion": "pinion", "Main Plate": "plate", "Barrel": "barrel",
             "balance staff": "balance", "pallet fork": "pallet_fork", "Hairspring": "hairspring", "ruby jewel 2.0": "jewel",
             "train bridge": "bridge", "center wheel": "wheel", "M1.2 screw": "screw", "fourth arbor": "arbor",
+            "Oscillating Weight": "rotor", "rotor": "rotor", "rotor screw": "screw", "rotor bridge": "bridge",
         }
         for name, role in cases.items():
             self.assertEqual(ohs_preset.guess_role(name), role, name)

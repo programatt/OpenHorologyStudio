@@ -15,7 +15,7 @@ from typing import Dict, Iterable, List, Optional
 # Roles OHS understands (ohs rig set --role ...).
 ROLES = (
     "plate", "bridge", "barrel", "mainspring", "arbor", "wheel", "pinion", "escape_wheel",
-    "pallet_fork", "balance", "hairspring", "roller", "jewel", "screw",
+    "pallet_fork", "balance", "hairspring", "roller", "jewel", "screw", "rotor",
 )
 
 # Name fragments, checked in this order (the first hit wins), the same hints OHS's own classifier uses.
@@ -32,6 +32,7 @@ _NAME_RULES = (
     (r"arbor|staff|axle|shaft", "arbor"),
     (r"pinion", "pinion"),
     (r"bridge|cock", "bridge"),
+    (r"rotor|oscillating", "rotor"),
     (r"plate|mainplate|base", "plate"),
     (r"wheel|gear", "wheel"),
 )

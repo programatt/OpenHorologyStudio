@@ -7,7 +7,7 @@
 namespace ohs::model {
 
 namespace {
-constexpr std::array<std::pair<Role, std::string_view>, 15> kRoleNames{{
+constexpr std::array<std::pair<Role, std::string_view>, 16> kRoleNames{{
     {Role::Unknown, "unknown"},
     {Role::Plate, "plate"},
     {Role::Bridge, "bridge"},
@@ -23,6 +23,7 @@ constexpr std::array<std::pair<Role, std::string_view>, 15> kRoleNames{{
     {Role::Roller, "roller"},
     {Role::Jewel, "jewel"},
     {Role::Screw, "screw"},
+    {Role::Rotor, "rotor"},
 }};
 }  // namespace
 

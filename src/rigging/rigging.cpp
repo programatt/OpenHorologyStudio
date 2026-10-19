@@ -40,7 +40,10 @@ constexpr NameHint kNameHints[] = {
     {"barrel", Role::Barrel},          {"mainspring", Role::Mainspring},
     {"roller", Role::Roller},          {"jewel", Role::Jewel},
     {"ruby", Role::Jewel},             {"screw", Role::Screw},
-    {"bridge", Role::Bridge},          {"plate", Role::Plate},
+    {"bridge", Role::Bridge},
+    // After screw and bridge ("rotor screw", "rotor bridge"), before plate ("rotor plate").
+    {"rotor", Role::Rotor},            {"oscillating", Role::Rotor},
+    {"plate", Role::Plate},
     {"wheel", Role::Wheel},
 };
 
@@ -274,6 +277,32 @@ void set_role(Movement& m, const std::string& name, Role role, const RigOptions&
     infer_structure(m, options);
 }
 
+void spot_rotors(std::vector<Component>& components) {
+    // An automatic's rotor is large and thin, so on its own it passes for a plate. Against the rest of the
+    // movement it does not: it spans about the whole movement, like the main plate, but it covers only
+    // about half of it (a half disc), so its mass sits well to one side of the plate's. Comparing areas
+    // (volume over thickness) says which of such a pair is the rotor whichever way the CAD file has it
+    // turned. A wide bridge over one side of the movement looks the same, so the result is only a
+    // suggestion (confidence 0.5) to check.
+    double width = 0.0;
+    for (const Component& c : components) width = std::max({width, c.features.extent_x, c.features.extent_y});
+    if (width <= 0.0) return;
+    const auto spans = [width](const PartFeatures& f) { return std::max(f.extent_x, f.extent_y) >= 0.8 * width; };
+    const auto area = [](const PartFeatures& f) { return f.thickness() > 0 ? f.volume / f.thickness() : 0.0; };
+    for (Component& c : components) {
+        if (c.role != Role::Plate || c.role_source != "geometry" || !spans(c.features)) continue;
+        for (const Component& other : components) {
+            if (&other == &c || !spans(other.features)) continue;
+            if (distance(c.features.center, other.features.center) >= 0.2 * width &&
+                area(c.features) < 0.75 * area(other.features)) {
+                c.role = Role::Rotor;
+                c.role_confidence = 0.5;
+                break;
+            }
+        }
+    }
+}
+
 Movement auto_rig(std::string movement_name, std::vector<PartFeatures> parts, const RigOptions& options) {
     Movement m;
     m.name = std::move(movement_name);
@@ -282,6 +311,7 @@ Movement auto_rig(std::string movement_name, std::vector<PartFeatures> parts, co
         const Classification c = classify(p, options);
         m.components.push_back({std::move(p), std::nullopt, c.role, c.confidence, c.source});
     }
+    spot_rotors(m.components);
     infer_structure(m, options);
     return m;
 }

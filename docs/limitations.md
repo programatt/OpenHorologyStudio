@@ -41,6 +41,10 @@ know where to be careful.
   `part#2` and so on (rename them with a preset). A DXF is a flat drawing: closed contours are
   extruded into parts, with the thickness from the DXF (group 39) or 1 mm, and 3D DXF entities,
   splines, ellipses and blocks are ignored.
+- **No automatic winding.** The rotor (oscillating weight) is recognised and given the `rotor` role,
+  by name or because it spans the movement with its mass to one side, but it is not animated and the
+  winding chain is not simulated. The geometric guess can mistake a wide bridge over one side of the
+  movement for a rotor; it is marked with confidence 0.5, so check it in the rig list.
 - **No mainspring coil contact or hairspring coil model.** The mainspring is a torque curve and the
   hairspring a stiffness from `E b h^3 / 12 L`.
 - **Windows and macOS** builds and installers are configured (CMake presets, CPack, CI workflow)

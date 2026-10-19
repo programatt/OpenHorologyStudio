@@ -33,6 +33,7 @@ Colour colour_of(model::Role role) {
         case model::Role::Arbor:
         case model::Role::PalletFork:
         case model::Role::Screw: return {0.62, 0.64, 0.67};
+        case model::Role::Rotor: return {0.66, 0.44, 0.29};  // the viewport's copper
         default: return {0.79, 0.64, 0.30};
     }
 }

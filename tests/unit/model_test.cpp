@@ -11,7 +11,7 @@ using namespace ohs;
 
 TEST_CASE("role names round-trip") {
     for (auto role : {model::Role::Unknown, model::Role::Plate, model::Role::Barrel, model::Role::EscapeWheel,
-                      model::Role::PalletFork, model::Role::Screw}) {
+                      model::Role::PalletFork, model::Role::Screw, model::Role::Rotor}) {
         REQUIRE(model::role_from_string(model::to_string(role)) == role);
     }
     REQUIRE_FALSE(model::role_from_string("sprocket").has_value());

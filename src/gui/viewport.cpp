@@ -26,6 +26,7 @@ QColor role_colour(model::Role role) {
         case Role::Screw: return QColor(156, 160, 168);
         case Role::Jewel: return QColor(200, 40, 60);
         case Role::Hairspring: return QColor(70, 110, 190);
+        case Role::Rotor: return QColor(168, 112, 74);  // copper: apart from the brass train and the plates
         default: return QColor(201, 163, 76);
     }
 }

@@ -47,6 +47,49 @@ TEST_CASE("geometry classifies unnamed parts and flags contradictions") {
     CHECK(rigging::classify(named("odd wheel"), o).confidence < 0.6);
 }
 
+TEST_CASE("an automatic's rotor is a rotor, by name or by its place in the movement") {
+    rigging::RigOptions o;
+    CHECK(rigging::classify(named("Oscillating Weight"), o).role == Role::Rotor);
+    CHECK(rigging::classify(named("rotor"), o).role == Role::Rotor);
+    CHECK(rigging::classify(named("Rotor Plate"), o).role == Role::Rotor);
+    // Its fixings and bearings keep their own roles.
+    CHECK(rigging::classify(named("rotor screw"), o).role == Role::Screw);
+    CHECK(rigging::classify(named("rotor bridge"), o).role == Role::Bridge);
+    CHECK(rigging::classify(named("rotor_pinion", 8), o).role == Role::Pinion);
+
+    // Unnamed, large and thin: alone, a rotor passes for a plate. Next to the main plate it covers half the
+    // movement with its mass to one side, which makes it the rotor, whichever way it is turned in the file.
+    const auto slab = [](std::string name, double ex, double ey, double cx, double cy, double area, double thick) {
+        model::PartFeatures f;
+        f.name = std::move(name);
+        f.extent_x = ex;
+        f.extent_y = ey;
+        f.center = {cx, cy};
+        f.z_min = 0;
+        f.z_max = thick;
+        f.volume = area * thick;
+        return f;
+    };
+    const double r = 15.0, pi = 3.14159265358979;
+    const auto plate = slab("Body1", 2 * r, 2 * r, 0, 0, 0.8 * pi * r * r, 0.5);
+    const auto bridge = slab("Body2", 12, 5, 6, -4, 50, 0.4);
+    for (const auto& rotor : {slab("Body3", 2 * r, 1.1 * r, 0, 6.4, 0.5 * pi * r * r, 0.6),           // square to the axes
+                              slab("Body3", 1.71 * r, 1.71 * r, 4.5, 4.5, 0.5 * pi * r * r, 0.6)}) {  // turned 45 degrees
+        CHECK(rigging::classify(rotor, o).role == Role::Plate);
+        const auto m = rigging::auto_rig("automatic", {plate, bridge, rotor}, o);
+        CHECK(m.components[0].role == Role::Plate);
+        CHECK(m.components[1].role == Role::Plate);  // the small bridge is left as it was
+        CHECK(m.components[2].role == Role::Rotor);
+        CHECK(m.components[2].role_confidence == Catch::Approx(0.5));
+        CHECK(m.components[2].role_source == "geometry");
+        CHECK(m.mobile_of(2) < 0);  // not animated yet, so in no mobile
+    }
+
+    // A movement without a rotor keeps its plates.
+    const auto m = rigging::auto_rig("manual", {plate, bridge, slab("Body4", 2 * r, 2 * r, 0.5, 0, 0.7 * pi * r * r, 0.4)}, o);
+    for (const auto& c : m.components) CHECK(c.role == Role::Plate);
+}
+
 TEST_CASE("presets override name and geometry") {
     rigging::RigOptions o;
     o.presets = {{"^gp[0-9]+$", Role::Wheel}};
