@@ -290,6 +290,59 @@ TEST_CASE("meshes that just missed the strict test are suggested, and declaring 
     CHECK(rigging::suggest_meshes(rigging::auto_rig("train", test::synthetic_train(), {}), {}).empty());
 }
 
+TEST_CASE("walking the train goes mesh by mesh from the barrel, and stops at the gap with what could fill it") {
+    using Kind = rigging::WalkStep::Kind;
+    const auto good = rigging::auto_rig("train", test::synthetic_train(), {});
+    const auto done = rigging::walk_train(good, rigging::train_chain(good), {});
+    REQUIRE(done.complete);
+    REQUIRE(done.steps.size() == 4);
+    for (const auto& s : done.steps) CHECK(s.kind == Kind::Mesh);
+    CHECK(good.components[static_cast<std::size_t>(done.steps[0].driver)].features.name == "barrel");
+    CHECK(good.components[static_cast<std::size_t>(done.steps[0].driven)].features.name == "center_pinion");
+    // Each step starts where the one before ended: the driven wheel's mobile holds the next driver.
+    for (std::size_t i = 1; i < done.steps.size(); ++i) {
+        CHECK(good.mobile_of(done.steps[i].driver) == good.mobile_of(done.steps[i - 1].driven));
+        CHECK(done.steps[i].driver != done.steps[i - 1].driven);  // the other gear of that mobile
+    }
+    CHECK(done.steps[0].text.find("80 teeth") != std::string::npos);
+    CHECK(done.steps[0].text.find("8 times") != std::string::npos);
+
+    // A train nudged off its first mesh: the walk ends at a gap at the barrel, and the pair that would join it
+    // is the one offered.
+    auto parts = test::synthetic_train();
+    for (auto& p : parts) {
+        if (p.name == "center_pinion" || p.name == "center_wheel" || p.name == "center_arbor") p.center.x += 0.05;
+    }
+    const auto nudged = rigging::auto_rig("nudged", parts, {});
+    const auto suggestions = rigging::suggest_meshes(nudged, {});
+    const auto walk = rigging::walk_train(nudged, rigging::train_chain(nudged), suggestions);
+    CHECK_FALSE(walk.complete);
+    REQUIRE_FALSE(walk.steps.empty());
+    const auto& gap = walk.steps.back();
+    REQUIRE(gap.kind == Kind::Gap);
+    CHECK(walk.steps.size() == 1);  // the barrel meshes with nothing yet
+    CHECK(nudged.components[static_cast<std::size_t>(gap.driver)].features.name == "barrel");
+    REQUIRE_FALSE(gap.suggestions.empty());
+    const auto& offered = suggestions[static_cast<std::size_t>(gap.suggestions[0])];
+    const auto& a = nudged.components[static_cast<std::size_t>(offered.a)].features.name;
+    const auto& b = nudged.components[static_cast<std::size_t>(offered.b)].features.name;
+    CHECK(((a == "barrel" && b == "center_pinion") || (b == "barrel" && a == "center_pinion")));
+
+    // Without a barrel, or without an escape wheel, the first thing missing is a part to pick.
+    auto no_barrel = good;
+    rigging::set_role(no_barrel, "barrel", Role::Plate, {});
+    const auto first = rigging::walk_train(no_barrel, rigging::train_chain(no_barrel), {});
+    REQUIRE(first.steps.size() == 1);
+    CHECK(first.steps[0].kind == Kind::Missing);
+    CHECK(first.steps[0].needs_role == Role::Barrel);
+    auto no_escape = good;
+    rigging::set_role(no_escape, "escape_wheel", Role::Plate, {});
+    const auto last = rigging::walk_train(no_escape, rigging::train_chain(no_escape), {});
+    REQUIRE_FALSE(last.steps.empty());
+    CHECK(last.steps.back().kind == Kind::Missing);
+    CHECK(last.steps.back().needs_role == Role::EscapeWheel);
+}
+
 TEST_CASE("re-running the auto-rig recognises parts again but keeps what the user decided") {
     auto m = rigging::auto_rig("train", test::synthetic_train(), {});
     const std::size_t meshes = m.meshes.size();

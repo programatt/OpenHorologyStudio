@@ -77,6 +77,7 @@ Subcommands:
   mesh                        Declare that two toothed parts mesh although the geometry does not show it
   auto                        Run the auto-rig again on an imported project: roles, mobiles and meshes
   suggest                     List toothed parts that probably mesh but were not accepted, and optionally declare them
+  walk                        Step through the train from the barrel to the escape wheel, mesh by mesh, and show what is missing
 ```
 
 #### `ohs rig check`
@@ -91,6 +92,18 @@ Positionals:
 Options:
   -h,--help                   Print this help message and exit
   --strict                    Treat warnings as failures
+```
+
+#### `ohs rig label`
+
+```text
+Give a part a label to show in place of its name (none clears it)
+Usage: ohs rig label [OPTIONS] project part [label]
+
+Positionals:
+  project TEXT:FILE REQUIRED  Project file
+  part TEXT REQUIRED          Part name
+  label TEXT                  The label; leave out to remove it
 ```
 
 #### `ohs rig set`
@@ -154,6 +167,20 @@ Options:
   -h,--help                   Print this help message and exit
   --apply                     Declare the suggested meshes (as 'ohs rig mesh' does)
   --min-confidence FLOAT [0]  Leave out suggestions below this confidence (0 to 0.5)
+  --min-teeth INT [6]         Fewest teeth to call a part toothed
+```
+
+#### `ohs rig walk`
+
+```text
+Step through the train from the barrel to the escape wheel, mesh by mesh, and show what is missing
+Usage: ohs rig walk [OPTIONS] project
+
+Positionals:
+  project TEXT:FILE REQUIRED  Project file
+
+Options:
+  -h,--help                   Print this help message and exit
   --min-teeth INT [6]         Fewest teeth to call a part toothed
 ```
 

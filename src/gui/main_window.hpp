@@ -18,7 +18,10 @@
 #include "gui/viewport.hpp"
 
 class QCheckBox;
+class QHBoxLayout;
+class QScrollArea;
 class QComboBox;
+class QLineEdit;
 class QListWidget;
 class QMenu;
 class QUndoStack;
@@ -72,6 +75,8 @@ public:
     bool set_role(const QString& part, const QString& role);
     /// The undoable role change the rig page uses: pushes onto the undo stack.
     bool change_role(const QString& part, const QString& role);
+    /// Gives a part a label shown in place of its name in every view (empty clears it). Undoable.
+    bool change_label(const QString& part, const QString& label);
     /// Declares that two toothed parts mesh (`ohs rig mesh`), undoable.
     bool declare_mesh(const QString& part_a, const QString& part_b);
     /// Runs `ohs <args>`, a command that rewrites the project file, as one undoable edit: undo puts the
@@ -87,6 +92,20 @@ public:
     bool accept_suggested_meshes();
     /// Colours the mobiles and draws the meshes, suggestions and warnings over the viewport.
     void set_show_rig(bool on);
+    /// The Rig tab's walk through the train, one mesh at a time from the barrel. `step` counts from 0; out-of-range
+    /// values are clamped. The viewport shows the step while the Rig tab is open.
+    void go_to_step(int step);
+    int current_step() const { return walk_pos_; }
+    /// The next click on a part in the viewport declares that it meshes with `from` (the part the chain stops at).
+    void pick_partner_for(const QString& from);
+    /// The next click on a part in the viewport gives it this role (a barrel or an escape wheel that is missing).
+    void pick_part_for_role(const QString& role);
+    bool is_picking() const { return picking_; }
+    QLabel* step_label() const { return step_text_; }
+    QListWidget* candidate_list() const { return candidates_; }
+    QPushButton* next_step_button() const { return next_step_; }
+    QPushButton* previous_step_button() const { return prev_step_; }
+    QWidget* chip_strip() const { return chips_host_; }
     QCheckBox* rig_overlay_check() const { return rig_overlay_; }
     QLabel* chain_label() const { return chain_label_; }
     QTabWidget* rig_tabs() const { return rig_tabs_; }
@@ -161,8 +180,11 @@ private slots:
     void on_tree_selected();
     void on_run_analysis();
     void on_apply_role();
+    void on_apply_label();
     void on_declare_mesh();
     void on_accept_suggestion();
+    /// A click on a part in the viewport: selects it, or finishes a pick that is waiting for one.
+    void on_part_picked(const QString& name);
 
 private:
     void build_ui();
@@ -197,6 +219,10 @@ private:
     void refresh_panels();
     /// Fills the rig page's train line, to-do list and suggested meshes from the scene's review.
     void refresh_rig_review();
+    /// Redraws the walk: the chips, the step's card, the candidates for a gap and the viewport.
+    void update_walk();
+    /// Sets what the viewport shows of the walk (or nothing, off the Rig tab or with the whole rig shown).
+    void update_walk_view();
     QStringList with_project(QStringList args) const;
     void append_log(const QString& text);
     void on_job_changed(int index);
@@ -226,6 +252,8 @@ private:
     QListWidget* jobs_{};
     PlotWidget* plot_{};
     QComboBox* role_box_{};
+    QLineEdit* label_edit_{};
+    QPushButton* apply_label_{};
     QComboBox* mesh_box_{};
     QComboBox* field_box_{};
     QString field_vtu_, field_part_;
@@ -253,6 +281,23 @@ private:
     QPushButton* rerig_button_{};
     QPushButton* accept_suggestion_{};
     QPushButton* accept_all_{};
+    // The walk through the train.
+    QScrollArea* chips_scroll_{};
+    QWidget* chips_host_{};
+    QHBoxLayout* chips_layout_{};
+    QLabel* step_title_{};
+    QLabel* step_text_{};
+    QPushButton* prev_step_{};
+    QPushButton* next_step_{};
+    QWidget* gap_box_{};
+    QListWidget* candidates_{};
+    QPushButton* declare_candidate_{};
+    QPushButton* pick_partner_{};
+    QPushButton* change_role_{};
+    int walk_pos_{0};
+    bool picking_{false};
+    QString pick_from_;  ///< Partner pick: the part that is to mesh with the one clicked
+    QString pick_role_;  ///< Role pick: the role the one clicked gets (empty for a partner pick)
     QLabel* analyse_part_label_{};
     QLabel* time_label_{};
     QLabel* explode_label_{};

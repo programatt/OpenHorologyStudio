@@ -55,6 +55,7 @@ public:
         std::vector<rigging::Issue> issues;
         rigging::TrainChain chain;
         std::vector<rigging::MeshSuggestion> suggestions;
+        rigging::TrainWalk walk;  ///< the steps from the barrel to the escape wheel, or to what is missing
     };
     const RigReview& review() const { return review_; }
 

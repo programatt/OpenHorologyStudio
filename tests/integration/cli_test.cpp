@@ -103,6 +103,12 @@ TEST_CASE("ohs CLI end to end") {
         CHECK(nlohmann::json::parse(anim.output)["animated_nodes"] == 14);
         CHECK(fs::file_size(glb) > 100000);
 
+        CHECK(run("rig label " + proj + " fourth_wheel Seconds", dir).exit_code == 0);
+        CHECK(run("rig label " + proj + " nope Seconds", dir).exit_code == 2);
+        const auto labelled = nlohmann::json::parse(run("--json rig check " + proj, dir).output)["components"];
+        CHECK(std::count_if(labelled.begin(), labelled.end(), [](const auto& c) { return c.value("label", "") == "Seconds"; }) == 1);
+        CHECK(run("rig label " + proj + " fourth_wheel", dir).exit_code == 0);  // clears it
+
         CHECK(run("rig set " + proj + " fourth_wheel --role screw", dir).exit_code == 0);
         CHECK(nlohmann::json::parse(run("--json rig check " + proj, dir).output)["components"].size() == 15);
         CHECK(run("kinematics " + proj, dir).output.find("warning") != std::string::npos);
@@ -129,6 +135,19 @@ TEST_CASE("ohs CLI end to end") {
         CHECK(run("rig suggest " + proj, dir).output.find("no mesh to suggest") != std::string::npos);
         CHECK(run("rig suggest " + proj + " --apply", dir).exit_code == 0);
         CHECK(nlohmann::json::parse(run("--json rig suggest " + proj, dir).output).empty());
+
+        // The walk goes from the barrel to the escape pinion in four meshes, and stops at the missing one once a
+        // wheel is taken out.
+        const auto complete = nlohmann::json::parse(run("--json rig walk " + proj, dir).output);
+        CHECK(complete["complete"].get<bool>());
+        REQUIRE(complete["steps"].size() == 4);
+        CHECK(complete["steps"][0]["driver"] == "barrel");
+        CHECK(run("rig walk " + proj, dir).output.find("the train is complete") != std::string::npos);
+        CHECK(run("rig set " + proj + " fourth_wheel --role screw", dir).exit_code == 0);
+        const auto cut = nlohmann::json::parse(run("--json rig walk " + proj, dir).output);
+        CHECK_FALSE(cut["complete"].get<bool>());
+        CHECK(cut["steps"].back()["kind"] == "gap");
+        CHECK(run("rig walk " + proj, dir).output.find("not complete") != std::string::npos);
     }
 
     SECTION("error handling and exit codes") {

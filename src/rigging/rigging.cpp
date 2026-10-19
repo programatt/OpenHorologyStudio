@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <numbers>
 #include <regex>
 
@@ -401,7 +402,7 @@ Movement auto_rig(std::string movement_name, std::vector<PartFeatures> parts, co
     m.beat_rate_vph = options.beat_rate_vph;
     for (PartFeatures& p : parts) {
         const Classification c = classify(p, options);
-        m.components.push_back({std::move(p), std::nullopt, c.role, c.confidence, c.source});
+        m.components.push_back({std::move(p), std::nullopt, c.role, c.confidence, c.source, {}});
     }
     spot_rotors(m.components);
     spot_small_parts(m.components);
@@ -564,7 +565,7 @@ std::string describe_mobile(const Movement& m, int mobile) {
     const model::Mobile& mob = m.mobiles[static_cast<std::size_t>(mobile)];
     for (int idx : mob.components) {
         const Component& c = m.components[static_cast<std::size_t>(idx)];
-        if (model::is_toothed_role(c.role)) return mob.name + " (" + c.features.name + ")";
+        if (model::is_toothed_role(c.role)) return mob.name + " (" + c.display_name() + ")";
     }
     return mob.name;
 }
@@ -584,6 +585,88 @@ std::string describe_chain(const Movement& m, const TrainChain& chain) {
         for (int mobile : chain.unreached) s += " " + describe_mobile(m, mobile);
     }
     return s;
+}
+
+namespace {
+
+std::string number(double v, const char* format) {
+    char buffer[32];
+    std::snprintf(buffer, sizeof buffer, format, v);
+    return buffer;
+}
+
+}  // namespace
+
+TrainWalk walk_train(const Movement& m, const TrainChain& chain, const std::vector<MeshSuggestion>& suggestions) {
+    TrainWalk walk;
+    const auto name = [&m](int component) { return m.components[static_cast<std::size_t>(component)].display_name(); };
+    const auto teeth = [&m](int component) { return m.components[static_cast<std::size_t>(component)].features.teeth; };
+    const auto toothed_in = [&m](int mobile, int except) {
+        for (int idx : m.mobiles[static_cast<std::size_t>(mobile)].components) {
+            if (idx != except && model::is_toothed_role(m.components[static_cast<std::size_t>(idx)].role)) return idx;
+        }
+        return -1;
+    };
+    if (chain.barrel < 0) {
+        WalkStep step;
+        step.kind = WalkStep::Kind::Missing;
+        step.needs_role = Role::Barrel;
+        step.text = "No barrel found, so the train has nothing to start from. Pick the barrel.";
+        walk.steps.push_back(std::move(step));
+        return walk;
+    }
+
+    const std::vector<int>& way = chain.connected ? chain.path : chain.from_barrel;
+    int last_driven = -1;
+    for (std::size_t i = 0; i + 1 < way.size(); ++i) {
+        // The strongest mesh between the two mobiles.
+        int best = -1;
+        for (std::size_t k = 0; k < m.meshes.size(); ++k) {
+            const model::MeshJoint& j = m.meshes[k];
+            const int a = m.mobile_of(j.a), b = m.mobile_of(j.b);
+            if (!((a == way[i] && b == way[i + 1]) || (a == way[i + 1] && b == way[i]))) continue;
+            if (best < 0 || j.confidence > m.meshes[static_cast<std::size_t>(best)].confidence) best = static_cast<int>(k);
+        }
+        if (best < 0) break;
+        const model::MeshJoint& j = m.meshes[static_cast<std::size_t>(best)];
+        WalkStep step;
+        step.mesh = best;
+        step.driver = m.mobile_of(j.a) == way[i] ? j.a : j.b;
+        step.driven = step.driver == j.a ? j.b : j.a;
+        const double ratio = static_cast<double>(teeth(step.driver)) / std::max(1, teeth(step.driven));
+        step.text = name(step.driver) + " (" + std::to_string(teeth(step.driver)) + " teeth) drives " + name(step.driven) + " (" +
+                    std::to_string(teeth(step.driven)) + " teeth), so the second turns " +
+                    (ratio >= 1.0 ? number(ratio, "%.3g") + " times for each turn of the first"
+                                  : "once for each " + number(1.0 / ratio, "%.3g") + " turns of the first") +
+                    ". Module " + number(j.module, "%.3f") + ", " + (j.manual ? "declared by you" : "confidence " + number(j.confidence, "%.2f")) + ".";
+        last_driven = step.driven;
+        walk.steps.push_back(std::move(step));
+    }
+    if (chain.connected) {
+        walk.complete = true;
+        return walk;
+    }
+
+    WalkStep step;
+    if (chain.escape < 0) {
+        step.kind = WalkStep::Kind::Missing;
+        step.needs_role = Role::EscapeWheel;
+        step.text = "No escape wheel found, so the train has nothing to end on. Pick the escape wheel.";
+        walk.steps.push_back(std::move(step));
+        return walk;
+    }
+    step.kind = WalkStep::Kind::Gap;
+    step.driver = way.empty() ? -1 : toothed_in(way.back(), last_driven);
+    if (step.driver < 0 && !way.empty()) step.driver = toothed_in(way.back(), -1);
+    step.text = step.driver >= 0 ? "Nothing meshes with " + name(step.driver) + " yet. Pick the part it drives."
+                                 : "The chain stops here. Pick the part that comes next.";
+    for (std::size_t k = 0; k < suggestions.size(); ++k) {
+        const int ma = m.mobile_of(suggestions[k].a), mb = m.mobile_of(suggestions[k].b);
+        if (ma < 0 || mb < 0 || chain.fed.size() <= static_cast<std::size_t>(std::max(ma, mb))) continue;
+        if (chain.fed[static_cast<std::size_t>(ma)] != chain.fed[static_cast<std::size_t>(mb)]) step.suggestions.push_back(static_cast<int>(k));
+    }
+    walk.steps.push_back(std::move(step));
+    return walk;
 }
 
 std::vector<Issue> check_rig(const Movement& m, double low_confidence) {
@@ -614,8 +697,8 @@ std::vector<Issue> check_rig(const Movement& m, double low_confidence) {
     for (const model::MeshJoint& j : m.meshes) {
         meshed[j.a] = meshed[j.b] = true;
         if (j.confidence < low_confidence) {
-            add(Severity::Warning, "mesh '" + m.components[j.a].features.name + "' / '" +
-                                       m.components[j.b].features.name + "' has low confidence " +
+            add(Severity::Warning, "mesh '" + m.components[j.a].display_name() + "' / '" +
+                                       m.components[j.b].display_name() + "' has low confidence " +
                                        std::to_string(j.confidence),
                 {m.components[j.a].features.name, m.components[j.b].features.name});
         }
@@ -623,7 +706,7 @@ std::vector<Issue> check_rig(const Movement& m, double low_confidence) {
     if (m.meshes.empty()) add(Severity::Error, "no gear meshes were inferred");
     for (const Component& c : m.components) {
         if (c.role == Role::DateRing && c.features.inner_teeth <= 0 && c.features.teeth <= 0) {
-            add(Severity::Warning, "date ring '" + c.features.name + "' shows no teeth, so its step is assumed to be 1/31 of a turn",
+            add(Severity::Warning, "date ring '" + c.display_name() + "' shows no teeth, so its step is assumed to be 1/31 of a turn",
                 {c.features.name});
         }
     }
@@ -631,12 +714,12 @@ std::vector<Issue> check_rig(const Movement& m, double low_confidence) {
         const Component& c = m.components[i];
         const int index = static_cast<int>(i);
         if (c.role == Role::Lever && !model::lever_contact(m.components, index)) {
-            add(Severity::Info, "lever '" + c.features.name + "' rests on no toothed part, so it is drawn at rest", {c.features.name});
+            add(Severity::Info, "lever '" + c.display_name() + "' rests on no toothed part, so it is drawn at rest", {c.features.name});
         } else if (c.role == Role::Spring && !model::spring_flex(m.components, index)) {
-            add(Severity::Info, "spring '" + c.features.name + "' presses on no lever or toothed part, so it is drawn at rest",
+            add(Severity::Info, "spring '" + c.display_name() + "' presses on no lever or toothed part, so it is drawn at rest",
                 {c.features.name});
         } else if (c.role == Role::Stem && c.features.length <= 0.0) {
-            add(Severity::Info, "stem '" + c.features.name + "' has no recorded axis (re-import the file), so it is drawn at rest",
+            add(Severity::Info, "stem '" + c.display_name() + "' has no recorded axis (re-import the file), so it is drawn at rest",
                 {c.features.name});
         }
     }
@@ -644,10 +727,10 @@ std::vector<Issue> check_rig(const Movement& m, double low_confidence) {
         const Component& c = m.components[i];
         if (!model::is_toothed_role(c.role) || meshed[i]) continue;
         if (c.role == Role::EscapeWheel) {  // its partner is the pallet fork, not inferred yet
-            add(Severity::Info, "escape wheel '" + c.features.name + "' has no pallet fork joint (not inferred in M0)",
+            add(Severity::Info, "escape wheel '" + c.display_name() + "' has no pallet fork joint (not inferred in M0)",
                 {c.features.name});
         } else {
-            add(Severity::Warning, "toothed part '" + c.features.name + "' meshes with nothing", {c.features.name});
+            add(Severity::Warning, "toothed part '" + c.display_name() + "' meshes with nothing", {c.features.name});
         }
     }
     if (has_barrel && has_escape) {

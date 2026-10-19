@@ -34,20 +34,24 @@
 #include <QMenu>
 #include <QPainter>
 #include <QPixmap>
+#include <QPointer>
 #include <QProgressBar>
 #include <QSettings>
 #include <QStyle>
 #include <QMenuBar>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSlider>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QTableWidget>
 #include <QTabWidget>
 #include <QTextStream>
+#include <QLineEdit>
 #include <QTimer>
 #include <QToolBar>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 
@@ -186,7 +190,8 @@ void MainWindow::build_ui() {
     tree_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     tree_->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     tree_->setUniformRowHeights(true);
-    tree_->setToolTip(tr("Tick a part to show or hide it. Right-click to show or hide every part of a role."));
+    tree_->setEditTriggers(QAbstractItemView::EditKeyPressed);
+    tree_->setToolTip(tr("Tick a part to show or hide it. Press F2 to label it; hover for its part name. Right-click to show or hide every part of a role."));
     auto* tree_dock = new QDockWidget(tr("Model"), this);
     tree_dock->setObjectName("model_dock");
     tree_dock->setWidget(tree_);
@@ -381,7 +386,8 @@ void MainWindow::build_ui() {
     timer_ = new QTimer(this);
     timer_->setInterval(33);
     connect(timer_, &QTimer::timeout, this, &MainWindow::on_timer);
-    connect(viewport_, &Viewport::part_picked, this, &MainWindow::select_part);
+    connect(viewport_, &Viewport::part_picked, this, &MainWindow::on_part_picked);
+    connect(workspaces_, &QTabWidget::currentChanged, this, [this](int) { update_walk_view(); });
     connect(tree_, &QTreeWidget::itemChanged, this, &MainWindow::on_tree_changed);
     connect(tree_, &QTreeWidget::itemSelectionChanged, this, &MainWindow::on_tree_selected);
     // Right click in the model tree or the rig list: show or hide all the parts of one role.
@@ -422,32 +428,117 @@ void MainWindow::update_busy() {
 QWidget* MainWindow::build_rig_page() {
     auto* page = new QWidget;
     auto* layout = new QVBoxLayout(page);
-    layout->addWidget(make_hint(new QLabel(tr("Roles, mobiles and gear meshes are found automatically. What is left to "
-                                              "rig is listed under To do; a mesh the geometry does not show can be "
-                                              "suggested or declared. Every change can be undone."))));
+    layout->addWidget(make_hint(new QLabel(tr("Roles, mobiles and gear meshes are found automatically. Walk the train from "
+                                              "the barrel, one mesh at a time, to check each link and fill any gap. "
+                                              "Every change can be undone."))));
 
-    // Whether the going train is joined up from the barrel to the escape wheel: the condition for the animation
-    // and the simulations.
-    auto* train_box = new QGroupBox(tr("Train"));
+    // The condition for the animation and the simulations is a train joined up from the barrel to the escape wheel:
+    // the walk goes through its meshes in order and stops at the first one that is missing.
+    auto* train_box = new QGroupBox(tr("Walk the train"));
     auto* train_layout = new QVBoxLayout(train_box);
     chain_label_ = new QLabel(tr("No movement open"));
     chain_label_->setWordWrap(true);
     chain_label_->setTextFormat(Qt::RichText);
-    chain_label_->setTextInteractionFlags(Qt::TextSelectableByMouse);
     train_layout->addWidget(chain_label_);
-    auto* train_row = new QHBoxLayout;
-    rig_overlay_ = new QCheckBox(tr("Show the rig in the viewport"));
-    rig_overlay_->setToolTip(tr("Colour each mobile, draw the gear meshes (green where the barrel feeds them), the "
-                                "suggested meshes and a ring round the parts to check"));
+
+    // One chip for each step; the current one is pressed in, and clicking another goes to it.
+    auto* strip = chips_scroll_ = new QScrollArea;
+    strip->setFrameShape(QFrame::NoFrame);
+    strip->setWidgetResizable(true);
+    strip->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    strip->setFixedHeight(54);
+    chips_host_ = new QWidget;
+    chips_layout_ = new QHBoxLayout(chips_host_);
+    chips_layout_->setContentsMargins(0, 0, 0, 0);
+    strip->setWidget(chips_host_);
+    train_layout->addWidget(strip);
+
+    step_title_ = new QLabel;
+    QFont heading = step_title_->font();
+    heading.setBold(true);
+    step_title_->setFont(heading);
+    step_text_ = new QLabel;
+    step_text_->setWordWrap(true);
+    step_text_->setTextFormat(Qt::RichText);
+    step_text_->setMinimumHeight(3 * step_text_->fontMetrics().lineSpacing());
+    step_text_->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+    train_layout->addWidget(step_title_);
+    train_layout->addWidget(step_text_);
+
+    // What can be done where the chain stops, or when the barrel or the escape wheel is missing.
+    gap_box_ = new QWidget;
+    auto* gap_layout = new QVBoxLayout(gap_box_);
+    gap_layout->setContentsMargins(0, 0, 0, 0);
+    candidates_ = new QListWidget;
+    candidates_->setMaximumHeight(84);
+    candidates_->setToolTip(tr("Pairs that probably mesh and would join the chain. Click one to see it in the viewport"));
+    gap_layout->addWidget(candidates_);
+    auto* gap_row = new QHBoxLayout;
+    declare_candidate_ = new QPushButton(tr("Declare the mesh"));
+    declare_candidate_->setToolTip(tr("Say that the selected pair meshes (undoable)"));
+    pick_partner_ = new QPushButton;
+    change_role_ = new QPushButton(tr("Change its role"));
+    change_role_->setToolTip(tr("Select the part so that its role can be corrected below"));
+    gap_row->addWidget(declare_candidate_);
+    gap_row->addWidget(pick_partner_);
+    gap_row->addWidget(change_role_);
+    gap_layout->addLayout(gap_row);
+    train_layout->addWidget(gap_box_);
+
+    auto* step_row = new QHBoxLayout;
+    prev_step_ = new QPushButton(tr("◀ Previous"));
+    next_step_ = new QPushButton(tr("Next ▶"));
+    prev_step_->setShortcut(QKeySequence(tr("Alt+Left")));
+    next_step_->setShortcut(QKeySequence(tr("Alt+Right")));
+    prev_step_->setToolTip(tr("The previous mesh (Alt+Left)"));
+    next_step_->setToolTip(tr("The next mesh along the train (Alt+Right)"));
+    step_row->addWidget(prev_step_);
+    step_row->addWidget(next_step_);
+    step_row->addStretch(1);
+    rig_overlay_ = new QCheckBox(tr("Show the whole rig instead"));
+    rig_overlay_->setToolTip(tr("Colour each mobile and draw every gear mesh (green where the barrel feeds it), the "
+                                "suggested meshes and a ring round the parts to check, instead of one step"));
     rerig_button_ = new QPushButton(tr("Re-run auto-rig"));
     rerig_button_->setToolTip(tr("Classify and rig the parts again: newly recognised parts join their mobiles and "
                                  "meshes. The roles you set and the meshes you declared are kept (undoable)"));
-    train_row->addWidget(rig_overlay_, 1);
-    train_row->addWidget(rerig_button_);
-    train_layout->addLayout(train_row);
+    step_row->addWidget(rerig_button_);
+    train_layout->addLayout(step_row);
+    train_layout->addWidget(rig_overlay_);
     layout->addWidget(train_box);
     connect(rig_overlay_, &QCheckBox::toggled, this, [this](bool on) { set_show_rig(on); });
     connect(rerig_button_, &QPushButton::clicked, this, [this] { rerig(false); });
+    connect(prev_step_, &QPushButton::clicked, this, [this] { go_to_step(walk_pos_ - 1); });
+    connect(next_step_, &QPushButton::clicked, this, [this] { go_to_step(walk_pos_ + 1); });
+    connect(candidates_, &QListWidget::currentRowChanged, this, [this](int) { update_walk_view(); });
+    connect(declare_candidate_, &QPushButton::clicked, this, [this] {
+        const QListWidgetItem* item = candidates_->currentItem();
+        if (!item) {
+            statusBar()->showMessage(tr("Select a pair first"), 4000);
+            return;
+        }
+        const QStringList pair = item->data(Qt::UserRole).toStringList();
+        declare_mesh(pair.value(0), pair.value(1));
+    });
+    connect(pick_partner_, &QPushButton::clicked, this, [this] {
+        if (!scene_) return;
+        const auto& walk = scene_->review().walk;
+        if (walk.steps.empty()) return;
+        const auto& step = walk.steps[static_cast<std::size_t>(std::clamp(walk_pos_, 0, static_cast<int>(walk.steps.size()) - 1))];
+        if (step.kind == rigging::WalkStep::Kind::Missing) {
+            pick_part_for_role(QString::fromUtf8(model::to_string(step.needs_role).data()));
+        } else if (step.driver >= 0) {
+            pick_partner_for(QString::fromStdString(scene_->movement().components[static_cast<std::size_t>(step.driver)].features.name));
+        }
+    });
+    connect(change_role_, &QPushButton::clicked, this, [this] {
+        if (!scene_) return;
+        const auto& walk = scene_->review().walk;
+        if (walk.steps.empty()) return;
+        const auto& step = walk.steps[static_cast<std::size_t>(std::clamp(walk_pos_, 0, static_cast<int>(walk.steps.size()) - 1))];
+        if (step.driver < 0) return;
+        select_part(QString::fromStdString(scene_->movement().components[static_cast<std::size_t>(step.driver)].features.name));
+        role_box_->setFocus();
+    });
 
     rig_tabs_ = new QTabWidget;
     rig_tabs_->setDocumentMode(true);
@@ -517,17 +608,27 @@ QWidget* MainWindow::build_rig_page() {
     form->addWidget(new QLabel(tr("Role")), 0, 0);
     form->addWidget(role_box_, 0, 1);
     form->addWidget(apply_role_, 0, 2);
-    form->addWidget(new QLabel(tr("Meshes with")), 1, 0);
-    form->addWidget(mesh_box_, 1, 1);
-    form->addWidget(declare_mesh_, 1, 2);
+    label_edit_ = new QLineEdit;
+    label_edit_->setPlaceholderText(tr("none: the part name is shown"));
+    apply_label_ = new QPushButton(tr("Set label"));
+    apply_label_->setToolTip(tr("Show this text in place of the part name in the model tree, the part list and the viewport "
+                                "(undoable). Leave it empty to go back to the part name."));
+    form->addWidget(new QLabel(tr("Label")), 1, 0);
+    form->addWidget(label_edit_, 1, 1);
+    form->addWidget(apply_label_, 1, 2);
+    form->addWidget(new QLabel(tr("Meshes with")), 2, 0);
+    form->addWidget(mesh_box_, 2, 1);
+    form->addWidget(declare_mesh_, 2, 2);
     form->setColumnStretch(1, 1);
     layout->addWidget(selected_box_);
 
     connect(declare_mesh_, &QPushButton::clicked, this, &MainWindow::on_declare_mesh);
     connect(apply_role_, &QPushButton::clicked, this, &MainWindow::on_apply_role);
+    connect(apply_label_, &QPushButton::clicked, this, &MainWindow::on_apply_label);
+    connect(label_edit_, &QLineEdit::returnPressed, this, &MainWindow::on_apply_label);
     connect(rig_table_, &QTableWidget::itemSelectionChanged, this, [this] {
         const auto rows = rig_table_->selectionModel()->selectedRows();
-        if (!rows.isEmpty() && !rebuilding_) select_part(rig_table_->item(rows.first().row(), 0)->text());
+        if (!rows.isEmpty() && !rebuilding_) select_part(rig_table_->item(rows.first().row(), 0)->data(Qt::UserRole).toString());
     });
     return page;
 }
@@ -766,7 +867,7 @@ bool MainWindow::reload_rig() {
     for (QTreeWidgetItemIterator it(tree_); *it; ++it) {
         if ((*it)->parent()) {
             const QSignalBlocker block(tree_);
-            (*it)->setCheckState(0, scene_->visible((*it)->text(0).toStdString()) ? Qt::Checked : Qt::Unchecked);
+            (*it)->setCheckState(0, scene_->visible((*it)->data(0, Qt::UserRole).toString().toStdString()) ? Qt::Checked : Qt::Unchecked);
         }
     }
     if (!selected.isEmpty()) select_part(selected);  // the part that was changed stays selected in every view
@@ -782,6 +883,7 @@ bool MainWindow::install_scene(const QString& project, const QString& step, std:
     if (new_project) attach_job_journal();
     timeline_->setValue(0);
     time_ = 0;
+    walk_pos_ = 0;
     viewport_->set_scene(scene_);
     setWindowTitle(tr("%1 — Open Horology Studio").arg(QFileInfo(project).fileName()));
     refresh_panels();
@@ -934,6 +1036,7 @@ bool MainWindow::edit_project(const QString& label, const QStringList& args, QSt
 
 void MainWindow::set_show_rig(bool on) {
     viewport_->set_show_rig(on);
+    update_walk_view();
     if (rig_overlay_->isChecked() != on) {
         const QSignalBlocker block(rig_overlay_);
         rig_overlay_->setChecked(on);
@@ -984,12 +1087,10 @@ void MainWindow::refresh_rig_review() {
 
     // The train, as a line a person can read.
     const rigging::TrainChain& chain = review.chain;
-    QString text = QString::fromStdString(rigging::describe_chain(m, chain)).toHtmlEscaped();
-    text.replace("-&gt;", QString::fromUtf8("→"));
-    text.replace("[no mesh]", QString::fromUtf8("<b><span style='color:#f0aa28'>✗ no mesh</span></b>"));
     const QString dot = chain.connected ? "<span style='color:#3cc86e'>&#9679;</span> " : "<span style='color:#f0aa28'>&#9679;</span> ";
-    chain_label_->setText(dot + (chain.connected ? tr("<b>Connected</b> from the barrel to the escape wheel: ")
-                                                 : tr("<b>Not connected</b> from the barrel to the escape wheel: ")) + text);
+    const int meshes = static_cast<int>(review.walk.steps.size());
+    chain_label_->setText(dot + (chain.connected ? tr("<b>Connected</b> from the barrel to the escape wheel, in %n mesh(es).", nullptr, meshes)
+                                                 : tr("<b>Not connected</b> from the barrel to the escape wheel: step %1 is missing.").arg(meshes)));
 
     issue_list_->clear();
     int to_do = 0;
@@ -1011,7 +1112,9 @@ void MainWindow::refresh_rig_review() {
     for (const rigging::MeshSuggestion& s : review.suggestions) {
         const QString a = QString::fromStdString(m.components[static_cast<std::size_t>(s.a)].features.name);
         const QString b = QString::fromStdString(m.components[static_cast<std::size_t>(s.b)].features.name);
-        auto* item = new QListWidgetItem(tr("%1  ↔  %2   (module %3, likelihood %4)").arg(a, b).arg(s.module, 0, 'f', 3).arg(s.confidence, 0, 'f', 2));
+        const auto shown = [&m](int c) { return QString::fromStdString(m.components[static_cast<std::size_t>(c)].display_name()); };
+        auto* item = new QListWidgetItem(tr("%1  ↔  %2   (module %3, likelihood %4)").arg(shown(s.a), shown(s.b)).arg(s.module, 0, 'f', 3).arg(s.confidence, 0, 'f', 2));
+        item->setToolTip(tr("%1 ↔ %2").arg(a, b));
         item->setData(Qt::UserRole, QStringList{a, b});
         suggestion_list_->addItem(item);
     }
@@ -1020,6 +1123,180 @@ void MainWindow::refresh_rig_review() {
 
     rig_tabs_->setTabText(1, to_do > 0 ? tr("To do (%1)").arg(to_do) : tr("To do"));
     rig_tabs_->setTabText(2, review.suggestions.empty() ? tr("Suggested meshes") : tr("Suggested meshes (%1)").arg(review.suggestions.size()));
+    update_walk();
+}
+
+void MainWindow::go_to_step(int step) {
+    if (!scene_) return;
+    const int last = std::max(0, static_cast<int>(scene_->review().walk.steps.size()) - 1);
+    walk_pos_ = std::clamp(step, 0, last);
+    update_walk();
+}
+
+void MainWindow::pick_partner_for(const QString& from) {
+    picking_ = true;
+    pick_from_ = from;
+    pick_role_.clear();
+    statusBar()->showMessage(tr("Click the part that %1 drives in the viewport (click beside the movement to cancel)").arg(from));
+}
+
+void MainWindow::pick_part_for_role(const QString& role) {
+    picking_ = true;
+    pick_role_ = role;
+    pick_from_.clear();
+    statusBar()->showMessage(tr("Click the %1 in the viewport (click beside the movement to cancel)").arg(role));
+}
+
+void MainWindow::on_part_picked(const QString& name) {
+    if (!picking_) {
+        select_part(name);
+        return;
+    }
+    picking_ = false;
+    if (name.isEmpty()) {
+        statusBar()->showMessage(tr("Cancelled"), 3000);
+        select_part(name);
+        return;
+    }
+    statusBar()->clearMessage();
+    if (!pick_role_.isEmpty()) change_role(name, pick_role_);
+    else if (name != pick_from_) declare_mesh(pick_from_, name);
+    select_part(name);
+}
+
+void MainWindow::update_walk() {
+    const auto& walk = scene_->review().walk;
+    const int count = static_cast<int>(walk.steps.size());
+    walk_pos_ = std::clamp(walk_pos_, 0, std::max(0, count - 1));
+    const auto name_of = [this](int component) {  // the part name: what identifies a part
+        return component >= 0 ? QString::fromStdString(scene_->movement().components[static_cast<std::size_t>(component)].features.name) : QString();
+    };
+    const auto shown_of = [this](int component) {  // what to call it on screen: its label when it has one
+        return component >= 0 ? QString::fromStdString(scene_->movement().components[static_cast<std::size_t>(component)].display_name()) : QString();
+    };
+    using Kind = rigging::WalkStep::Kind;
+
+    // The chips: the part the barrel starts with, then one for each step, with the one being looked at pressed in.
+    while (QLayoutItem* item = chips_layout_->takeAt(0)) {
+        delete item->widget();
+        delete item;
+    }
+    QToolButton* current_chip = nullptr;
+    const auto add_chip = [this, &current_chip](const QString& text, bool current, int step, const QString& tip, const QString& style = {}) {
+        auto* chip = new QToolButton;
+        chip->setText(text);
+        chip->setCheckable(true);
+        chip->setChecked(current);
+        if (current) current_chip = chip;
+        chip->setToolTip(tip);
+        if (!style.isEmpty()) chip->setStyleSheet(style);
+        connect(chip, &QToolButton::clicked, this, [this, step] { go_to_step(step); });
+        chips_layout_->addWidget(chip);
+    };
+    const QString amber = "QToolButton { color: #f0aa28; font-weight: bold; }";
+    if (count > 0 && walk.steps[0].driver >= 0) {
+        auto* start = new QLabel(shown_of(walk.steps[0].driver));
+        start->setToolTip(tr("The start of the train: %1").arg(name_of(walk.steps[0].driver)));
+        chips_layout_->addWidget(start);
+    }
+    for (int i = 0; i < count; ++i) {
+        const auto& step = walk.steps[static_cast<std::size_t>(i)];
+        auto* arrow = new QLabel(QString::fromUtf8("→"));
+        chips_layout_->addWidget(arrow);
+        if (step.kind == Kind::Mesh) {
+            add_chip(shown_of(step.driven), i == walk_pos_, i,
+                     tr("Step %1 (%2): %3").arg(i + 1).arg(name_of(step.driven), QString::fromStdString(step.text)));
+        } else {
+            add_chip(QString::fromUtf8("✗ ?"), i == walk_pos_, i, QString::fromStdString(step.text), amber);
+        }
+    }
+    chips_layout_->addStretch(1);
+    if (current_chip) {
+        // The strip is laid out once it is shown, so scroll to the chip then.
+        QTimer::singleShot(0, chips_scroll_, [scroll = chips_scroll_, chip = QPointer<QToolButton>(current_chip)] {
+            if (chip) scroll->ensureWidgetVisible(chip, 40, 0);
+        });
+    }
+
+    // The card for the step.
+    const bool have = count > 0;
+    prev_step_->setEnabled(have && walk_pos_ > 0);
+    next_step_->setEnabled(have && walk_pos_ + 1 < count);
+    gap_box_->setVisible(false);
+    const QSignalBlocker candidates_block(candidates_);  // the viewport is updated once, at the end
+    candidates_->clear();
+    if (!have) {
+        step_title_->setText(tr("Nothing to walk"));
+        step_text_->setText(tr("The rig has no parts to walk."));
+    } else {
+        const auto& step = walk.steps[static_cast<std::size_t>(walk_pos_)];
+        QString text = QString::fromStdString(step.text).toHtmlEscaped();
+        if (step.kind == Kind::Mesh) {
+            step_title_->setText(tr("Step %1 of %2").arg(walk_pos_ + 1).arg(count));
+            if (walk.complete && walk_pos_ + 1 == count) {
+                text += tr("<br><b>That is the escape wheel: the train is complete.</b> ")
+                        + (scene_->can_animate() ? tr("The animation and the simulations are ready.")
+                                                 : tr("Set a beat rate for the animation and the simulations."));
+            }
+        } else {
+            step_title_->setText(step.kind == Kind::Gap ? tr("Step %1: the chain stops here").arg(walk_pos_ + 1) : tr("Step %1: a part is missing").arg(walk_pos_ + 1));
+            gap_box_->setVisible(true);
+            const bool gap = step.kind == Kind::Gap;
+            candidates_->setVisible(gap && !step.suggestions.empty());
+            declare_candidate_->setVisible(gap && !step.suggestions.empty());
+            change_role_->setVisible(gap && step.driver >= 0);
+            pick_partner_->setText(gap ? tr("Pick what it drives...") : tr("Pick the %1...").arg(QString::fromUtf8(model::to_string(step.needs_role).data()).replace('_', ' ')));
+            pick_partner_->setToolTip(gap ? tr("Then click the part it meshes with in the viewport") : tr("Then click the part in the viewport"));
+            if (gap) {
+                const auto& suggestions = scene_->review().suggestions;
+                for (int k : step.suggestions) {
+                    const auto& s = suggestions[static_cast<std::size_t>(k)];
+                    auto* item = new QListWidgetItem(tr("%1  ↔  %2   (likelihood %3)").arg(shown_of(s.a), shown_of(s.b)).arg(s.confidence, 0, 'f', 2));
+                    item->setToolTip(tr("%1 ↔ %2").arg(name_of(s.a), name_of(s.b)));
+                    item->setData(Qt::UserRole, QStringList{name_of(s.a), name_of(s.b)});
+                    candidates_->addItem(item);
+                }
+                if (candidates_->count() > 0) candidates_->setCurrentRow(0);
+            }
+        }
+        step_text_->setText(text);
+    }
+    update_walk_view();
+}
+
+void MainWindow::update_walk_view() {
+    if (!scene_ || !viewport_) return;
+    const auto& walk = scene_->review().walk;
+    if (walk.steps.empty() || workspaces_->currentIndex() != 0 || rig_overlay_->isChecked()) {
+        viewport_->set_walk(std::nullopt);
+        return;
+    }
+    const model::Movement& m = scene_->movement();
+    Viewport::WalkView view;
+    view.walked.assign(m.components.size(), 0);
+    const auto walk_mobile = [&](int component) {
+        const int mobile = component >= 0 ? m.mobile_of(component) : -1;
+        if (mobile < 0) return;
+        for (int idx : m.mobiles[static_cast<std::size_t>(mobile)].components) view.walked[static_cast<std::size_t>(idx)] = 1;
+    };
+    for (int i = 0; i <= walk_pos_ && i < static_cast<int>(walk.steps.size()); ++i) {
+        walk_mobile(walk.steps[static_cast<std::size_t>(i)].driver);
+        walk_mobile(walk.steps[static_cast<std::size_t>(i)].driven);
+    }
+    if (std::none_of(view.walked.begin(), view.walked.end(), [](char w) { return w != 0; })) {
+        viewport_->set_walk(std::nullopt);  // nothing is reached yet (no barrel): fading everything would show nothing
+        return;
+    }
+    const auto& step = walk.steps[static_cast<std::size_t>(walk_pos_)];
+    view.driver = step.driver;
+    view.driven = step.driven;
+    view.gap = step.kind != rigging::WalkStep::Kind::Mesh;
+    if (view.gap && candidates_->currentItem()) {
+        const QStringList pair = candidates_->currentItem()->data(Qt::UserRole).toStringList();
+        view.preview_a = m.find_component(pair.value(0).toStdString());
+        view.preview_b = m.find_component(pair.value(1).toStdString());
+    }
+    viewport_->set_walk(view);
 }
 
 void MainWindow::refresh_panels() {
@@ -1042,9 +1319,11 @@ void MainWindow::refresh_panels() {
         const auto& c = m.components[i];
         const int mob = m.mobile_of(static_cast<int>(i));
         auto* parent = mob >= 0 ? mobile_items[mob] : fixed;
-        auto* item = new QTreeWidgetItem(parent, {QString::fromStdString(c.features.name),
+        auto* item = new QTreeWidgetItem(parent, {QString::fromStdString(c.display_name()),
                                                   QString::fromUtf8(model::to_string(c.role).data())});
-        item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+        item->setData(0, Qt::UserRole, QString::fromStdString(c.features.name));
+        item->setToolTip(0, QString::fromStdString(c.features.name));
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsEditable);
         item->setCheckState(0, Qt::Checked);
     }
 
@@ -1055,7 +1334,10 @@ void MainWindow::refresh_panels() {
                      [&](int a, int b) { return m.components[a].role_confidence < m.components[b].role_confidence; });
     for (std::size_t row = 0; row < order.size(); ++row) {
         const auto& c = m.components[order[row]];
-        rig_table_->setItem(static_cast<int>(row), 0, new QTableWidgetItem(QString::fromStdString(c.features.name)));
+        auto* part_item = new QTableWidgetItem(QString::fromStdString(c.display_name()));
+        part_item->setData(Qt::UserRole, QString::fromStdString(c.features.name));
+        part_item->setToolTip(QString::fromStdString(c.features.name));
+        rig_table_->setItem(static_cast<int>(row), 0, part_item);
         rig_table_->setItem(static_cast<int>(row), 1,
                             new QTableWidgetItem(QString::fromUtf8(model::to_string(c.role).data())));
         auto* confidence = new QTableWidgetItem(QString::number(c.role_confidence, 'f', 2));
@@ -1149,17 +1431,23 @@ void MainWindow::update_selection_ui() {
     const QString part = QString::fromStdString(viewport_->selected());
     const int index = scene_ && !part.isEmpty() ? scene_->movement().find_component(part.toStdString()) : -1;
     const bool has = index >= 0;
-    selection_label_->setText(has ? tr("Selected: %1").arg(part) : QString());
-    selected_box_->setTitle(has ? tr("Selected part: %1").arg(part) : tr("Selected part (click one in the list or the viewport)"));
-    for (QWidget* w : {static_cast<QWidget*>(role_box_), static_cast<QWidget*>(apply_role_), static_cast<QWidget*>(mesh_box_),
+    const QString shown = has ? QString::fromStdString(scene_->movement().components[static_cast<std::size_t>(index)].display_name()) : part;
+    selection_label_->setText(has ? tr("Selected: %1").arg(shown) : QString());
+    selection_label_->setToolTip(has ? part : QString());
+    selected_box_->setTitle(has ? tr("Selected part: %1").arg(shown) : tr("Selected part (click one in the list or the viewport)"));
+    for (QWidget* w : {static_cast<QWidget*>(role_box_), static_cast<QWidget*>(apply_role_), static_cast<QWidget*>(label_edit_),
+                       static_cast<QWidget*>(apply_label_), static_cast<QWidget*>(mesh_box_),
                        static_cast<QWidget*>(declare_mesh_)})
         w->setEnabled(has);
     if (has) {
         // The role box starts at the part's current role, so Set role changes only what is changed.
         const auto& c = scene_->movement().components[static_cast<std::size_t>(index)];
         role_box_->setCurrentText(QString::fromUtf8(model::to_string(c.role).data()));
+        label_edit_->setText(QString::fromStdString(c.label));
+    } else {
+        label_edit_->clear();
     }
-    analyse_part_label_->setText(has ? tr("Selected part: <b>%1</b>").arg(part.toHtmlEscaped())
+    analyse_part_label_->setText(has ? tr("Selected part: <b>%1</b>").arg(shown.toHtmlEscaped())
                                      : tr("<i>No part selected. The part analyses work on the part selected in the "
                                           "viewport, the model tree or the rig list.</i>"));
 }
@@ -1184,11 +1472,11 @@ void MainWindow::select_part(const QString& name) {
     explain_->setPlainText(!text.isEmpty() ? text : tr("No explanation for '%1'.").arg(name));
     rebuilding_ = true;
     for (QTreeWidgetItemIterator it(tree_); *it; ++it) {
-        if ((*it)->text(0) == name) tree_->setCurrentItem(*it);
+        if ((*it)->data(0, Qt::UserRole).toString() == name) tree_->setCurrentItem(*it);
     }
     for (int row = 0; row < rig_table_->rowCount(); ++row) {
         const auto* item = rig_table_->item(row, 0);
-        if (item && item->text() == name) {
+        if (item && item->data(Qt::UserRole).toString() == name) {
             rig_table_->selectRow(row);
             rig_table_->scrollToItem(item);
             break;
@@ -1266,13 +1554,19 @@ void MainWindow::on_tree_selected() {
     if (rebuilding_ || !scene_) return;
     const auto items = tree_->selectedItems();
     if (items.isEmpty() || !items.first()->parent()) return;
-    select_part(items.first()->text(0));
+    select_part(items.first()->data(0, Qt::UserRole).toString());
 }
 
 void MainWindow::on_tree_changed(QTreeWidgetItem* item) {
     if (rebuilding_ || !scene_ || !item || !item->parent()) return;
     // Only the item that changed: ticking one part used to re-apply every part's check state.
-    const std::string name = item->text(0).toStdString();
+    const std::string name = item->data(0, Qt::UserRole).toString().toStdString();
+    const int index = scene_->movement().find_component(name);
+    if (index >= 0 && item->text(0).toStdString() != scene_->movement().components[static_cast<std::size_t>(index)].display_name()) {
+        // Renamed in place with F2. The tree is rebuilt by the edit, so wait until this signal has returned.
+        QTimer::singleShot(0, this, [this, part = QString::fromStdString(name), text = item->text(0)] { change_label(part, text); });
+        return;
+    }
     const bool visible = item->checkState(0) == Qt::Checked;
     if (scene_->visible(name) == visible) return;  // a change other than the tick
     scene_->set_visible(name, visible);
@@ -1382,6 +1676,17 @@ bool MainWindow::change_role(const QString& part, const QString& role) {
     return edit_project(tr("Role of %1: %2 to %3").arg(part, from, role), {"rig", "set", project_, part, "--role", role});
 }
 
+bool MainWindow::change_label(const QString& part, const QString& label) {
+    if (!scene_) return false;
+    const int index = scene_->movement().find_component(part.toStdString());
+    if (index < 0) return false;
+    const QString text = label.trimmed();
+    if (QString::fromStdString(scene_->movement().components[static_cast<std::size_t>(index)].label) == text) return true;
+    QStringList args{"rig", "label", project_, part};
+    if (!text.isEmpty()) args << text;
+    return edit_project(text.isEmpty() ? tr("Remove the label of %1").arg(part) : tr("Label %1: %2").arg(part, text), args);
+}
+
 bool MainWindow::declare_mesh(const QString& a, const QString& b) {
     if (!scene_ || a == b) return false;
     return edit_project(tr("Mesh %1 with %2").arg(a, b), {"rig", "mesh", project_, a, b});
@@ -1393,6 +1698,14 @@ void MainWindow::on_declare_mesh() {
         return;
     }
     declare_mesh(QString::fromStdString(viewport_->selected()), mesh_box_->currentText());
+}
+
+void MainWindow::on_apply_label() {
+    if (viewport_->selected().empty()) {
+        statusBar()->showMessage(tr("Select a part first"), 4000);
+        return;
+    }
+    change_label(QString::fromStdString(viewport_->selected()), label_edit_->text());
 }
 
 void MainWindow::on_apply_role() {

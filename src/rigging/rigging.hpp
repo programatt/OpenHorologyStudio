@@ -118,6 +118,29 @@ std::string describe_mobile(const model::Movement& movement, int mobile);
 /// The chain as one line of text, with "->" between mobiles; says where it breaks.
 std::string describe_chain(const model::Movement& movement, const TrainChain& chain);
 
+/// One step of walking the train from the barrel towards the escape wheel.
+struct WalkStep {
+    /// Mesh: a mesh of the train, `driver` driving `driven`. Gap: the chain stops at `driver`, which meshes with
+    /// nothing further. Missing: there is no barrel or no escape wheel at all (`needs_role` says which).
+    enum class Kind { Mesh, Gap, Missing } kind{Kind::Mesh};
+    int mesh{-1};                    ///< Mesh: index into Movement::meshes
+    int driver{-1};                  ///< component; -1 for Missing
+    int driven{-1};                  ///< component; -1 for Gap and Missing
+    model::Role needs_role{model::Role::Unknown};  ///< Missing: the role to give a part
+    std::string text;                ///< one sentence saying what the step is
+    std::vector<int> suggestions;    ///< Gap: indices into the suggestions given, those that would join the gap
+};
+
+struct TrainWalk {
+    std::vector<WalkStep> steps;
+    bool complete{false};            ///< the steps reach the escape wheel
+};
+
+/// The steps from the barrel along the chain of meshes, in order, ending at the escape wheel (complete) or at
+/// the step that is missing. `suggestions` are those of suggest_meshes.
+TrainWalk walk_train(const model::Movement& movement, const TrainChain& chain,
+                     const std::vector<MeshSuggestion>& suggestions);
+
 enum class Severity { Info, Warning, Error };
 
 struct Issue {

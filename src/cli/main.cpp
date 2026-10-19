@@ -61,6 +61,7 @@ json movement_summary(const ohs::model::Movement& m) {
                                    {"role", std::string(to_string(c.role))},
                                    {"confidence", c.role_confidence},
                                    {"teeth", c.features.teeth}});
+        if (!c.label.empty()) j["components"].back()["label"] = c.label;
     }
     j["mobiles"] = m.mobiles.size();
     j["meshes"] = m.meshes.size();
@@ -94,7 +95,7 @@ struct Options {
     std::string root_mobile;
 
     // rig set
-    std::string part_name, part_b, role_name;
+    std::string part_name, part_b, role_name, label_text;
 
     // rig auto / suggest
     bool apply = false;
@@ -235,6 +236,43 @@ int cmd_rig_auto(const Options& o) {
     return kExitOk;
 }
 
+int cmd_rig_walk(const Options& o) {
+    const ohs::model::Movement m = ohs::model::load_rig(o.project);
+    const auto chain = ohs::rigging::train_chain(m);
+    const auto suggestions = ohs::rigging::suggest_meshes(m, rig_options(o));
+    const auto walk = ohs::rigging::walk_train(m, chain, suggestions);
+    const auto name = [&m](int component) { return m.components[static_cast<std::size_t>(component)].features.name; };
+    if (o.json_output) {
+        json j;
+        j["complete"] = walk.complete;
+        j["steps"] = json::array();
+        for (const auto& s : walk.steps) {
+            const char* kind = s.kind == ohs::rigging::WalkStep::Kind::Mesh ? "mesh"
+                               : s.kind == ohs::rigging::WalkStep::Kind::Gap ? "gap" : "missing";
+            json step = {{"kind", kind}, {"text", s.text}};
+            if (s.driver >= 0) step["driver"] = name(s.driver);
+            if (s.driven >= 0) step["driven"] = name(s.driven);
+            j["steps"].push_back(std::move(step));
+        }
+        std::cout << j.dump(2) << '\n';
+        return kExitOk;
+    }
+    int n = 0;
+    for (const auto& s : walk.steps) {
+        ++n;
+        const bool mesh = s.kind == ohs::rigging::WalkStep::Kind::Mesh;
+        std::cout << (mesh ? "" : "!") << n << ". " << s.text << '\n';
+        for (int k : s.suggestions) {
+            const auto& sg = suggestions[static_cast<std::size_t>(k)];
+            std::cout << "     could be " << name(sg.a) << " <-> " << name(sg.b) << " (likelihood " << std::fixed << std::setprecision(2)
+                      << sg.confidence << "): ohs rig mesh " << o.project << " " << name(sg.a) << " " << name(sg.b) << '\n';
+        }
+    }
+    std::cout << (walk.complete ? "the train is complete from the barrel to the escape wheel\n"
+                                : "the train is not complete: the last step above is what is missing\n");
+    return kExitOk;
+}
+
 int cmd_rig_suggest(const Options& o) {
     ohs::model::Movement m = ohs::model::load_rig(o.project);
     const ohs::rigging::RigOptions rig = rig_options(o);
@@ -371,6 +409,17 @@ int cmd_rig_set(const Options& o) {
     ohs::model::save_rig(m, o.project);
     std::cout << o.part_name << " is now " << o.role_name << "; " << m.mobiles.size() << " mobiles, " << m.meshes.size()
               << " meshes\n";
+    return kExitOk;
+}
+
+int cmd_rig_label(const Options& o) {
+    ohs::model::Movement m = ohs::model::load_rig(o.project);
+    const int idx = m.find_component(o.part_name);
+    if (idx < 0) throw ohs::Error("no component named '" + o.part_name + "'");
+    m.components[static_cast<std::size_t>(idx)].label = o.label_text;
+    ohs::model::save_rig(m, o.project);
+    if (o.label_text.empty()) std::cout << o.part_name << " has no label\n";
+    else std::cout << o.part_name << " is labelled \"" << o.label_text << "\"\n";
     return kExitOk;
 }
 
@@ -515,6 +564,12 @@ int ohs::cli::run(int argc, char** argv) {
     set->add_option("--min-teeth", o.min_teeth, "Fewest teeth to call a part toothed")->capture_default_str();
     set->callback(pick(cmd_rig_set));
 
+    auto* label = rig->add_subcommand("label", "Give a part a label to show in place of its name (none clears it)");
+    label->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);
+    label->add_option("part", o.part_name, "Part name")->required();
+    label->add_option("label", o.label_text, "The label; leave out to remove it");
+    label->callback(pick(cmd_rig_label));
+
     auto* mesh = rig->add_subcommand("mesh", "Declare that two toothed parts mesh although the geometry does not show it");
     mesh->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);
     mesh->add_option("part", o.part_name, "First part")->required();
@@ -536,6 +591,11 @@ int ohs::cli::run(int argc, char** argv) {
         ->capture_default_str();
     suggest->add_option("--min-teeth", o.min_teeth, "Fewest teeth to call a part toothed")->capture_default_str();
     suggest->callback(pick(cmd_rig_suggest));
+
+    auto* walk = rig->add_subcommand("walk", "Step through the train from the barrel to the escape wheel, mesh by mesh, and show what is missing");
+    walk->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);
+    walk->add_option("--min-teeth", o.min_teeth, "Fewest teeth to call a part toothed")->capture_default_str();
+    walk->callback(pick(cmd_rig_walk));
 
     auto* anim = app.add_subcommand("animate", "Export the running train as an animated binary glTF (.glb) or OpenUSD text file (.usda)");
     anim->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);

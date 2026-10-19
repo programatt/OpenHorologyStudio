@@ -4,6 +4,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <QImage>
 #include <QTimer>
@@ -38,6 +39,19 @@ public:
     /// needs a look.
     void set_show_rig(bool on);
     bool show_rig() const { return show_rig_; }
+
+    /// What the Rig tab's walk through the train shows. The parts walked so far are drawn as usual and everything
+    /// else is faded back; the mesh being looked at is bright, with an arrow from the part that drives to the one
+    /// driven. Parts are indexed as the scene's parts are (the movement's components).
+    struct WalkView {
+        std::vector<char> walked;      ///< per part: 1 for the parts of the mobiles walked so far
+        int driver{-1};                ///< the current step's parts; `driven` is -1 at a gap
+        int driven{-1};
+        bool gap{false};               ///< the chain stops at `driver`: it is drawn amber, with no arrow
+        int preview_a{-1}, preview_b{-1};  ///< a pair that could fill the gap, drawn with a dotted line
+    };
+    void set_walk(std::optional<WalkView> walk);
+    const std::optional<WalkView>& walk() const { return walk_; }
     double yaw() const { return yaw_; }
     double pitch() const { return pitch_; }
     double zoom() const { return zoom_; }
@@ -76,6 +90,7 @@ private:
     void draw_legend(QPainter& painter, const QSize& size, const FieldOverlay& field) const;
     void draw_overlays(QPainter& painter, const QSize& size) const;  ///< force arrows and motion trails
     void draw_rig(QPainter& painter, const QSize& size) const;       ///< meshes, suggestions and warnings
+    void draw_walk(QPainter& painter, const QSize& size) const;      ///< the mesh being walked, and a preview
     QPointF to_screen(const Point3& p, const QSize& size) const;
 
     std::shared_ptr<Scene> scene_;
@@ -90,6 +105,7 @@ private:
     enum class Drag { None, Turn, Pan };
     Drag drag_{Drag::None};
     bool show_rig_{false};
+    std::optional<WalkView> walk_;
     bool fast_{false};          ///< the next paint is an interactive one
     QTimer* settle_{};          ///< draws at full quality once the interaction pauses
 };

@@ -14,25 +14,35 @@ ohs-gui movement.hsproj
 
 - **Viewport.** Drag with the left button to orbit, with the right or middle button to pan, scroll
   to zoom, click a part to select it. The View menu has top, isometric and side views.
-- **Model dock.** Mobiles and their parts, with each part's role. Untick a part to hide it.
+- **Model dock.** Mobiles and their parts, with each part's role. Untick a part to hide it. A part shows its
+  label when it has one (press F2 to give it one, or use *Label* under *Selected part*); hover over it for the part name.
 - **Explain dock.** Select a part (in the viewport, the tree or the rig list) and it shows what the
   part does, with the numbers of your movement.
 - **Import and Rig.** Open a project, import a STEP file, or open the built-in demonstration
-  movement. The Rig tab shows what is left to rig for the animation and the simulations to work:
-  a **Train** line says whether meshes join the barrel to the escape wheel, and where it breaks if
-  not. Under it, **Parts** lists every part's role, how sure OHS is and what decided it, least sure
-  first; **To do** lists what to check (parts that could not be classified or are unsure, toothed
-  parts that mesh with nothing, a broken train), and clicking an entry selects the part; **Suggested
-  meshes** lists pairs of toothed parts that probably mesh although the strict test did not accept
-  them, with how likely each is, and *Declare selected* or *Declare all* makes them meshes.
-  *Re-run auto-rig* (also under Edit) classifies and rigs the parts again, so newly recognised parts
-  join their mobiles and meshes; the roles you set and the meshes you declared are kept
-  (*Re-rig from scratch* in the Edit menu forgets those too).
-- **Show the rig** (the check box on the Rig tab, or View > Show the rig) colours each mobile and
-  draws the rig over the movement: a line for every gear mesh, green where the barrel feeds it and
-  blue-grey where it does not reach (so the break in a train is where green turns to blue), dashed
-  violet where you declared it, amber where the confidence is low; dotted amber lines with a `?` for
-  suggested meshes; and a ring round the parts that need a look. Parts that do not turn are faded.
+  movement. The Rig tab is for finishing the rig, so that the animation and the simulations work: they
+  need meshes joining the barrel to the escape wheel.
+  - **Walk the train** steps through that chain one mesh at a time, from the barrel. The viewport shows
+    only the step: the parts walked so far as they are, the two gears of the step in green with an arrow
+    from the one that drives to the one driven, and everything else faded back. The card says what the
+    mesh is (teeth, speed ratio, module, confidence). *Previous* and *Next* (Alt+Left, Alt+Right) move
+    along the train, and the row of chips above it jumps to any step.
+  - **Where the chain stops** (a gear that meshes with nothing yet), the walk ends in an amber step.
+    Its card lists the pairs that probably mesh and would join the gap, and clicking one shows it in the
+    viewport; *Declare the mesh* adds it. *Pick what it drives...* lets you click the partner in the
+    viewport instead, and *Change its role* selects the part so that its role can be corrected. If there
+    is no barrel or no escape wheel, the first or last step asks you to click it. After each change the
+    walk carries on from the same place, until the card says the train is complete.
+  - **Re-run auto-rig** (also under Edit) classifies and rigs the parts again, so newly recognised parts
+    join their mobiles and meshes; the roles you set and the meshes you declared are kept (*Re-rig from
+    scratch* in the Edit menu forgets those too).
+  - Below, **Parts** lists every part's role, how sure OHS is and what decided it, least sure first;
+    **To do** lists what else to check (parts that could not be classified or are unsure, toothed parts
+    that mesh with nothing), and clicking an entry selects the part; **Suggested meshes** lists every
+    pair that probably meshes, with *Declare selected* and *Declare all*.
+  - **Show the whole rig instead** draws everything at once: each mobile in its own colour, a line for
+    every mesh (green where the barrel feeds it, blue-grey where it does not reach, dashed violet where
+    you declared it, amber where the confidence is low), dotted amber lines with a `?` for suggested
+    meshes, and a ring round the parts that need a look. The walk is shown only on the Rig tab.
 - **Animate.** Play or scrub the going train over 60 seconds of movement time, at any speed, smooth
   or one escapement step per beat. An exploded view and a cut-away plane help you see inside.
 - **Simulate, Analyse, Manufacture, Report.** One button per analysis: torque chain, timekeeping,

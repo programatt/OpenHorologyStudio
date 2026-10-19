@@ -122,6 +122,10 @@ struct Component {
     Role role{Role::Unknown};
     double role_confidence{};
     std::string role_source;  ///< "preset", "name", "geometry" or "user"
+    std::string label;        ///< a name the user gave the part, shown in place of the part name; empty for none
+
+    /// What to call the part on screen: its label when it has one, else its part name.
+    const std::string& display_name() const { return label.empty() ? features.name : label; }
 };
 
 /// Components that rotate together about one axis.

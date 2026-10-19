@@ -116,6 +116,7 @@ void Scene::update_review() {
     review_.issues = rigging::check_rig(movement_);
     review_.chain = rigging::train_chain(movement_);
     review_.suggestions = rigging::suggest_meshes(movement_, {});
+    review_.walk = rigging::walk_train(movement_, review_.chain, review_.suggestions);
 }
 
 bool Scene::reload_rig(const std::filesystem::path& project, double beat_rate_vph) {

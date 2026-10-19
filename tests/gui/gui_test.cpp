@@ -22,8 +22,11 @@
 #include <QPushButton>
 #include <QSlider>
 #include <QTableWidget>
+#include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
 #include <QTabWidget>
 #include <QTimer>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QListWidget>
 #include <QMouseEvent>
@@ -384,6 +387,44 @@ TEST_CASE("gui: role changes can be undone and redone", "[gui]") {
     // The same role again is not a change.
     REQUIRE(w.change_role(part, QString::fromUtf8(ohs::model::to_string(original).data())));
     CHECK(w.undo_stack()->count() == 1);
+}
+
+TEST_CASE("gui: a label replaces the part name in the model tree", "[gui]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_demo(fresh_dir("label")));
+    const auto m = [&]() -> const ohs::model::Movement& { return w.viewport()->scene()->movement(); };
+    const QString part = "escape_wheel";
+    REQUIRE(m().find_component(part.toStdString()) >= 0);
+
+    REQUIRE(w.change_label(part, "  Escape  "));
+    const auto& c = m().components[static_cast<std::size_t>(m().find_component(part.toStdString()))];
+    CHECK(c.label == "Escape");
+    CHECK(c.display_name() == "Escape");
+    CHECK(w.undo_stack()->count() == 1);
+
+    bool found = false;
+    for (QTreeWidgetItemIterator it(w.findChild<QTreeWidget*>()); *it; ++it) {
+        if ((*it)->data(0, Qt::UserRole).toString() == part) {
+            found = true;
+            CHECK((*it)->text(0) == "Escape");
+            CHECK((*it)->toolTip(0) == part);
+        }
+    }
+    CHECK(found);
+
+    // The walk of the train names the part by its label too.
+    REQUIRE(w.change_label("barrel", "Mainspring barrel"));
+    const auto& walk = w.viewport()->scene()->review().walk;
+    REQUIRE_FALSE(walk.steps.empty());
+    CHECK(walk.steps.front().text.find("Mainspring barrel") != std::string::npos);
+    w.undo_stack()->undo();
+
+    w.undo_stack()->undo();
+    const auto& back = m().components[static_cast<std::size_t>(m().find_component(part.toStdString()))];
+    CHECK(back.label.empty());
+    CHECK(back.display_name() == part.toStdString());
 }
 
 TEST_CASE("job queue: jobs run in worker processes, failures and bad programs are reported", "[gui][jobs]") {
@@ -1222,6 +1263,103 @@ TEST_CASE("gui: the rig page shows the train, what is left to rig and suggested 
     CHECK(w.suggestion_list()->count() >= 1);
 }
 
+TEST_CASE("gui: the Rig tab walks the train one mesh at a time and helps fill the gap", "[gui][rig]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_demo(fresh_dir("rig-walk")));
+    const auto m = [&]() -> const ohs::model::Movement& { return w.viewport()->scene()->movement(); };
+    const auto name_of = [&](int component) { return m().components[static_cast<std::size_t>(component)].features.name; };
+    const auto role_of = [&](const char* part) {
+        return m().components[static_cast<std::size_t>(m().find_component(part))].role;
+    };
+
+    // The demonstration train is four meshes, from the barrel to the escape pinion, and the walk starts at the first.
+    REQUIRE(w.workspaces()->currentIndex() == 0);
+    CHECK(w.current_step() == 0);
+    REQUIRE(w.viewport()->walk().has_value());
+    CHECK(name_of(w.viewport()->walk()->driver) == "barrel");
+    CHECK(name_of(w.viewport()->walk()->driven) == "center_pinion");
+    CHECK_FALSE(w.viewport()->walk()->gap);
+    CHECK(w.step_label()->text().contains("barrel"));
+    CHECK_FALSE(w.previous_step_button()->isEnabled());
+    CHECK(w.next_step_button()->isEnabled());
+    CHECK(w.chip_strip()->findChildren<QToolButton*>().size() == 4);
+
+    // Next goes along the train; each step starts from the mobile the one before ended on.
+    w.next_step_button()->click();
+    CHECK(w.current_step() == 1);
+    CHECK(name_of(w.viewport()->walk()->driver) == "center_wheel");
+    CHECK(w.previous_step_button()->isEnabled());
+    w.go_to_step(99);  // clamped to the last step
+    CHECK(w.current_step() == 3);
+    CHECK(w.step_label()->text().contains("train is complete"));
+    CHECK_FALSE(w.next_step_button()->isEnabled());
+    // Everything of the mobiles walked so far is drawn as it is; the rest is faded, so the picture differs.
+    const QImage last = w.viewport()->render(QSize(640, 480));
+    w.go_to_step(0);
+    CHECK(w.viewport()->render(QSize(640, 480)) != last);
+
+    // The walk is for the Rig tab: elsewhere the viewport shows the movement as it is.
+    w.workspaces()->setCurrentIndex(1);
+    CHECK_FALSE(w.viewport()->walk().has_value());
+    w.workspaces()->setCurrentIndex(0);
+    CHECK(w.viewport()->walk().has_value());
+    w.rig_overlay_check()->setChecked(true);  // the whole rig instead
+    CHECK_FALSE(w.viewport()->walk().has_value());
+    w.rig_overlay_check()->setChecked(false);
+    CHECK(w.viewport()->walk().has_value());
+
+    // No wheel after the centre pinion: the walk ends in a gap there, and says so.
+    REQUIRE(w.change_role("center_wheel", "plate"));
+    CHECK(w.chain_label()->text().contains("Not connected"));
+    w.go_to_step(99);
+    REQUIRE(w.viewport()->walk().has_value());
+    CHECK(w.viewport()->walk()->gap);
+    CHECK(name_of(w.viewport()->walk()->driver) == "center_pinion");
+    CHECK(w.step_label()->text().contains("Nothing meshes with center_pinion"));
+    CHECK_FALSE(w.next_step_button()->isEnabled());
+    // Pick the part it drives: the next click on a part in the viewport sets its role (here, back to a wheel).
+    w.pick_part_for_role("wheel");
+    CHECK(w.is_picking());
+    emit w.viewport()->part_picked(QString("center_wheel"));
+    CHECK_FALSE(w.is_picking());
+    CHECK(role_of("center_wheel") == ohs::model::Role::Wheel);
+    CHECK(w.chain_label()->text().contains("Connected"));
+    CHECK(w.undo_stack()->undoText().contains("center_wheel"));
+
+    // Nudge the centre mobile off its mesh with the barrel. The gap is at the barrel, the likely pair is listed and
+    // shown, and picking the partner in the viewport declares the mesh and the walk carries on from there.
+    auto rig = ohs::model::load_rig(w.project().toStdString());
+    for (auto& c : rig.components) {
+        const std::string& n = c.features.name;
+        if (n == "center_pinion" || n == "center_wheel" || n == "center_arbor") c.features.center.x += 0.05;
+    }
+    ohs::rigging::infer_structure(rig, {});
+    ohs::model::save_rig(rig, w.project().toStdString());
+    REQUIRE(w.open_project(w.project()));
+    CHECK(w.current_step() == 0);
+    REQUIRE(w.viewport()->walk().has_value());
+    CHECK(w.viewport()->walk()->gap);
+    CHECK(name_of(w.viewport()->walk()->driver) == "barrel");
+    REQUIRE(w.candidate_list()->count() >= 1);
+    CHECK(w.candidate_list()->item(0)->text().contains("center_pinion"));
+    CHECK(name_of(w.viewport()->walk()->preview_b) == "center_pinion");  // previewed in the viewport
+    w.pick_partner_for("barrel");
+    emit w.viewport()->part_picked(QString("center_pinion"));
+    CHECK(w.chain_label()->text().contains("Connected"));
+    CHECK(w.current_step() == 0);
+    CHECK_FALSE(w.viewport()->walk()->gap);
+    CHECK(name_of(w.viewport()->walk()->driven) == "center_pinion");
+    w.undo_stack()->undo();
+    CHECK(w.viewport()->walk()->gap);
+
+    // A click beside the movement cancels a pick.
+    w.pick_partner_for("barrel");
+    emit w.viewport()->part_picked(QString());
+    CHECK_FALSE(w.is_picking());
+}
+
 // Hidden (run with `ohs_gui_tests "[screenshots]"`): the whole window on each workspace, written to
 // $OHS_SCREENSHOT_DIR (default: the temporary directory), for reviewing the layout.
 TEST_CASE("screenshots: the window on each workspace", "[.][screenshots]") {
@@ -1246,11 +1384,19 @@ TEST_CASE("screenshots: the window on each workspace", "[.][screenshots]") {
         pump();
         w.grab().save(QDir(out).filePath(QString("%1-%2.png").arg(i + 1, 2, 10, QChar('0')).arg(w.workspaces()->tabText(i).remove('&').replace(' ', '-').toLower())));
     }
-    // The rig page with the rig drawn over a train that is broken at the centre wheel.
+    // The rig page walking the train: a step in the middle, then a train that is broken at the centre wheel, then
+    // the whole rig drawn at once.
     w.workspaces()->setCurrentIndex(0);
+    w.select_part("");
+    w.go_to_step(1);
+    pump();
+    w.grab().save(QDir(out).filePath("90-walk-step.png"));
     REQUIRE(w.change_role("center_wheel", "plate"));
+    w.go_to_step(99);
+    pump();
+    w.grab().save(QDir(out).filePath("91-walk-gap.png"));
     w.rig_overlay_check()->setChecked(true);
     w.rig_tabs()->setCurrentIndex(1);
     pump();
-    w.grab().save(QDir(out).filePath("90-rig-overlay.png"));
+    w.grab().save(QDir(out).filePath("92-rig-overlay.png"));
 }

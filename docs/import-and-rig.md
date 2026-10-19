@@ -64,6 +64,10 @@ ohs rig check movement.hsproj          # every part, role, confidence, gear fit 
 ohs rig set movement.hsproj "third wheel" --role pinion
 ```
 
+A part name from a CAD file is often a number. `ohs rig label movement.hsproj Part_017 "Third wheel"` gives
+the part a label, stored in the project, that the desktop application shows in place of the name (hover over it
+to see the name); leave the label out to remove it.
+
 `rig check --strict` fails on warnings; use it in scripts. Setting a role re-infers mobiles and
 meshes, and your choice is recorded with confidence 1 and source `user`.
 
@@ -87,7 +91,13 @@ ohs rig auto movement.hsproj           # classify and rig every part again
 ohs rig auto movement.hsproj --reset   # ... and forget the roles you set and the meshes you declared
 ohs rig suggest movement.hsproj        # pairs that probably mesh but failed the strict test
 ohs rig suggest movement.hsproj --apply --min-confidence 0.3
+ohs rig walk movement.hsproj           # the train mesh by mesh from the barrel, and what is missing
 ```
+
+`rig walk` numbers the meshes from the barrel to the escape wheel (which part drives which, the tooth
+counts and the speed ratio) and ends either with "the train is complete" or at the step that is missing,
+with the `ohs rig mesh` commands for the pairs that would fill it. It is the same walk as the Rig tab of
+the desktop app.
 
 `rig auto` runs the classification and the mesh inference again from the part features stored in the
 project, without re-importing the CAD file. Roles you set (`user`) or a preset gave, and meshes you

@@ -85,6 +85,77 @@ void Viewport::set_show_rig(bool on) {
     update();
 }
 
+void Viewport::set_walk(std::optional<WalkView> walk) {
+    walk_ = std::move(walk);
+    update();
+}
+
+void Viewport::draw_walk(QPainter& painter, const QSize& size) const {
+    const model::Movement& m = scene_->movement();
+    const bool dark = palette().window().color().lightness() < 128;
+    const QColor go(45, 205, 125), check(240, 170, 40);
+    const auto centre = [&m](int component) {
+        const model::PartFeatures& f = m.components[static_cast<std::size_t>(component)].features;
+        return Point3{f.center.x, f.center.y, 0.5 * (f.z_min + f.z_max)};
+    };
+    const auto valid = [&m](int component) { return component >= 0 && static_cast<std::size_t>(component) < m.components.size(); };
+    QFont small = font();  // the widget's, not the painter's: a snapshot's image would give a different default
+    small.setPointSizeF(small.pointSizeF() * 0.95);
+    small.setWeight(QFont::DemiBold);
+    small.setStyleStrategy(QFont::NoSubpixelAntialias);  // the same pixels on screen and in a snapshot
+    painter.setFont(small);
+    const QFontMetrics fm(painter.font());
+    // A name on a small plate, above the part, so it reads on every colour.
+    const auto label = [&](int component, const QString& text, const QColor& ink, double below = 0.0) {
+        const QPointF at = to_screen(centre(component), size);
+        const QRectF box(at.x() - fm.horizontalAdvance(text) / 2.0 - 6, at.y() - 30 + below, fm.horizontalAdvance(text) + 12, fm.height() + 4);
+        painter.setPen(QPen(ink, 1.5));
+        painter.setBrush(dark ? QColor(26, 28, 32, 225) : QColor(240, 238, 232, 230));
+        painter.drawRoundedRect(box, 4, 4);
+        painter.setPen(dark ? QColor(236, 236, 238) : QColor(28, 28, 32));  // not palette().text(): that follows whether the window is active
+        painter.drawText(box, Qt::AlignCenter, text);
+    };
+    const auto name = [&m](int component) {
+        const auto& f = m.components[static_cast<std::size_t>(component)].features;
+        return QString::fromStdString(m.components[static_cast<std::size_t>(component)].display_name()) + (f.teeth > 0 ? QString(" · %1T").arg(f.teeth) : QString());
+    };
+
+    // The pair that could fill a gap: a dotted line, with both parts named.
+    if (valid(walk_->preview_a) && valid(walk_->preview_b)) {
+        const QPointF a = to_screen(centre(walk_->preview_a), size), b = to_screen(centre(walk_->preview_b), size);
+        painter.setPen(QPen(QColor(0, 0, 0, 120), 6.0, Qt::SolidLine, Qt::RoundCap));
+        painter.drawLine(a, b);
+        painter.setPen(QPen(check, 3.4, Qt::DotLine, Qt::RoundCap));
+        painter.drawLine(a, b);
+        label(walk_->preview_a, name(walk_->preview_a), check);
+        label(walk_->preview_b, name(walk_->preview_b), check, 52.0);
+    }
+    if (!valid(walk_->driver)) return;
+    if (walk_->gap || !valid(walk_->driven)) {
+        label(walk_->driver, tr("%1 — nothing meshes here yet").arg(name(walk_->driver)), check);
+        return;
+    }
+    const QPointF a = to_screen(centre(walk_->driver), size), b = to_screen(centre(walk_->driven), size);
+    painter.setPen(QPen(QColor(0, 0, 0, 140), 7.0, Qt::SolidLine, Qt::RoundCap));
+    painter.drawLine(a, b);
+    painter.setPen(QPen(go, 4.0, Qt::SolidLine, Qt::RoundCap));
+    painter.drawLine(a, b);
+    // The arrowhead sits towards the driven part, so the direction of the drive reads at a glance.
+    const double dx = b.x() - a.x(), dy = b.y() - a.y(), len = std::hypot(dx, dy);
+    if (len > 1.0) {
+        const QPointF tip = a + QPointF(dx, dy) * 0.62;
+        const double back = std::atan2(dy, dx) + std::numbers::pi, head = 13.0;
+        QPolygonF arrow;
+        arrow << tip << tip + QPointF(head * std::cos(back + 0.5), head * std::sin(back + 0.5))
+              << tip + QPointF(head * std::cos(back - 0.5), head * std::sin(back - 0.5));
+        painter.setPen(QPen(QColor(0, 0, 0, 140), 2.0));
+        painter.setBrush(go);
+        painter.drawPolygon(arrow);
+    }
+    label(walk_->driver, name(walk_->driver), go);
+    label(walk_->driven, name(walk_->driven), go, 52.0);  // below its part, so it does not sit on the driver's
+}
+
 void Viewport::select(const std::string& part) {
     selected_ = part;
     update();
@@ -190,6 +261,7 @@ void Viewport::draw_rig(QPainter& painter, const QSize& size) const {
 void Viewport::draw_overlays(QPainter& painter, const QSize& size) const {
     const bool lifted = scene_->explode() > 0;  // the overlays follow the assembled positions only
     if (show_rig_ && !lifted) draw_rig(painter, size);
+    else if (walk_ && !lifted) draw_walk(painter, size);
     if (scene_->show_trails() && !lifted) {
         const auto trails = scene_->trails();
         for (std::size_t i = 0; i < trails.size(); ++i) {
@@ -316,6 +388,20 @@ void Viewport::draw(QPainter& painter, const QSize& size, bool fast) const {
     const QColor backdrop = palette().window().color().lightness() < 128 ? QColor(26, 28, 32) : QColor(226, 224, 218);
     for (const Projected& p : project(size)) {
         QColor base = role_colour(scene_->parts()[p.part].role);
+        if (!show_rig_ && walk_) {
+            // The walk: the parts reached so far as they are, the mesh being looked at bright, the rest faded back.
+            const int c = p.part;
+            const bool current = c == walk_->driver || c == walk_->driven;
+            const bool preview = c == walk_->preview_a || c == walk_->preview_b;
+            if (current) {
+                base = walk_->gap ? QColor(240, 170, 40) : QColor(45, 205, 125);
+            } else if (preview) {
+                base = QColor(240, 170, 40);
+            } else if (static_cast<std::size_t>(c) >= walk_->walked.size() || !walk_->walked[static_cast<std::size_t>(c)]) {
+                base = QColor((base.red() * 2 + backdrop.red() * 3) / 5, (base.green() * 2 + backdrop.green() * 3) / 5,
+                              (base.blue() * 2 + backdrop.blue() * 3) / 5);
+            }
+        }
         if (show_rig_) {
             // Each mobile in a hue of its own; what does not turn is faded back so the train stands out.
             const int mobile = scene_->parts()[p.part].mobile;
@@ -351,6 +437,7 @@ void Viewport::draw(QPainter& painter, const QSize& size, bool fast) const {
         for (const QPolygonF& poly : selected_outline) painter.drawPolygon(poly);
     }
     painter.setRenderHint(QPainter::Antialiasing, true);  // the overlays are few: always smooth
+    painter.setRenderHint(QPainter::TextAntialiasing, true);
     draw_overlays(painter, size);
     if (field) draw_legend(painter, size, *field);
 }

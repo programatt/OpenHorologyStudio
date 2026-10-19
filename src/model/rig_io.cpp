@@ -21,6 +21,7 @@ toml::table component_to_table(const Component& c) {
     t.insert("role", std::string(to_string(c.role)));
     t.insert("role_confidence", c.role_confidence);
     t.insert("role_source", c.role_source);
+    if (!c.label.empty()) t.insert("label", c.label);
     t.insert("teeth", f.teeth);
     t.insert("tooth_confidence", f.tooth_confidence);
     if (f.inner_teeth > 0) {
@@ -92,6 +93,7 @@ Component component_from_table(const toml::table& t) {
     c.role = *parsed;
     c.role_confidence = number(t, "role_confidence");
     c.role_source = t["role_source"].value_or(std::string{"user"});
+    c.label = t["label"].value_or(std::string{});
     f.teeth = t["teeth"].value_or(0);
     f.tooth_confidence = number(t, "tooth_confidence");
     f.inner_teeth = t["inner_teeth"].value_or(0);

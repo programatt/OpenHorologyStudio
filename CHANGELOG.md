@@ -9,14 +9,19 @@ Semantic Versioning, with the Python API and the plugin ABI versioned as describ
 Found by running the plan's gates on the real OM10 file.
 
 ### Added
+- Part labels. `ohs rig label` gives a part a name of your own, stored in the project; the model tree, the part list,
+  the status bar and the viewport show it in place of the part name, and hovering shows the part name.
 - Seeing and finishing the rig. `ohs rig auto` runs the classification and mesh inference again on an imported
   project (roles you set and meshes you declared are kept; `--reset` forgets them), `ohs rig suggest [--apply]`
   lists, and declares, pairs of toothed parts that probably mesh although the strict test rejected them, and
   `ohs rig check` ends with the train from the barrel to the escape wheel, says where it breaks and warns
-  when it does. `ohs-gui`'s Rig tab shows the train, a To do list, the suggested meshes and *Re-run auto-rig*
-  (all undoable), and *Show the rig* colours each mobile and draws the meshes (green where the barrel feeds
-  them), the suggestions and the parts to check over the viewport. `rigging::re_rig`, `suggest_meshes`,
-  `train_chain` and `describe_chain` are the library calls.
+  when it does. `ohs rig walk` lists the train mesh by mesh from the barrel and what is missing. `ohs-gui`'s Rig
+  tab walks the train one mesh at a time (the viewport shows only the step: the parts walked so far, the two
+  gears of the mesh with an arrow from driver to driven, the rest faded), stops at the first gap with the pairs
+  that would fill it (declare one, or click the partner in the viewport), and has a To do list, the suggested
+  meshes and *Re-run auto-rig* (all undoable); *Show the whole rig instead* colours each mobile and draws every
+  mesh, the suggestions and the parts to check. `rigging::re_rig`, `suggest_meshes`, `train_chain`,
+  `walk_train` and `describe_chain` are the library calls.
 - Four roles for parts that had no type: `stem` (the winding stem), `spring` (click, jumper and setting springs,
   of wire or plate), `lever` (clicks, pawls, jumpers, setting levers, yokes) and `bearing` (brass tubes and
   bushes in plates). They are recognised by name ("winding stem", "click spring", "setting lever", "bush", ...;
