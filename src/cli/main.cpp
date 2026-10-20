@@ -491,6 +491,14 @@ int cmd_rig_solve(const Options& o) {
     return kExitOk;
 }
 
+int cmd_rig_unmesh(const Options& o) {
+    ohs::model::Movement m = ohs::model::load_rig(o.project);
+    ohs::rigging::remove_manual_mesh(m, o.part_name, o.part_b, rig_options(o));
+    ohs::model::save_rig(m, o.project);
+    std::cout << o.part_name << " / " << o.part_b << " no longer mesh; " << m.meshes.size() << " meshes\n";
+    return kExitOk;
+}
+
 int cmd_rig_winding(const Options& o) {
     ohs::model::Movement m = ohs::model::load_rig(o.project);
     ohs::rigging::set_mesh_winding(m, o.part_name, o.part_b, !o.in_train);
@@ -660,6 +668,12 @@ int ohs::cli::run(int argc, char** argv) {
     solve->add_flag("--apply", o.apply_solution, "Declare the mesh of the best candidate");
     solve->add_option("--pick", o.pick, "With --apply: the candidate to declare, as numbered in the list")->capture_default_str();
     solve->callback(pick(cmd_rig_solve));
+
+    auto* unmesh = rig->add_subcommand("unmesh", "Take away a mesh that was declared by hand");
+    unmesh->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);
+    unmesh->add_option("part", o.part_name, "One of the two parts")->required();
+    unmesh->add_option("partner", o.part_b, "The other")->required();
+    unmesh->callback(pick(cmd_rig_unmesh));
 
     auto* winding = rig->add_subcommand("winding", "Leave a mesh out of the going train (the winding work), or put it back");
     winding->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);

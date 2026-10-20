@@ -58,6 +58,11 @@ void set_role(model::Movement& movement, const std::string& name, model::Role ro
 
 /// Takes the mesh between two parts out of the going train (`winding` true: it is the winding work, or just not a link
 /// from the barrel to the escape wheel) or puts it back. Throws when the two parts are not meshed.
+/// Takes away a mesh that was declared by hand (`add_manual_mesh`) and fits the gears again without it, as a wrong
+/// declared mesh also spoils the module of the gears it joins. A mesh the geometry found would come back at once, so
+/// that one is refused: leave it out of the train with set_mesh_winding instead. Throws when the parts are not meshed.
+void remove_manual_mesh(model::Movement& movement, const std::string& a, const std::string& b, const RigOptions& options);
+
 void set_mesh_winding(model::Movement& movement, const std::string& a, const std::string& b, bool winding);
 
 /// Declares that two toothed parts mesh although the geometry does not show it (a smooth barrel

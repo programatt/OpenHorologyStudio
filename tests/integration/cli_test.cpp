@@ -118,6 +118,7 @@ TEST_CASE("ohs CLI end to end") {
         CHECK(run("rig beat-rate " + proj + " 0", dir).exit_code == 2);
         CHECK(nlohmann::json::parse(run("--json rig solve " + proj, dir).output)["beat_rate_vph"] == 25200);
         CHECK(run("rig beat-rate " + proj + " 21600", dir).exit_code == 0);
+        CHECK(run("rig unmesh " + proj + " barrel center_pinion", dir).exit_code == 2);  // found from the geometry: it would come back
 
         // Solving the train:the rates of the wheels from the beat rate, and nothing to declare when it is connected.
         CHECK(run("rig solve " + proj, dir).exit_code == 0);  // the project's own beat rate

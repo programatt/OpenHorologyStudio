@@ -321,6 +321,22 @@ void infer_structure(Movement& m, const RigOptions& options) {
     fit_gears(m, options);
 }
 
+void remove_manual_mesh(Movement& m, const std::string& a, const std::string& b, const RigOptions& options) {
+    const int ia = m.find_component(a);
+    const int ib = m.find_component(b);
+    if (ia < 0) throw Error("no component named '" + a + "'");
+    if (ib < 0) throw Error("no component named '" + b + "'");
+    const auto it = std::find_if(m.meshes.begin(), m.meshes.end(), [&](const model::MeshJoint& j) {
+        return (j.a == ia && j.b == ib) || (j.a == ib && j.b == ia);
+    });
+    if (it == m.meshes.end()) throw Error("'" + a + "' and '" + b + "' are not meshed");
+    if (!it->manual) {
+        throw Error("that mesh was found from the geometry, so it would come back: use `ohs rig winding` to leave it out of the train");
+    }
+    m.meshes.erase(it);
+    infer_structure(m, options);  // the other meshes and the gear fits, without it
+}
+
 void set_mesh_winding(Movement& m, const std::string& a, const std::string& b, bool winding) {
     const int ia = m.find_component(a);
     const int ib = m.find_component(b);

@@ -318,6 +318,21 @@ TEST_CASE("a mesh left out of the train as winding work is not walked, and stays
     CHECK_FALSE(rigging::train_chain(m).connected);
 }
 
+TEST_CASE("a mesh declared by hand can be taken away, one found from the geometry cannot") {
+    auto m = rigging::auto_rig("train", test::synthetic_train(), {});
+    const std::size_t before = m.meshes.size();
+    rigging::add_manual_mesh(m, "barrel", "fourth_wheel", {});
+    REQUIRE(m.meshes.size() == before + 1);
+
+    rigging::remove_manual_mesh(m, "fourth_wheel", "barrel", {});  // either way round
+    CHECK(m.meshes.size() == before);
+    CHECK(rigging::train_chain(m).connected);
+
+    CHECK_THROWS_AS(rigging::remove_manual_mesh(m, "barrel", "center_pinion", {}), Error);  // found from the geometry
+    CHECK_THROWS_AS(rigging::remove_manual_mesh(m, "barrel", "fourth_wheel", {}), Error);   // no longer there
+    CHECK_THROWS_AS(rigging::remove_manual_mesh(m, "nope", "barrel", {}), Error);
+}
+
 TEST_CASE("solving the train finds the driver of its loose end, works out its teeth, and names the wheels of the hands") {
     // The barrel's teeth are not found (a smooth drum in the CAD): the train stops at the centre pinion.
     auto parts = test::synthetic_train();
