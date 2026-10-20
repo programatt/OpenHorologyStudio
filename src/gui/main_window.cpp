@@ -686,12 +686,26 @@ QWidget* MainWindow::build_rig_page() {
     winding_button_->setToolTip(tr("Take the mesh between the selected part and this partner out of the going train (the "
                                    "winding work, say), or put it back in (undoable)"));
     form->addWidget(winding_button_, 3, 2);
+    remove_mesh_button_ = new QPushButton(tr("Remove mesh"));
+    remove_mesh_button_->setToolTip(tr("Take away the mesh that was declared by hand between the selected part and this "
+                                       "partner (undoable). A mesh found from the geometry cannot be removed: leave it out "
+                                       "of the train instead"));
+    form->addWidget(remove_mesh_button_, 3, 1);
     form->setColumnStretch(1, 1);
     layout->addWidget(selected_box_);
 
     connect(declare_mesh_, &QPushButton::clicked, this, &MainWindow::on_declare_mesh);
     connect(apply_role_, &QPushButton::clicked, this, &MainWindow::on_apply_role);
     connect(apply_label_, &QPushButton::clicked, this, &MainWindow::on_apply_label);
+    connect(remove_mesh_button_, &QPushButton::clicked, this, [this] {
+        if (!scene_ || viewport_->selected().empty() || mesh_box_->currentText().isEmpty()) {
+            statusBar()->showMessage(tr("Select a part and the part it meshes with first"), 4000);
+            return;
+        }
+        if (!remove_mesh(QString::fromStdString(viewport_->selected()), mesh_box_->currentText())) {
+            statusBar()->showMessage(tr("Only a mesh declared by hand can be removed; use \"In or out of the train\" for the others"), 8000);
+        }
+    });
     connect(winding_button_, &QPushButton::clicked, this, [this] {
         if (!scene_ || viewport_->selected().empty() || mesh_box_->currentText().isEmpty()) {
             statusBar()->showMessage(tr("Select a part and the part it meshes with first"), 4000);
@@ -854,8 +868,12 @@ QWidget* MainWindow::build_analysis_page(const QString& title, const QString& in
         auto* holder = new QWidget;
         auto* hl = new QVBoxLayout(holder);
         hl->setContentsMargins(0, 0, 0, 0);
+        timegrapher_ = new TimegrapherScreen;
+        timegrapher_->setToolTip(tr("The simulated beats of the timegrapher run. Double-click to run them again."));
+        timegrapher_->hide();  // until a timegrapher run has been made
+        hl->addWidget(timegrapher_, 3);
         hl->addWidget(plot_);
-        hl->addWidget(results_);
+        hl->addWidget(results_, 2);
         results_->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));  // the analyses print tables
         plot_->hide();  // until an analysis has something to plot
         results_dock_ = new QDockWidget(tr("Results"), this);
@@ -1640,7 +1658,8 @@ void MainWindow::update_selection_ui() {
     selected_box_->setTitle(has ? tr("Selected part: %1").arg(shown) : tr("Selected part (click one in the list or the viewport)"));
     for (QWidget* w : {static_cast<QWidget*>(role_box_), static_cast<QWidget*>(apply_role_), static_cast<QWidget*>(label_edit_),
                        static_cast<QWidget*>(apply_label_), static_cast<QWidget*>(mesh_box_),
-                       static_cast<QWidget*>(declare_mesh_), static_cast<QWidget*>(winding_button_)})
+                       static_cast<QWidget*>(declare_mesh_), static_cast<QWidget*>(winding_button_),
+                       static_cast<QWidget*>(remove_mesh_button_)})
         w->setEnabled(has);
     if (has) {
         // The role box starts at the part's current role, so Set role changes only what is changed.
@@ -1867,6 +1886,12 @@ void MainWindow::on_run_analysis() {
         args << "--vtu" << QFileInfo(project_).dir().filePath(part + ".shock.vtu");
     }
     submit(static_cast<QPushButton*>(sender())->text(), args);
+    if (args.value(0) == "timegrapher") {
+        // The same run again with its beats written out, for the screen.
+        QStringList screen{"--json", "timegrapher"};
+        screen << args.mid(1) << "--csv" << project_ + ".timegrapher.csv";
+        submit(tr("Timegrapher screen data"), screen);
+    }
     if (args.value(0) == "timekeeping") submit(tr("Timekeeping plot data"), {"--json", "timekeeping", project_});
 }
 
@@ -1895,6 +1920,11 @@ bool MainWindow::set_winding(const QString& a, const QString& b, bool winding) {
     QStringList args{"rig", "winding", project_, a, b};
     if (!winding) args << "--in-train";
     return edit_project(winding ? tr("Leave %1 / %2 out of the train").arg(a, b) : tr("Put %1 / %2 back in the train").arg(a, b), args);
+}
+
+bool MainWindow::remove_mesh(const QString& a, const QString& b) {
+    if (!scene_ || a == b) return false;
+    return edit_project(tr("Remove the mesh %1 / %2").arg(a, b), {"rig", "unmesh", project_, a, b});
 }
 
 bool MainWindow::declare_mesh(const QString& a, const QString& b) {
@@ -2018,11 +2048,40 @@ void MainWindow::show_result(const QStringList& args, const QString& out, int co
         }
         return;
     }
+    if (args.size() >= 2 && args[0] == "--json" && args[1] == "timegrapher") {
+        if (code != 0) return;  // the text job of the same run says why
+        show_timegrapher(args, out);
+        return;
+    }
     results_->setPlainText(out + (code == 0 ? QString() : tr("\n(exit code %1: see the log)").arg(code)));
     // The panel may be closed, or behind the Log or Jobs tab: bring it forward so that a run is seen to have finished.
     results_dock_->show();
     results_dock_->raise();
     statusBar()->showMessage(code == 0 ? tr("Finished: the result is in the Results panel") : tr("Failed (exit code %1): see the Results and Log panels").arg(code), 8000);
+}
+
+void MainWindow::show_timegrapher(const QStringList& args, const QString& json_text) {
+    try {
+        const auto j = nlohmann::json::parse(json_text.toStdString());
+        const int csv_at = args.indexOf("--csv");
+        QFile file(csv_at >= 0 ? args.value(csv_at + 1) : QString());
+        if (!file.open(QIODevice::ReadOnly)) throw std::runtime_error("the beats were not written");
+        std::vector<ScreenBeat> beats;
+        const QList<QByteArray> lines = file.readAll().split('\n');
+        for (int i = 1; i < lines.size(); ++i) {  // index,time_s,tock,interval_ms,deviation_ms,lift_time_ms
+            const QList<QByteArray> f = lines[i].split(',');
+            if (f.size() < 6) continue;
+            beats.push_back({f[0].toInt(), f[1].toDouble(), f[2].toInt() != 0, f[3].toDouble(), f[4].toDouble(), f[5].toDouble()});
+        }
+        if (beats.empty()) throw std::runtime_error("no beats");
+        timegrapher_->set_run(std::move(beats), {j.at("rate_s_per_day").get<double>(), j.at("amplitude_deg").get<double>(), j.at("beat_error_ms").get<double>()},
+                              j.value("beat_rate_vph", 0.0), j.value("lift_angle_deg", 52.0), QString::fromStdString(j.value("position", std::string{})));
+        timegrapher_->show();
+        resizeDocks({results_dock_}, {std::max(results_dock_->height(), 400)}, Qt::Vertical);  // room for the screen
+        timegrapher_->play(4.0);
+    } catch (const std::exception& e) {
+        append_log(tr("Timegrapher screen data unreadable: %1").arg(e.what()));
+    }
 }
 
 void MainWindow::wait_for_jobs() { queue_->wait(); }

@@ -133,6 +133,21 @@ Options:
   --pick INT [0]              With --apply: the candidate to declare, as numbered in the list
 ```
 
+#### `ohs rig unmesh`
+
+```text
+Take away a mesh that was declared by hand
+Usage: ohs rig unmesh [OPTIONS] project part partner
+
+Positionals:
+  project TEXT:FILE REQUIRED  Project file
+  part TEXT REQUIRED          One of the two parts
+  partner TEXT REQUIRED       The other
+```
+
+A mesh found from the geometry cannot be removed, as it would be found again; `ohs rig winding` leaves it out of the
+train instead.
+
 #### `ohs rig winding`
 
 ```text

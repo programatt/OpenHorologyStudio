@@ -21,9 +21,18 @@ ohs-gui movement.hsproj
   viewport: a prompt appears across the top of the viewport, the cursor becomes a cross and the status bar says what
   is expected. Click the part to declare the mesh; click beside the movement, press Esc or press the button again
   to cancel. If the mesh cannot be made the status bar says why (a part with no tooth count, say).
+- **Timegrapher screen.** *Timegrapher (60 s)* in the Simulate tab prints its text in the Results panel and also shows
+  a timegrapher modelled on the generic "multifunction time grapher": a grey case with a blue LCD whose lit top line
+  reads the rate (s/d), amplitude, beat error and lift angle, with the position, the beats counted and the beat rate
+  below it, and the ticks and tocks drawn beat by beat as two rows of dots. A level line is a movement that keeps time,
+  a slope is a rate and a step between the rows is beat error. The "sig." light comes on once there is a reading. The
+  run plays at four times real time; the red start/stop button, or a double-click on the screen, runs it again.
 - **Beat rate.** The *Beat rate* box in the Rig tab sets the project's vibrations per hour (pick a common rate or
   type one and press Enter; undoable). A project imported from the window starts without one, and the animation, the
   simulations and *Solve the train* need it.
+- **Removing a mesh.** *Remove mesh* under *Selected part* takes away a mesh that was declared by hand between the
+  selected part and the partner shown (undoable). A wrong declared mesh does more than fail the tolerance check: it also
+  spoils the module of the gears it joins. A mesh found from the geometry cannot be removed; leave it out of the train.
 - **Solve the train.** In the Rig tab, *Solve the train* works back from the escape wheel and the beat rate to find
   what drives the loose end of the train (it asks before declaring the mesh, and the declaration is undoable) and
   says which wheels turn the seconds, minute and hour hands.

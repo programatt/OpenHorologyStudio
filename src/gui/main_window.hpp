@@ -13,6 +13,7 @@
 #include "cli/cli_run.hpp"
 #include "gui/job_queue.hpp"
 #include "gui/plot.hpp"
+#include "gui/timegrapher_screen.hpp"
 #include "gui/video.hpp"
 #include "gui/scene.hpp"
 #include "gui/viewport.hpp"
@@ -82,6 +83,8 @@ public:
     /// Takes the mesh between two parts out of the going train (it is the winding work, or not a link of the train),
     /// or puts it back; the walk then goes another way. Undoable.
     bool set_winding(const QString& a, const QString& b, bool winding);
+    /// Takes away a mesh declared by hand (`ohs rig unmesh`), undoable.
+    bool remove_mesh(const QString& a, const QString& b);
     /// Runs `ohs <args>`, a command that rewrites the project file, as one undoable edit: undo puts the
     /// project file back exactly as it was and reloads it, redo restores what the command wrote. Returns
     /// false (and changes nothing) when the command fails or the result cannot be opened.
@@ -139,6 +142,7 @@ public:
     int unfinished_jobs() const;
     QListWidget* job_list() const { return jobs_; }
     PlotWidget* plot() const { return plot_; }
+    TimegrapherScreen* timegrapher() const { return timegrapher_; }
 
     /// Renders the animation to a video file with ffmpeg (see export_video in video.hpp). Returns an empty
     /// string on success, else the reason.
@@ -191,6 +195,8 @@ private slots:
     void on_run_analysis();
     void on_apply_role();
     void on_apply_label();
+    /// Shows the beats of a `--json timegrapher --csv` job on the timegrapher screen and plays them.
+    void show_timegrapher(const QStringList& args, const QString& json_text);
     /// Shows only the rows of the part list that match the search box (part name, label or role).
     void apply_parts_filter();
     /// Shows or hides what tells the user that the next click in the viewport is a pick (see pick_partner_for).
@@ -266,6 +272,7 @@ private:
     QUndoStack* undo_{};
     QListWidget* jobs_{};
     PlotWidget* plot_{};
+    TimegrapherScreen* timegrapher_{};
     QComboBox* role_box_{};
     QLineEdit* label_edit_{};
     QLineEdit* parts_filter_{};  ///< Rig tab, Parts: hides the rows that do not match
@@ -288,7 +295,8 @@ private:
     QGroupBox* selected_box_{};
     QPushButton* apply_role_{};
     QPushButton* declare_mesh_{};
-    QPushButton* winding_button_{};  ///< Selected part: takes the mesh with the partner out of the train, or puts it back
+    QPushButton* winding_button_{};
+    QPushButton* remove_mesh_button_{};  ///< Selected part: takes away the mesh declared by hand with the partner  ///< Selected part: takes the mesh with the partner out of the train, or puts it back
     QPushButton* leave_out_{};       ///< Walk: takes the mesh of the step shown out of the train
     QLabel* chain_label_{};
     QCheckBox* rig_overlay_{};

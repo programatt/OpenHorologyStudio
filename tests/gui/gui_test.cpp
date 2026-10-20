@@ -544,6 +544,75 @@ TEST_CASE("gui: running an analysis shows the Results panel even when it was clo
     CHECK(w.statusBar()->currentMessage().contains("Results"));
 }
 
+TEST_CASE("gui: the timegrapher screen draws the traces beat by beat", "[gui][timegrapher]") {
+    app();
+    ohs::gui::TimegrapherScreen screen;
+    CHECK_FALSE(screen.has_run());
+    std::vector<ohs::gui::ScreenBeat> beats;
+    for (int i = 0; i < 200; ++i) {  // 25200 vph: a beat every 0.1429 s, 6 s/d fast, ticks and tocks 0.4 ms apart
+        beats.push_back({i, i * 0.142857, i % 2 == 1, 142.857, -0.0094 * i + (i % 2 ? 0.4 : 0.0), 3.1});
+    }
+    screen.set_run(beats, {6.0, 285.0, 0.4}, 25200, 52, "dial_up");
+    REQUIRE(screen.has_run());
+    CHECK(screen.duration() == Catch::Approx(199 * 0.142857).margin(1e-6));
+
+    const QSize size(1000, 617);
+    const QImage idle = screen.render(size, 0.0);
+    const QImage early = screen.render(size, 0.4);
+    const QImage later = screen.render(size, 12.0);
+    CHECK(idle != early);
+    CHECK(early != later);
+    CHECK(idle.size() == size);
+    // The blue screen is there: most of the LCD is blue-dominant.
+    int blue = 0;
+    for (int y = 140; y < 340; y += 6)
+        for (int x = 220; x < 760; x += 6) {
+            const QRgb c = later.pixel(x, y);
+            blue += qBlue(c) > qRed(c) + 40;
+        }
+    CHECK(blue > 900);
+
+    screen.set_time(0.4);
+    const int few = screen.beats_shown();
+    screen.set_time(12.0);
+    CHECK(screen.beats_shown() > few);
+    CHECK(ohs::gui::TimegrapherScreen::position_code("crown_left") == "CL");
+    CHECK(ohs::gui::TimegrapherScreen::position_code("dial_down") == "DD");
+}
+
+TEST_CASE("gui: a timegrapher run shows the screen and still prints the text", "[gui][timegrapher]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_demo(fresh_dir("tgscreen")));
+    REQUIRE_FALSE(w.timegrapher()->has_run());
+    auto* run = button(w, "Timegrapher (60 s)");
+    REQUIRE(run);
+    run->click();
+    w.wait_for_jobs();
+    QCoreApplication::processEvents();
+    CHECK(w.results()->toPlainText().contains("virtual timegrapher"));
+    REQUIRE(w.timegrapher()->has_run());
+    CHECK(w.timegrapher()->isVisibleTo(&w));
+    CHECK(w.timegrapher()->beats_shown() >= 0);
+}
+
+TEST_CASE("gui: a mesh declared by hand can be removed, undoably", "[gui]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_demo(fresh_dir("unmesh")));
+    const auto meshes = [&] { return w.viewport()->scene()->movement().meshes.size(); };
+    const std::size_t before = meshes();
+    REQUIRE(w.declare_mesh("barrel", "fourth_wheel"));
+    CHECK(meshes() == before + 1);
+    REQUIRE(w.remove_mesh("barrel", "fourth_wheel"));
+    CHECK(meshes() == before);
+    w.undo_stack()->undo();
+    CHECK(meshes() == before + 1);
+    CHECK_FALSE(w.remove_mesh("barrel", "center_pinion"));  // found from the geometry
+}
+
 TEST_CASE("job queue: jobs run in worker processes, failures and bad programs are reported", "[gui][jobs]") {
     app();
     ohs::gui::JobQueue q("/bin/sh");

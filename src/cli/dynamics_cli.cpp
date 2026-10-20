@@ -231,7 +231,8 @@ int cmd_timegrapher(const DynOptions& o, bool as_json) {
     if (as_json) {
         json j = {{"position", to_string(pos)}, {"wind", o.wind}, {"beats", tr.reading.beats},
                   {"rate_s_per_day", tr.reading.rate_s_per_day}, {"amplitude_deg", tr.reading.amplitude_deg},
-                  {"beat_error_ms", tr.reading.beat_error_ms}};
+                  {"beat_error_ms", tr.reading.beat_error_ms}, {"beat_rate_vph", s.calibre.beat_rate_vph},
+                  {"lift_angle_deg", s.calibre.lift_angle_deg}};
         std::cout << j.dump(2) << '\n';
     } else {
         std::cout << "virtual timegrapher, " << to_string(pos) << ", wind " << o.wind << ", " << seconds << " s\n";

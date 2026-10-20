@@ -9,6 +9,10 @@ Semantic Versioning, with the Python API and the plugin ABI versioned as describ
 Found by running the plan's gates on the real OM10 file.
 
 ### Added
+- `ohs rig unmesh` and a *Remove mesh* button take away a mesh declared by hand; the gears are fitted again without it.
+- A timegrapher screen in the Results panel: the beats of the virtual timegrapher run drawn on a grey case with a
+  blue LCD like a generic timegrapher, beside the unchanged text output. `ohs --json timegrapher` also reports the
+  beat rate and the lift angle.
 - A *Beat rate* box in the Rig tab and `ohs rig beat-rate`, to set the project's beat rate, which a project imported
   from the window did not have; *Solve the train* sends you to it when it is missing.
 - `ohs rig solve` and the Rig tab's *Solve the train*: from the escape wheel and the beat rate, name the wheels
@@ -97,6 +101,9 @@ Found by running the plan's gates on the real OM10 file.
 - OM10 preset: escape wheel, barrel and the barrel mesh.
 
 ### Fixed
+- A round part whose teeth are on a rim at one end, with a smooth tube between (a barrel modelled in one piece), is
+  now counted: when no teeth are found at mid-height and the part is wider than that outline, other heights are
+  tried. The OM10's barrel is found to have 107 teeth.
 - Only round pivot and screw holes are clamped in the shock case; windows and slots were clamped
   too, which made skeletonised parts look much stronger than they are.
 - The collision report printed 10^30 mm for pairs that never come within the search range.
