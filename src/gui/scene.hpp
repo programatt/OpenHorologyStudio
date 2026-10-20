@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <unordered_set>
@@ -63,12 +64,28 @@ public:
     const kinematics::TrainAnalysis& train() const { return train_; }
     const std::vector<ScenePart>& parts() const { return parts_; }
 
-    void set_time(double seconds) { time_ = seconds; }
+    /// Counts the changes that alter what draw_list() returns (time, exploded factor, cut-away, visibility, field,
+    /// rig); a view that caches the list draws it again only when this moves.
+    std::uint64_t revision() const { return revision_; }
+
+    void set_time(double seconds) {
+        time_ = seconds;
+        ++revision_;
+    }
     double time() const { return time_; }
-    void set_stepped(bool stepped) { stepped_ = stepped; }
-    void set_explode(double factor) { explode_ = factor; }
+    void set_stepped(bool stepped) {
+        stepped_ = stepped;
+        ++revision_;
+    }
+    void set_explode(double factor) {
+        explode_ = factor;
+        ++revision_;
+    }
     double explode() const { return explode_; }
-    void set_section(const SectionPlane& plane) { section_ = plane; }
+    void set_section(const SectionPlane& plane) {
+        section_ = plane;
+        ++revision_;
+    }
     const SectionPlane& section() const { return section_; }
     void set_visible(const std::string& part, bool visible);
     bool visible(const std::string& part) const;
@@ -78,8 +95,16 @@ public:
 
     /// Draws a result field on one part, replacing its CAD surface (the finite element mesh of a part
     /// carries the part's own placement, so the overlay turns with the part).
-    void set_field(FieldOverlay field) { field_ = std::move(field); has_field_ = true; }
-    void clear_field() { has_field_ = false; field_ = {}; }
+    void set_field(FieldOverlay field) {
+        field_ = std::move(field);
+        has_field_ = true;
+        ++revision_;
+    }
+    void clear_field() {
+        has_field_ = false;
+        field_ = {};
+        ++revision_;
+    }
     const FieldOverlay* field() const { return has_field_ ? &field_ : nullptr; }
 
     /// The tooth force at one gear mesh: the driver's rim pushes the driven wheel along `direction` (a unit
@@ -138,6 +163,7 @@ private:
     std::vector<ScenePart> parts_;
     std::string train_error_;
     std::unordered_set<std::string> hidden_;  ///< looked up for every part on every frame
+    std::uint64_t revision_{0};
     double time_{0};
     bool stepped_{false};
     double explode_{0};

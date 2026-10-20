@@ -14,13 +14,42 @@
 
 namespace ohs::gui {
 
-/// The 3D viewport. It draws the scene with Qt's painter (shaded, depth-sorted triangles), so it
-/// works on every platform and without a GPU, including the offscreen platform the tests use.
-/// Left drag orbits, right or middle drag pans, the wheel zooms, a click picks a part.
+/// How the viewport draws. Software is Qt's painter (shaded, depth-sorted triangles): it works on every
+/// platform and without a GPU, including the offscreen platform the tests use. OpenGL puts the triangles in
+/// a vertex buffer and lets the graphics card project, shade and depth-test them, which keeps a large
+/// movement smooth while orbiting. Auto picks OpenGL only when a hardware GPU is there to use.
+enum class Renderer { Auto, Software, OpenGL };
+
+/// The 3D viewport (see Renderer for how it draws). Left drag orbits, right or middle drag pans, the wheel
+/// zooms, a click picks a part. Snapshots and video (render()) always use the software path, so they come
+/// out the same on every machine.
 class Viewport : public QWidget {
     Q_OBJECT
 public:
     explicit Viewport(QWidget* parent = nullptr);
+
+    ~Viewport() override;
+
+    /// The renderer chosen in the settings (the OHS_RENDERER environment variable - auto, software or opengl -
+    /// wins over it), and storing a choice.
+    static Renderer saved_renderer();
+    static void save_renderer(Renderer renderer);
+    /// What this machine offers: whether an OpenGL context can be made at all, whether it is a hardware GPU
+    /// (not llvmpipe or another software rasteriser, which is slower than the painter), and its name. Probed
+    /// once.
+    struct GpuInfo {
+        bool usable{false};
+        bool hardware{false};
+        QString name;
+    };
+    static const GpuInfo& gpu();
+    /// Switches the renderer now. OpenGL falls back to the painter when no context can be made.
+    void set_renderer(Renderer renderer);
+    Renderer renderer() const { return renderer_; }
+    /// True while the picture is drawn by OpenGL.
+    bool using_opengl() const { return gl_on_; }
+    /// Repaints whichever surface draws the scene.
+    void update();
 
     void set_scene(std::shared_ptr<Scene> scene);
     Scene* scene() const { return scene_.get(); }
@@ -76,8 +105,23 @@ protected:
     void mouseMoveEvent(QMouseEvent*) override;
     void mouseReleaseEvent(QMouseEvent*) override;
     void wheelEvent(QWheelEvent*) override;
+    void resizeEvent(QResizeEvent*) override;
+    void changeEvent(QEvent*) override;
 
 private:
+    class GlSurface;
+    friend class GlSurface;
+    /// The triangles of the visible parts in world space, worked out again only when the scene changes: orbiting,
+    /// panning and zooming reuse them.
+    const Scene::Drawn& drawn() const;
+    QColor backdrop() const;
+    /// The colour a part is drawn in before shading: its role, the rig and walk overlays, or the selection.
+    QColor part_colour(int part, int selected) const;
+    int selected_index() const;
+    void draw_decorations(QPainter& painter, const QSize& size) const;  ///< overlays and the colour legend
+    void draw_notes(QPainter& painter) const;                           ///< the pick prompt and the controls hint, on screen only
+    void gl_failed();                                                   ///< the context could not be used: back to the painter
+
     struct Projected {
         double x[3], y[3];
         double depth;
@@ -111,6 +155,13 @@ private:
     std::optional<WalkView> walk_;
     bool fast_{false};          ///< the next paint is an interactive one
     QTimer* settle_{};          ///< draws at full quality once the interaction pauses
+    Renderer renderer_{Renderer::Auto};
+    GlSurface* gl_{};           ///< made the first time OpenGL is wanted
+    bool gl_on_{false};
+    std::uint64_t look_{0};     ///< moves when anything that changes the colours does
+    mutable Scene::Drawn drawn_;
+    mutable std::uint64_t drawn_revision_{0};
+    mutable bool drawn_valid_{false};
 };
 
 }  // namespace ohs::gui

@@ -9,6 +9,13 @@ Semantic Versioning, with the Python API and the plugin ABI versioned as describ
 Found by running the plan's gates on the real OM10 file.
 
 ### Added
+- An OpenGL viewport, chosen in *View, Renderer* (Automatic, OpenGL or Software; the `OHS_RENDERER` environment
+  variable overrides it). Automatic uses the graphics card when there is one and Qt's painter when there is not
+  (including a software rasteriser such as llvmpipe); OpenGL falls back to the painter when no context can be made.
+  The triangles stay in a vertex buffer and the card projects, shades and depth-tests them, so orbiting is several
+  times faster (69 to over 500 frames per second on the demonstration movement), and it no longer shows the painter's
+  depth-sort errors. The painter is also faster: the drawn triangles are kept until the scene changes. Snapshots and
+  video still use the painter. `ohs_viewport_bench` measures both.
 - `ohs rig unmesh` and a *Remove mesh* button take away a mesh declared by hand; the gears are fitted again without it.
 - A timegrapher screen in the Results panel: the beats of the virtual timegrapher run drawn on a grey case with a
   blue LCD like a generic timegrapher, beside the unchanged text output. `ohs --json timegrapher` also reports the

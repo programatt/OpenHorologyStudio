@@ -93,6 +93,36 @@ QPushButton* button(ohs::gui::MainWindow& w, const QString& text) {
 
 }  // namespace
 
+TEST_CASE("gui: the renderer is a setting, falls back to the painter without a GPU, and OpenGL draws what the painter does", "[gui][renderer]") {
+    app();
+    using ohs::gui::Renderer;
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_demo(fresh_dir("renderer")));
+    ohs::gui::Viewport& view = *w.viewport();
+    ohs::gui::Viewport::save_renderer(Renderer::Software);
+    REQUIRE(ohs::gui::Viewport::saved_renderer() == Renderer::Software);
+    ohs::gui::Viewport::save_renderer(Renderer::OpenGL);
+    REQUIRE(ohs::gui::Viewport::saved_renderer() == Renderer::OpenGL);
+    ohs::gui::Viewport::save_renderer(Renderer::Auto);  // what a fresh install has
+
+    view.set_renderer(Renderer::Software);
+    REQUIRE_FALSE(view.using_opengl());
+    const QImage painter = view.render(QSize(400, 300));
+    CHECK(coloured_pixels(painter) > 1000);
+
+    // Software never uses OpenGL, whatever the machine has; forcing OpenGL falls back when no context can be made.
+    const auto& gpu = ohs::gui::Viewport::gpu();
+    view.set_renderer(Renderer::OpenGL);
+    CHECK(view.using_opengl() == gpu.usable);
+    view.set_renderer(Renderer::Auto);
+    CHECK(view.using_opengl() == gpu.hardware);
+    // Snapshots and video do not depend on the renderer.
+    CHECK(view.render(QSize(400, 300)) == painter);
+    view.set_renderer(Renderer::Software);
+    CHECK_FALSE(view.using_opengl());
+}
+
 TEST_CASE("gui: the demonstration movement opens, is listed and is drawn", "[gui]") {
     app();
     ohs::gui::MainWindow w;

@@ -102,9 +102,15 @@ ohs-gui movement.hsproj
 
 ## Not in the window
 
-The viewport draws with Qt's own painter, so it needs no GPU and runs anywhere, but it does not
-have the OpenCASCADE OpenGL viewer or PBR materials. The flat-shaded triangles, the field plot and the
-overlays are the whole of it. A job that was running when the window closed starts again from the
+The viewport has no OpenCASCADE viewer, VTK or PBR materials: the flat-shaded triangles, the field plot and the
+overlays are the whole of it. **View, Renderer** chooses how they are drawn. *Automatic* (the default) uses OpenGL
+when the machine has a graphics card and Qt's painter otherwise; *OpenGL* insists on OpenGL (it still falls back to
+the painter when no context can be made); *Software* always uses the painter, which needs no GPU and runs anywhere.
+OpenGL needs version 2.1; a software rasteriser such as llvmpipe does not count as a graphics card for *Automatic*.
+The choice is remembered, and the `OHS_RENDERER` environment variable (`auto`, `software` or `opengl`) overrides it.
+On a laptop with a Radeon GPU, orbiting the demonstration movement runs at over 500 frames per second against 69 with the painter
+(`ohs_viewport_bench` measures both), and the gap grows with the number of triangles. Pictures saved with `--snapshot`, and videos, are
+always drawn by the painter, so they come out the same on every machine. A job that was running when the window closed starts again from the
 beginning rather than carrying on (the solvers do not checkpoint). Views cannot be undone, only
 edits of the project. Use `ohs animate` for glTF or USD, and `ohs report` for the report. See
 [Limitations](limitations.md).

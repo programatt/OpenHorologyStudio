@@ -39,6 +39,7 @@
 #include <QPixmap>
 #include <QPointer>
 #include <QProgressBar>
+#include <QActionGroup>
 #include <QSettings>
 #include <QStyle>
 #include <QMenuBar>
@@ -345,6 +346,32 @@ void MainWindow::build_ui() {
     rig_overlay_action_->setCheckable(true);
     rig_overlay_action_->setToolTip(tr("Colour the mobiles and draw the gear meshes, suggested meshes and parts to check"));
     connect(rig_overlay_action_, &QAction::toggled, this, [this](bool on) { rig_overlay_->setChecked(on); });
+    view->addSeparator();
+    // How the viewport draws: the graphics card when there is one (Auto), or the painter, which runs anywhere.
+    auto* renderer = view->addMenu(tr("Rend&erer"));
+    auto* renderers = new QActionGroup(this);
+    struct Choice {
+        Renderer value;
+        QString name, tip;
+    };
+    const Choice choices[] = {
+        {Renderer::Auto, tr("&Automatic"), tr("Use OpenGL when a graphics card is there to draw with, the painter otherwise")},
+        {Renderer::OpenGL, tr("&OpenGL"), tr("Draw on the graphics card: smoother with a large movement")},
+        {Renderer::Software, tr("&Software"), tr("Draw with Qt's painter on the processor: works on every machine")}};
+    for (const Choice& c : choices) {
+        QAction* a = renderer->addAction(c.name);
+        a->setCheckable(true);
+        a->setActionGroup(renderers);
+        a->setChecked(viewport_->renderer() == c.value);
+        a->setToolTip(c.tip);
+        a->setStatusTip(c.tip);
+        connect(a, &QAction::triggered, this, [this, c] {
+            Viewport::save_renderer(c.value);
+            viewport_->set_renderer(c.value);
+            statusBar()->showMessage(viewport_->using_opengl() ? tr("Drawing with OpenGL (%1)").arg(Viewport::gpu().name)
+                                                               : tr("Drawing with the painter"), 5000);
+        });
+    }
     view->addSeparator();
     auto* panels = view->addMenu(tr("&Panels"));
     for (QDockWidget* d : {tree_dock, explain_dock, results_dock_, log_dock, jobs_dock, history_dock}) panels->addAction(d->toggleViewAction());

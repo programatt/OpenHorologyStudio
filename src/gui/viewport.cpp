@@ -54,18 +54,73 @@ Viewport::Viewport(QWidget* parent) : QWidget(parent) {
         fast_ = false;
         update();
     });
+    set_renderer(saved_renderer());
 }
 
+Viewport::~Viewport() = default;
+
 void Viewport::interactive_update() {
-    fast_ = true;
-    settle_->start();
+    // The graphics card draws every frame at full quality, so there is no cheap frame to settle from.
+    if (!gl_on_) {
+        fast_ = true;
+        settle_->start();
+    }
     update();
 }
 
 void Viewport::set_scene(std::shared_ptr<Scene> scene) {
     scene_ = std::move(scene);
     selected_.clear();
+    drawn_valid_ = false;
+    drawn_ = {};
+    ++look_;
     fit();
+}
+
+const Scene::Drawn& Viewport::drawn() const {
+    if (!drawn_valid_ || drawn_revision_ != scene_->revision()) {
+        drawn_ = scene_->draw_list();
+        drawn_revision_ = scene_->revision();
+        drawn_valid_ = true;
+    }
+    return drawn_;
+}
+
+QColor Viewport::backdrop() const {
+    return palette().window().color().lightness() < 128 ? QColor(26, 28, 32) : QColor(226, 224, 218);
+}
+
+int Viewport::selected_index() const {
+    if (!scene_ || selected_.empty()) return -1;
+    const auto& parts = scene_->parts();
+    for (std::size_t i = 0; i < parts.size(); ++i) {
+        if (parts[i].name == selected_) return static_cast<int>(i);
+    }
+    return -1;
+}
+
+QColor Viewport::part_colour(int part, int selected) const {
+    const QColor back = backdrop();
+    const auto faded = [&back](const QColor& c) {
+        return QColor((c.red() * 2 + back.red() * 3) / 5, (c.green() * 2 + back.green() * 3) / 5, (c.blue() * 2 + back.blue() * 3) / 5);
+    };
+    QColor base = role_colour(scene_->parts()[static_cast<std::size_t>(part)].role);
+    if (!show_rig_ && walk_) {
+        // The walk: the parts reached so far as they are, the mesh being looked at bright, the rest faded back.
+        const bool current = part == walk_->driver || part == walk_->driven;
+        const bool preview = part == walk_->preview_a || part == walk_->preview_b;
+        if (current) base = walk_->gap ? QColor(240, 170, 40) : QColor(45, 205, 125);
+        else if (preview) base = QColor(240, 170, 40);
+        else if (static_cast<std::size_t>(part) >= walk_->walked.size() || !walk_->walked[static_cast<std::size_t>(part)]) base = faded(base);
+    }
+    if (show_rig_) {
+        // Each mobile in a hue of its own; what does not turn is faded back so the train stands out.
+        const int mobile = scene_->parts()[static_cast<std::size_t>(part)].mobile;
+        base = mobile >= 0 ? mobile_colour(mobile) : faded(base);
+    }
+    // Cyan: the complement of the brass most parts are drawn in, and unlike the hairspring's blue.
+    if (part == selected) base = QColor(40, 200, 235);
+    return base;
 }
 
 void Viewport::set_view(double yaw_deg, double pitch_deg) {
@@ -89,11 +144,13 @@ void Viewport::set_prompt(const QString& text) {
 
 void Viewport::set_show_rig(bool on) {
     show_rig_ = on;
+    ++look_;
     update();
 }
 
 void Viewport::set_walk(std::optional<WalkView> walk) {
     walk_ = std::move(walk);
+    ++look_;
     update();
 }
 
@@ -165,6 +222,7 @@ void Viewport::draw_walk(QPainter& painter, const QSize& size) const {
 
 void Viewport::select(const std::string& part) {
     selected_ = part;
+    ++look_;
     update();
 }
 
@@ -313,7 +371,7 @@ void Viewport::draw_overlays(QPainter& painter, const QSize& size) const {
 std::vector<Viewport::Projected> Viewport::project(const QSize& size) const {
     std::vector<Projected> out;
     if (!scene_) return out;
-    const auto drawn = scene_->draw_list();
+    const Scene::Drawn& drawn = this->drawn();
     const Point3 c = scene_->centre();
     const double r = scene_->radius();
     const double scale = 0.45 * std::min(size.width(), size.height()) / r * zoom_;
@@ -368,7 +426,7 @@ std::vector<Viewport::Projected> Viewport::project(const QSize& size) const {
 }
 
 void Viewport::draw(QPainter& painter, const QSize& size, bool fast) const {
-    painter.fillRect(QRect(QPoint(0, 0), size), palette().window().color().lightness() < 128 ? QColor(26, 28, 32) : QColor(226, 224, 218));
+    painter.fillRect(QRect(QPoint(0, 0), size), backdrop());
     // Antialiased triangles need a thin outline to hide the seams between them, and the two together are most
     // of a frame. Aliased fills tile without seams, so a fast frame draws neither.
     painter.setRenderHint(QPainter::Antialiasing, !fast);
@@ -389,40 +447,13 @@ void Viewport::draw(QPainter& painter, const QSize& size, bool fast) const {
         return;
     }
     const FieldOverlay* field = scene_->field();
-    // Cyan: the complement of the brass most parts are drawn in, and unlike the hairspring's blue.
-    const QColor selection(40, 200, 235);
+    const int selected = selected_index();
     std::vector<QPolygonF> selected_outline;  // the selected part's triangles, drawn again on top
-    const QColor backdrop = palette().window().color().lightness() < 128 ? QColor(26, 28, 32) : QColor(226, 224, 218);
+    std::vector<QColor> colours(scene_->parts().size());
+    for (std::size_t i = 0; i < colours.size(); ++i) colours[i] = part_colour(static_cast<int>(i), selected);
     for (const Projected& p : project(size)) {
-        QColor base = role_colour(scene_->parts()[p.part].role);
-        if (!show_rig_ && walk_) {
-            // The walk: the parts reached so far as they are, the mesh being looked at bright, the rest faded back.
-            const int c = p.part;
-            const bool current = c == walk_->driver || c == walk_->driven;
-            const bool preview = c == walk_->preview_a || c == walk_->preview_b;
-            if (current) {
-                base = walk_->gap ? QColor(240, 170, 40) : QColor(45, 205, 125);
-            } else if (preview) {
-                base = QColor(240, 170, 40);
-            } else if (static_cast<std::size_t>(c) >= walk_->walked.size() || !walk_->walked[static_cast<std::size_t>(c)]) {
-                base = QColor((base.red() * 2 + backdrop.red() * 3) / 5, (base.green() * 2 + backdrop.green() * 3) / 5,
-                              (base.blue() * 2 + backdrop.blue() * 3) / 5);
-            }
-        }
-        if (show_rig_) {
-            // Each mobile in a hue of its own; what does not turn is faded back so the train stands out.
-            const int mobile = scene_->parts()[p.part].mobile;
-            if (mobile >= 0) {
-                base = mobile_colour(mobile);
-            } else {
-                base = QColor((base.red() * 2 + backdrop.red() * 3) / 5, (base.green() * 2 + backdrop.green() * 3) / 5,
-                              (base.blue() * 2 + backdrop.blue() * 3) / 5);
-            }
-        }
-        if (!selected_.empty() && scene_->parts()[p.part].name == selected_) {
-            base = selection;
-            selected_outline.push_back(QPolygonF({{p.x[0], p.y[0]}, {p.x[1], p.y[1]}, {p.x[2], p.y[2]}}));
-        }
+        QColor base = colours[static_cast<std::size_t>(p.part)];
+        if (p.part == selected) selected_outline.push_back(QPolygonF({{p.x[0], p.y[0]}, {p.x[1], p.y[1]}, {p.x[2], p.y[2]}}));
         if (field && !std::isnan(p.value)) {
             const auto c = field_colour((p.value - field->lo) / (field->hi - field->lo));
             base = QColor(c[0], c[1], c[2]);
@@ -437,16 +468,20 @@ void Viewport::draw(QPainter& painter, const QSize& size, bool fast) const {
     // X-ray: a part selected from the tree or the list may be hidden behind others; a faint tint over
     // everything shows where it is.
     if (!selected_outline.empty()) {
-        QColor ghost = selection;
+        QColor ghost(40, 200, 235);
         ghost.setAlpha(60);
         painter.setPen(Qt::NoPen);
         painter.setBrush(ghost);
         for (const QPolygonF& poly : selected_outline) painter.drawPolygon(poly);
     }
+    draw_decorations(painter, size);
+}
+
+void Viewport::draw_decorations(QPainter& painter, const QSize& size) const {
     painter.setRenderHint(QPainter::Antialiasing, true);  // the overlays are few: always smooth
     painter.setRenderHint(QPainter::TextAntialiasing, true);
     draw_overlays(painter, size);
-    if (field) draw_legend(painter, size, *field);
+    if (const FieldOverlay* field = scene_->field()) draw_legend(painter, size, *field);
 }
 
 void Viewport::draw_legend(QPainter& painter, const QSize& size, const FieldOverlay& field) const {
@@ -469,8 +504,13 @@ void Viewport::draw_legend(QPainter& painter, const QSize& size, const FieldOver
 }
 
 void Viewport::paintEvent(QPaintEvent*) {
+    if (gl_on_) return;  // the OpenGL surface over this widget draws everything
     QPainter painter(this);
     draw(painter, size(), fast_);
+    draw_notes(painter);
+}
+
+void Viewport::draw_notes(QPainter& painter) const {
     if (scene_ && !prompt_.isEmpty()) {
         // A pick is waiting for a click: a plate across the top, on screen only.
         QFont big = font();
@@ -561,6 +601,7 @@ void Viewport::mouseReleaseEvent(QMouseEvent* e) {
     else setCursor(Qt::CrossCursor);
     if (dragged_ || e->button() != Qt::LeftButton || !scene_) return;
     selected_ = pick(e->pos());
+    ++look_;
     update();
     emit part_picked(QString::fromStdString(selected_));
 }

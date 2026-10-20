@@ -157,6 +157,7 @@ bool Scene::reload_rig(const std::filesystem::path& project, double beat_rate_vp
     }
     update_bounds();
     update_review();
+    ++revision_;
     forces_.clear();
     if (has_field_) clear_field();
     return true;
@@ -165,6 +166,7 @@ bool Scene::reload_rig(const std::filesystem::path& project, double beat_rate_vp
 void Scene::set_visible(const std::string& part, bool visible) {
     if (visible) hidden_.erase(part);
     else hidden_.insert(part);
+    ++revision_;
 }
 
 bool Scene::visible(const std::string& part) const {
