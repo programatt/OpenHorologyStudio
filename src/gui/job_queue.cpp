@@ -2,6 +2,7 @@
 #include "gui/job_queue.hpp"
 
 #include <algorithm>
+#include <cstring>
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
@@ -11,7 +12,12 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
+#include <QDir>
 #include <QThread>
+#include <fcntl.h>
+#include <unistd.h>
+
+#include "cli/daemon_protocol.hpp"
 #include <QTimer>
 
 namespace ohs::gui {
@@ -57,6 +63,11 @@ QString JobQueue::state_name(State state) {
 void JobQueue::stop_workers() {
     // The jobs stay "running" in the journal on purpose: that is how a restart knows to run them again.
     for (Worker& w : workers_) {
+        if (w.fd >= 0) {  // a job in the daemon: closing the connection ends it there
+            delete w.notifier;
+            ::close(w.fd);
+            continue;
+        }
         w.process->disconnect(this);
         w.process->kill();
         w.process->waitForFinished(3000);
@@ -176,6 +187,10 @@ bool JobQueue::cancel(int index) {
     for (Worker& w : workers_) {
         if (w.index != index || w.cancel_requested) continue;
         w.cancel_requested = true;
+        if (w.fd >= 0) {
+            finish_daemon(w.fd, -1, false);  // closes the connection: the daemon's process for the job is killed
+            return true;
+        }
         w.process->terminate();
         // A worker that ignores the polite request is killed.
         QPointer<QProcess> p = w.process;
@@ -195,8 +210,32 @@ void JobQueue::start_next() {
         ++job.attempts;
         job.out.clear();
         job.err.clear();
+        if (!daemon_.isEmpty()) {
+            std::vector<std::string> args;
+            for (const QString& a : job.args) args.push_back(a.toStdString());
+            const int fd = cli::daemon::connect_and_send(args, daemon_.toStdString(), QDir::currentPath().toStdString());
+            if (fd >= 0) {
+                ::fcntl(fd, F_SETFL, ::fcntl(fd, F_GETFL) | O_NONBLOCK);
+                Worker w;
+                w.index = static_cast<int>(i);
+                w.fd = fd;
+                w.notifier = new QSocketNotifier(fd, QSocketNotifier::Read, this);
+                connect(w.notifier, &QSocketNotifier::activated, this, [this](QSocketDescriptor, QSocketNotifier::Type) {
+                    // The descriptor is the notifier's own: look it up by sender.
+                    auto* n = qobject_cast<QSocketNotifier*>(sender());
+                    if (n) on_daemon_readable(static_cast<int>(n->socket()));
+                });
+                workers_.push_back(std::move(w));
+                save_soon();
+                emit changed(static_cast<int>(i));
+                continue;
+            }
+        }
         auto* process = new QProcess(this);
-        workers_.push_back({process, static_cast<int>(i), false});
+        Worker w;
+        w.process = process;
+        w.index = static_cast<int>(i);
+        workers_.push_back(std::move(w));
         connect(process, &QProcess::finished, this,
                 [this, process](int code, QProcess::ExitStatus status) { on_process_finished(process, code, status); });
         connect(process, &QProcess::errorOccurred, this,
@@ -207,6 +246,67 @@ void JobQueue::start_next() {
         emit changed(static_cast<int>(i));
         process->start();
     }
+}
+
+void JobQueue::on_daemon_readable(int fd) {
+    Worker* worker = nullptr;
+    for (Worker& w : workers_) {
+        if (w.fd == fd) worker = &w;
+    }
+    if (!worker) return;
+    Job& job = jobs_[static_cast<std::size_t>(worker->index)];
+    char chunk[65536];
+    bool closed = false;
+    for (;;) {
+        const ssize_t n = ::read(fd, chunk, sizeof chunk);
+        if (n > 0) {
+            worker->received.append(chunk, static_cast<std::size_t>(n));
+            continue;
+        }
+        closed = n == 0;  // EOF; a negative count is "nothing more yet"
+        break;
+    }
+    // Whole frames: tag, u32 length, bytes.
+    std::size_t at = 0;
+    for (;;) {
+        const std::string& b = worker->received;
+        if (b.size() - at < 5) break;
+        std::uint32_t length = 0;
+        std::memcpy(&length, b.data() + at + 1, sizeof length);
+        if (b.size() - at - 5 < length) break;
+        const char tag = b[at];
+        const QString text = QString::fromUtf8(b.data() + at + 5, static_cast<int>(length));
+        at += 5 + length;
+        if (tag == 'o') {
+            if (job.out.size() < kMaxOutputBytes) job.out += text;
+        } else if (tag == 'e') {
+            if (job.err.size() < kMaxOutputBytes) job.err += text;
+        } else if (tag == 'x') {
+            finish_daemon(fd, text.toInt(), false);
+            return;
+        }  // 'p' lines (import progress) are not kept
+    }
+    worker->received.erase(0, at);
+    if (closed) finish_daemon(fd, -1, true);
+}
+
+void JobQueue::finish_daemon(int fd, int exit_code, bool crashed) {
+    std::size_t at = 0;
+    while (at < workers_.size() && workers_[at].fd != fd) ++at;
+    if (at == workers_.size()) return;
+    const int index = workers_[at].index;
+    const bool cancelled = workers_[at].cancel_requested;
+    Job& job = jobs_[static_cast<std::size_t>(index)];
+    job.exit_code = exit_code;
+    if (crashed && !cancelled) job.err += "\nthe daemon's process for this job ended without a result (it crashed); the daemon is still running";
+    job.state = cancelled ? State::Cancelled : (exit_code == 0 && !crashed ? State::Done : State::Failed);
+    delete workers_[at].notifier;
+    ::close(fd);
+    workers_.erase(workers_.begin() + static_cast<std::ptrdiff_t>(at));
+    save_soon();
+    emit changed(index);
+    if (!cancelled) emit finished(index);
+    start_next();
 }
 
 void JobQueue::on_process_finished(QProcess* process, int exit_code, QProcess::ExitStatus status) {

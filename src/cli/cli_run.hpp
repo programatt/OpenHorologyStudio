@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstddef>
 #include <functional>
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -22,6 +23,9 @@ struct Captured {
 /// Runs `ohs <args>` in this process with std::cout and std::cerr captured. One run at a time
 /// (it swaps the global stream buffers), so the Python module serialises calls.
 Captured run_captured(const std::vector<std::string>& args);
+
+/// The same, writing to `out` and `err` as the command goes (a daemon streams them to its client) and returning the exit code.
+int run_streaming(const std::vector<std::string>& args, std::ostream& out, std::ostream& err);
 
 /// What an application running `ohs import` in this process can watch and stop: called after each part's
 /// features are extracted (from any thread), and a flag that makes the import stop between parts.

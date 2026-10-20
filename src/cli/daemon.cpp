@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "cli/daemon.hpp"
 
+#include <poll.h>
+
 #include <csignal>
 #include <iostream>
+#include <sstream>
+#include <thread>
 
 #include <spdlog/spdlog.h>
 
@@ -29,6 +33,42 @@ int serve(const std::string&, const std::vector<std::string>&) {
 
 namespace {
 
+// A stream buffer that sends what is written to it as frames on the connection, a line at a time, so a client sees a
+// long command's output while it runs.
+class FrameBuf : public std::streambuf {
+public:
+    FrameBuf(int fd, char tag) : fd_(fd), tag_(tag) {}
+    ~FrameBuf() override { flush(); }
+
+protected:
+    int_type overflow(int_type c) override {
+        if (c != traits_type::eof()) {
+            pending_.push_back(static_cast<char>(c));
+            if (c == '\n' || pending_.size() > 4096) flush();
+        }
+        return c;
+    }
+    std::streamsize xsputn(const char* s, std::streamsize n) override {
+        pending_.append(s, static_cast<std::size_t>(n));
+        if (pending_.find('\n') != std::string::npos || pending_.size() > 4096) flush();
+        return n;
+    }
+    int sync() override {
+        flush();
+        return 0;
+    }
+
+private:
+    void flush() {
+        if (pending_.empty()) return;
+        daemon::put_frame(fd_, tag_, pending_);
+        pending_.clear();
+    }
+    int fd_;
+    char tag_;
+    std::string pending_;
+};
+
 // One request, in a child forked after accept: it inherits what the daemon has loaded (the geometry kept in memory),
 // runs the command like any `ohs` call with its output captured, and exits. A crash in the command (the OM10 tooth mesh
 // once segfaulted) takes the child down, not the daemon: the client sees a broken conversation and runs the command itself.
@@ -44,15 +84,35 @@ void serve_one(int fd) {
     if (!daemon::get_string(fd, cwd)) _exit(2);
     if (!cwd.empty() && ::chdir(cwd.c_str()) != 0) {
         const std::string message = "error: cannot enter " + cwd + "\n";
-        daemon::put_u32(fd, 2);
-        daemon::put_string(fd, "");
-        daemon::put_string(fd, message);
+        daemon::put_frame(fd, 'e', message);
+        daemon::put_frame(fd, 'x', "2");
         _exit(0);
     }
-    const Captured result = run_captured(args);
-    daemon::put_u32(fd, static_cast<std::uint32_t>(result.exit_code));
-    daemon::put_string(fd, result.out);
-    daemon::put_string(fd, result.err);
+    // A client that goes away (the window cancelling a job, a script killed) is the end of this command: the child watches
+    // the connection, which the client never writes to again, and kills itself when it closes.
+    std::thread([fd] {
+        pollfd p{fd, POLLIN, 0};
+        for (;;) {
+            if (::poll(&p, 1, -1) < 0) continue;
+            char byte;
+            if (::read(fd, &byte, 1) <= 0) ::kill(::getpid(), SIGKILL);
+        }
+    }).detach();
+    // Progress of an import, as it happens.
+    ImportHooks hooks;
+    hooks.progress = [fd](std::size_t done, std::size_t total) {
+        daemon::put_frame(fd, 'p', "part " + std::to_string(done) + " of " + std::to_string(total) + "\n");
+    };
+    set_import_hooks(hooks);
+    int code = 2;
+    {
+        FrameBuf out(fd, 'o'), err(fd, 'e');
+        std::ostream out_stream(&out), err_stream(&err);
+        code = run_streaming(args, out_stream, err_stream);
+        out_stream.flush();
+        err_stream.flush();
+    }
+    daemon::put_frame(fd, 'x', std::to_string(code));
     ::close(fd);
     _exit(0);
 }

@@ -430,5 +430,9 @@ Added afterwards:
 | 6.2 | `geometry::load_part`: the cache also holds each part in a file of its own, and a command that needs one part reads that file | `fea --case shock` 12.2 s → 0.29 s in all; `draw` the same |
 | 7 | `ohs serve [--socket] [--warm project…]` and the thin `ohs-client` (`src/cli/daemon*.{hpp,cpp}`, `client_main.cpp`): length-prefixed requests over a Unix socket, each run in a forked child of the daemon; the daemon keeps the parts of warm projects (`set_parts_memo`); the client falls back to `ohs` when nothing listens | `rig check` on OM10 128 ms → 29 ms; `dfm` 0.76 s warm. Crash isolation is the fork: a failing request does not stop the daemon (the test checks a failing command and a second daemon refused). Not on Windows |
 
-Left out of 7: streamed progress lines for long jobs (a reply carries the whole output at the end) and the job queue of the
-window using the daemon (it runs `ohs` worker processes as before, which can be killed to cancel).
+Also in 7: the reply is a stream of frames (output, error, progress lines, exit code) sent while the command runs; a client
+that closes the connection ends the command (the child watches it and kills itself); a command whose process dies
+(`ohs dev crash` raises SIGSEGV) ends the reply without an exit code, and the client reports it and does not run it again;
+`JobQueue::set_daemon` sends the window's jobs to a daemon that answers on the socket (output as it runs, cancel by closing,
+a crash is a failed job with a message), with the process-per-job path as the fallback. Each is tested, the crash and the
+cancel against a real daemon.

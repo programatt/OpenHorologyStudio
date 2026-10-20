@@ -68,8 +68,11 @@ ohs-client rig check movement.hsproj       # 29 ms on the 166-part OM10, against
 ohs-client dfm movement.hsproj
 ```
 
-`ohs-client` takes the same words as `ohs`, passes its working directory, and prints what the command printed and returns
-its exit code. Each request runs in a forked child of the daemon, so a command that crashes does not stop it, and the
+`ohs-client` takes the same words as `ohs`, passes its working directory, and prints what the command printed, while it
+runs, and returns its exit code (at a terminal an import also shows "part 37 of 166"). If you stop the client, the command
+stops in the daemon. A command that crashes ends with exit code 134 and a message; it is not run again, as it may have written.
+The desktop application's analyses use a running daemon too: when one answers on the socket, `ohs-gui` sends its jobs there
+(`OHS_JOB_DAEMON=0` keeps one process per job), and *Cancel* ends the job in the daemon. Each request runs in a forked child of the daemon, so a command that crashes does not stop it, and the
 child starts with the libraries and the warm geometry loaded. With no daemon listening, `ohs-client` runs `ohs`
 itself, so a script works either way (`OHS_NO_DAEMON=1` forces that). The socket is `$XDG_RUNTIME_DIR/ohs.sock`, or
 `--socket`/`$OHS_SOCKET`, readable by you only. Linux and macOS; not Windows.

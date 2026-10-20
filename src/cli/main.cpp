@@ -20,6 +20,10 @@
 #include <Message_PrinterOStream.hxx>
 #include <spdlog/sinks/stdout_sinks.h>
 
+#include <chrono>
+#include <csignal>
+#include <thread>
+
 #include "cli/cli_run.hpp"
 #include "cli/daemon.hpp"
 #include "cli/daemon_protocol.hpp"
@@ -123,6 +127,7 @@ struct Options {
     // dev gen-movement
     std::string gen_out;
     std::string socket_path;
+    double sleep_seconds = 1.0;
     std::vector<std::string> warm_projects;
 
     // thirdparty
@@ -642,6 +647,19 @@ int cmd_serve(const Options& o) {
     return ohs::cli::serve(o.socket_path.empty() ? ohs::cli::daemon::default_socket_path() : o.socket_path, o.warm_projects);
 }
 
+int cmd_dev_crash(const Options&) {
+    std::cerr << "about to crash on purpose\n" << std::flush;
+    std::raise(SIGSEGV);
+    return kExitError;
+}
+
+int cmd_dev_sleep(const Options& o) {
+    std::cout << "sleeping " << o.sleep_seconds << " s\n" << std::flush;
+    std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(o.sleep_seconds * 1000)));
+    std::cout << "slept\n";
+    return kExitOk;
+}
+
 int cmd_gen_movement(const Options& o) {
     ohs::geometry::export_step(ohs::geometry::make_test_movement(), o.gen_out);
     std::cout << "wrote " << o.gen_out << '\n';
@@ -810,6 +828,11 @@ int ohs::cli::run(int argc, char** argv) {
     auto* gen = dev->add_subcommand("gen-movement", "Write the procedural test movement as STEP");
     gen->add_option("-o,--output", o.gen_out, "STEP file to write")->required();
     gen->callback(pick(cmd_gen_movement));
+    auto* crash = dev->add_subcommand("crash", "Crash the process on purpose (tests that `ohs serve` survives a crashing command)");
+    crash->callback(pick(cmd_dev_crash));
+    auto* nap = dev->add_subcommand("sleep", "Wait, then finish (tests cancelling a long command)");
+    nap->add_option("seconds", o.sleep_seconds, "How long")->capture_default_str();
+    nap->callback(pick(cmd_dev_sleep));
 
     auto* third = app.add_subcommand("thirdparty", "Third-party data (never committed to the repo)");
     third->require_subcommand(1);

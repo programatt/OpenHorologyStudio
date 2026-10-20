@@ -909,6 +909,87 @@ TEST_CASE("job queue: a quick job does not wait behind a long one when two may r
     CHECK(q.jobs()[slow].state == ohs::gui::JobQueue::State::Cancelled);
 }
 
+TEST_CASE("job queue: jobs run in a resident daemon, stream their output, are cancelled by closing, and a crash leaves it up", "[gui][jobs]") {
+    app();
+    const QString dir = fresh_dir("job-daemon");
+    const QString socket = QDir(dir).filePath("d.sock");
+    QProcess daemon;
+    daemon.start(ohs::gui::MainWindow::worker_program(), {"serve", "--socket", socket});
+    REQUIRE(daemon.waitForStarted());
+    QElapsedTimer wait;
+    wait.start();
+    while (!QFileInfo::exists(socket) && wait.elapsed() < 10000) QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    REQUIRE(QFileInfo::exists(socket));
+
+    ohs::gui::JobQueue q(ohs::gui::MainWindow::worker_program());
+    q.set_daemon(socket);
+    q.set_max_parallel(2);
+    using S = ohs::gui::JobQueue::State;
+
+    const int version = q.submit("version", {"--version"});
+    q.wait();
+    CHECK(q.jobs()[static_cast<std::size_t>(version)].state == S::Done);
+    CHECK(q.jobs()[static_cast<std::size_t>(version)].out.startsWith("1."));
+
+    // Output arrives while the job runs: the first line is there long before the job ends.
+    const int sleeper = q.submit("sleep", {"dev", "sleep", "30"});
+    wait.restart();
+    while (q.jobs()[static_cast<std::size_t>(sleeper)].out.isEmpty() && wait.elapsed() < 10000) QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    CHECK(q.jobs()[static_cast<std::size_t>(sleeper)].out.contains("sleeping"));
+    CHECK(q.jobs()[static_cast<std::size_t>(sleeper)].state == S::Running);
+    // Cancelling closes the connection; the job's process in the daemon dies, so a second job gets its slot at once.
+    CHECK(q.cancel(sleeper));
+    CHECK(q.jobs()[static_cast<std::size_t>(sleeper)].state == S::Cancelled);
+
+    // A command that crashes its process: the job fails with a message, and the daemon carries on.
+    const int crash = q.submit("crash", {"dev", "crash"});
+    q.wait();
+    CHECK(q.jobs()[static_cast<std::size_t>(crash)].state == S::Failed);
+    CHECK(q.jobs()[static_cast<std::size_t>(crash)].err.contains("crashed"));
+    const int after = q.submit("after", {"--version"});
+    q.wait();
+    CHECK(q.jobs()[static_cast<std::size_t>(after)].state == S::Done);
+    CHECK(daemon.state() == QProcess::Running);
+
+    // Nobody listening: the job runs in a process as before.
+    ohs::gui::JobQueue plain(ohs::gui::MainWindow::worker_program());
+    plain.set_daemon(QDir(dir).filePath("nobody.sock"));
+    const int fallback = plain.submit("version", {"--version"});
+    plain.wait();
+    CHECK(plain.jobs()[static_cast<std::size_t>(fallback)].state == S::Done);
+
+    daemon.terminate();
+    daemon.waitForFinished(5000);
+}
+
+TEST_CASE("gui: with a daemon listening the window runs its analyses there and shows the same results", "[gui][jobs]") {
+    app();
+    const QString dir = fresh_dir("window-daemon");
+    const QString socket = QDir(dir).filePath("d.sock");
+    QProcess daemon;
+    daemon.start(ohs::gui::MainWindow::worker_program(), {"serve", "--socket", socket});
+    REQUIRE(daemon.waitForStarted());
+    QElapsedTimer wait;
+    wait.start();
+    while (!QFileInfo::exists(socket) && wait.elapsed() < 10000) QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    REQUIRE(QFileInfo::exists(socket));
+    qputenv("OHS_SOCKET", socket.toUtf8());
+    {
+        ohs::gui::MainWindow w;
+        w.show();
+        CHECK(w.job_queue()->daemon() == socket);
+        REQUIRE(w.open_demo(QDir(dir).filePath("demo")));
+        button(w, "Timekeeping")->click();
+        w.wait_for_jobs();
+        CHECK(w.results()->toPlainText().contains("rate", Qt::CaseInsensitive));
+        CHECK(w.plot()->points().size() == 3);  // the plot data came from the same run
+        CHECK(w.job_queue()->jobs()[0].state == ohs::gui::JobQueue::State::Done);
+    }
+    qunsetenv("OHS_SOCKET");
+    daemon.terminate();
+    daemon.waitForFinished(5000);
+}
+
 TEST_CASE("job queue: unfinished jobs survive a restart and finished ones keep their results", "[gui][jobs]") {
     app();
     const QString dir = fresh_dir("job-journal");

@@ -68,6 +68,7 @@
 #include <nlohmann/json.hpp>
 
 #include "cli/cli_run.hpp"
+#include "cli/daemon_protocol.hpp"
 #include "model/rig_io.hpp"
 #include "rigging/rigging.hpp"
 #include "core/error.hpp"
@@ -237,6 +238,13 @@ void MainWindow::build_ui() {
     addDockWidget(Qt::BottomDockWidgetArea, jobs_dock);
     queue_ = new JobQueue(worker_program(), this);
     queue_->set_max_parallel(2);  // a quick analysis need not wait behind a long one
+    // A resident `ohs serve` that answers takes the jobs: no process start-up, warm geometry, output as it runs.
+    // OHS_JOB_DAEMON=0 keeps one process per job.
+    if (qEnvironmentVariable("OHS_JOB_DAEMON") != "0") {
+        const std::string socket = cli::daemon::default_socket_path();
+        const auto ping = cli::daemon::run_remote({"--version"}, socket, "");
+        if (ping && !ping->crashed) queue_->set_daemon(QString::fromStdString(socket));
+    }
     connect(queue_, &JobQueue::changed, this, &MainWindow::on_job_changed);
     connect(queue_, &JobQueue::finished, this, &MainWindow::on_job_finished);
     connect(jobs_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem*) { cancel_job(jobs_->currentRow()); });

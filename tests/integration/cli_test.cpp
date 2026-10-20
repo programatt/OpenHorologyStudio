@@ -3,6 +3,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -241,6 +242,47 @@ TEST_CASE("ohs serve runs commands for a client, keeps going after a bad one, an
     const auto again = run_remote({"--version"}, socket, dir.string());
     REQUIRE(again);
     CHECK(again->exit_code == 0);
+    // Output and progress arrive as frames while the command runs, not in one piece at the end.
+    std::vector<std::string> progress;
+    std::size_t out_frames = 0;
+    const auto imported = run_remote({"import", "m.step", "-o", "m.hsproj"}, socket, dir.string(), [&](char tag, const std::string& text) {
+        if (tag == 'p') progress.push_back(text);
+        if (tag == 'o') ++out_frames;
+    });
+    REQUIRE(imported);
+    CHECK(imported->exit_code == 0);
+    CHECK_FALSE(imported->crashed);
+    CHECK(progress.size() >= 5);
+    CHECK(progress.back().find("of") != std::string::npos);
+    CHECK(out_frames >= 1);
+    CHECK(imported->out.find("imported") != std::string::npos);
+
+    // A command that crashes its process (SIGSEGV): the reply ends without an exit code, and the daemon carries on.
+    const auto crashed = run_remote({"dev", "crash"}, socket, dir.string());
+    REQUIRE(crashed);
+    CHECK(crashed->crashed);
+    CHECK(crashed->err.find("about to crash") != std::string::npos);  // what it wrote before it died still arrived
+    const auto after_crash = run_remote({"--version"}, socket, dir.string());
+    REQUIRE(after_crash);
+    CHECK_FALSE(after_crash->crashed);
+    CHECK(after_crash->exit_code == 0);
+
+    // A client that goes away ends its command: the child is killed, and the daemon is not blocked.
+    {
+        const int fd = ohs::cli::daemon::connect_and_send({"dev", "sleep", "30"}, socket, dir.string());
+        REQUIRE(fd >= 0);
+        char tag = 0;
+        REQUIRE(read(fd, &tag, 1) == 1);  // the first line of its output: it is running
+        ::close(fd);
+    }
+    const auto start = std::chrono::steady_clock::now();
+    const auto quick = run_remote({"--version"}, socket, dir.string());
+    REQUIRE(quick);
+    CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds(5));
+    // The orphaned child is gone: the only processes left under the daemon are none (a sleeping one would remain 30 s).
+    usleep(300000);
+    CHECK(run("--version", dir).exit_code == 0);
+
     // A second daemon on the same socket is refused.
     CHECK(run("serve --socket '" + socket + "'", dir).exit_code != 0);
 

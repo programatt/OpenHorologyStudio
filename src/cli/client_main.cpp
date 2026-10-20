@@ -17,9 +17,18 @@ int main(int argc, char** argv) {
     char cwd[PATH_MAX];
     const std::string where = getcwd(cwd, sizeof cwd) ? cwd : "";
     if (!std::getenv("OHS_NO_DAEMON")) {
-        if (const auto reply = ohs::cli::daemon::run_remote(args, ohs::cli::daemon::default_socket_path(), where)) {
-            std::fwrite(reply->out.data(), 1, reply->out.size(), stdout);
-            std::fwrite(reply->err.data(), 1, reply->err.size(), stderr);
+        const bool tty = isatty(2) != 0;
+        // The output as it arrives; progress lines only for a person at a terminal.
+        const auto live = [tty](char tag, const std::string& text) {
+            if (tag == 'o') std::fwrite(text.data(), 1, text.size(), stdout), std::fflush(stdout);
+            else if (tag == 'e' || (tag == 'p' && tty)) std::fwrite(text.data(), 1, text.size(), stderr);
+        };
+        if (const auto reply = ohs::cli::daemon::run_remote(args, ohs::cli::daemon::default_socket_path(), where, live)) {
+            if (reply->crashed) {
+                // The command's process died in the daemon, which carries on. Not run again here: it may have written.
+                std::fputs("ohs-client: the command crashed in the daemon (the daemon is still running)\n", stderr);
+                return 134;
+            }
             return reply->exit_code;
         }
     }

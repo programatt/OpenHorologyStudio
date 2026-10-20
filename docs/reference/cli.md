@@ -334,6 +334,8 @@ Options:
 
 Subcommands:
   gen-movement                Write the procedural test movement as STEP
+  crash                       Crash the process on purpose (tests that `ohs serve` survives a crashing command)
+  sleep                       Wait, then finish (tests cancelling a long command)
 ```
 
 #### `ohs dev gen-movement`
@@ -345,6 +347,29 @@ Usage: ohs dev gen-movement [OPTIONS]
 Options:
   -h,--help                   Print this help message and exit
   -o,--output TEXT REQUIRED   STEP file to write
+```
+
+#### `ohs dev crash`
+
+```text
+Crash the process on purpose (tests that `ohs serve` survives a crashing command)
+Usage: ohs dev crash [OPTIONS]
+
+Options:
+  -h,--help                   Print this help message and exit
+```
+
+#### `ohs dev sleep`
+
+```text
+Wait, then finish (tests cancelling a long command)
+Usage: ohs dev sleep [OPTIONS] [seconds]
+
+Positionals:
+  seconds FLOAT [1]           How long
+
+Options:
+  -h,--help                   Print this help message and exit
 ```
 
 ### `ohs thirdparty`

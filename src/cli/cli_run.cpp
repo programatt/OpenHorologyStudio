@@ -22,7 +22,7 @@ ImportHooks import_hooks() {
     return hooks;
 }
 
-Captured run_captured(const std::vector<std::string>& args) {
+int run_streaming(const std::vector<std::string>& args, std::ostream& out, std::ostream& err) {
     static std::mutex one_at_a_time;
     std::lock_guard<std::mutex> lock(one_at_a_time);
 
@@ -34,7 +34,6 @@ Captured run_captured(const std::vector<std::string>& args) {
     for (std::string& s : storage) argv.push_back(s.data());
     argv.push_back(nullptr);
 
-    std::ostringstream out, err;
     std::streambuf* old_out = std::cout.rdbuf(out.rdbuf());
     std::streambuf* old_err = std::cerr.rdbuf(err.rdbuf());
     int code = 2;
@@ -46,6 +45,12 @@ Captured run_captured(const std::vector<std::string>& args) {
     }
     std::cout.rdbuf(old_out);
     std::cerr.rdbuf(old_err);
+    return code;
+}
+
+Captured run_captured(const std::vector<std::string>& args) {
+    std::ostringstream out, err;
+    const int code = run_streaming(args, out, err);
     return {code, out.str(), err.str()};
 }
 
