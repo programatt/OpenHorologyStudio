@@ -3,8 +3,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <fstream>
 #include <limits>
 #include <map>
+#include <set>
+#include <system_error>
 
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRep_Tool.hxx>
@@ -18,7 +23,9 @@
 #include "dynamics/calibre.hpp"
 #include "dynamics/torque_chain.hpp"
 #include "geometry/cad_io.hpp"
+#include "geometry/part_cache.hpp"
 #include "geometry/features.hpp"
+#include "geometry/shape_groups.hpp"
 #include "model/rig_io.hpp"
 #include "rigging/rigging.hpp"
 
@@ -26,8 +33,13 @@ namespace ohs::gui {
 
 namespace {
 
-std::vector<Triangle> tessellate(const TopoDS_Shape& shape, double deflection, double pivot_x, double pivot_y) {
-    BRepMesh_IncrementalMesh mesher(shape, deflection, false, 0.5, true);
+constexpr double kDeflection = 0.02;
+constexpr double kCoarseDeflection = 0.1;  ///< the mesh drawn while the view is moving: far fewer triangles
+constexpr double kCoarseAngle = 1.2;       ///< radians between facets: a circle is about five segments
+
+// The triangles a shape has been meshed into, in the CAD frame. OCCT writes the triangulation into the shape's
+// faces, so two threads must never mesh shapes that share a TShape (see mesh_parts).
+std::vector<Triangle> triangles_of(const TopoDS_Shape& shape) {
     std::vector<Triangle> out;
     for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next()) {
         const TopoDS_Face face = TopoDS::Face(ex.Current());
@@ -43,12 +55,148 @@ std::vector<Triangle> tessellate(const TopoDS_Shape& shape, double deflection, d
             const gp_Pnt p1 = tri->Node(n1).Transformed(trsf);
             const gp_Pnt p2 = tri->Node(n2).Transformed(trsf);
             const gp_Pnt p3 = tri->Node(n3).Transformed(trsf);
-            out.push_back({{p1.X() - pivot_x, p1.Y() - pivot_y, p1.Z()},
-                           {p2.X() - pivot_x, p2.Y() - pivot_y, p2.Z()},
-                           {p3.X() - pivot_x, p3.Y() - pivot_y, p3.Z()}});
+            out.push_back({{p1.X(), p1.Y(), p1.Z()}, {p2.X(), p2.Y(), p2.Z()}, {p3.X(), p3.Y(), p3.Z()}});
         }
     }
     return out;
+}
+
+// A part's display mesh in the CAD frame (oriented so the dial axis is Z, not yet moved to its pivot).
+struct PartMesh {
+    std::string name;
+    bool closed{false};
+    std::vector<Triangle> triangles;
+    std::vector<Triangle> coarse;
+};
+
+// Meshes every part. Instances of one shape (screws, jewels and pins in a movement are many parts with one
+// TShape) share their triangulation: meshing them on two threads at once corrupts it (it crashed with a
+// double free on a 166-part movement). So the parts are grouped by TShape, one thread takes a whole group, and
+// groups run in parallel. Each part's output goes in its own slot.
+std::vector<PartMesh> mesh_parts(const std::vector<geometry::ImportedPart>& imported, geometry::Axis axis) {
+    std::vector<PartMesh> out(imported.size());
+    std::vector<TopoDS_Shape> shapes;
+    shapes.reserve(imported.size());
+    for (const auto& part : imported) shapes.push_back(part.shape);
+    std::set<const void*> distinct;
+    for (const auto& shape : shapes) distinct.insert(shape.TShape().get());
+    const bool in_parallel = distinct.size() < 4;  // a few big shapes: let OCCT split each one instead
+    geometry::parallel_for_shape_groups(shapes, [&](const std::vector<std::size_t>& group) {
+        std::vector<TopoDS_Shape> placed;
+        for (const std::size_t i : group) placed.push_back(geometry::orient_dial_axis_to_z(imported[i].shape, axis));
+        // The coarse mesh first: meshing finer afterwards replaces it, where meshing coarser would keep the fine one. The
+        // shape is meshed once for the group and each instance reads the triangles in its own placement.
+        BRepMesh_IncrementalMesh(placed.front(), kCoarseDeflection, false, kCoarseAngle, in_parallel);
+        for (std::size_t k = 0; k < group.size(); ++k) out[group[k]].coarse = triangles_of(placed[k]);
+        BRepMesh_IncrementalMesh(placed.front(), kDeflection, false, 0.5, in_parallel);
+        for (std::size_t k = 0; k < group.size(); ++k) {
+            PartMesh& m = out[group[k]];
+            m.name = imported[group[k]].name;
+            m.triangles = triangles_of(placed[k]);
+            // At least one solid, and no face that is not in a solid (a loose sheet is seen from both sides).
+            m.closed = TopExp_Explorer(placed[k], TopAbs_SOLID).More() && !TopExp_Explorer(placed[k], TopAbs_FACE, TopAbs_SOLID).More();
+        }
+    }, in_parallel ? 1u : 0u);
+    return out;
+}
+
+// ---- the display mesh cache -------------------------------------------------------------------------------------
+// mesh.bin in the project's cache: magic, version, the CAD file's fingerprint, deflection, dial axis, then per part
+// the name, closed flag and the triangles as float32 (CAD frame). Reading it replaces both the STEP read and the
+// tessellation. Any mismatch or damage means "no cache".
+constexpr std::uint32_t kMeshMagic = 0x4d53484f;  // "OHSM"
+constexpr std::uint32_t kMeshVersion = 3;
+
+std::filesystem::path mesh_path(const std::filesystem::path& project) { return geometry::cache_dir(project) / "mesh.bin"; }
+
+template <class T>
+void put(std::string& out, const T& v) {
+    out.append(reinterpret_cast<const char*>(&v), sizeof v);
+}
+
+void write_mesh_cache(const std::filesystem::path& project, const std::string& fingerprint, geometry::Axis axis,
+                      const std::vector<PartMesh>& meshes) {
+    if (fingerprint.empty()) return;
+    std::error_code ec;
+    std::filesystem::create_directories(geometry::cache_dir(project), ec);
+    if (ec) return;
+    std::string out;
+    put(out, kMeshMagic);
+    put(out, kMeshVersion);
+    put(out, static_cast<std::uint32_t>(fingerprint.size()));
+    out.append(fingerprint);
+    put(out, kDeflection);
+    put(out, static_cast<std::uint8_t>(axis));
+    put(out, static_cast<std::uint32_t>(meshes.size()));
+    for (const PartMesh& m : meshes) {
+        put(out, static_cast<std::uint32_t>(m.name.size()));
+        out.append(m.name);
+        put(out, static_cast<std::uint8_t>(m.closed));
+        for (const std::vector<Triangle>* list : {&m.triangles, &m.coarse}) {
+            put(out, static_cast<std::uint32_t>(list->size()));
+            for (const Triangle& t : *list) {
+                for (const Point3* p : {&t.a, &t.b, &t.c}) {
+                    for (int k = 0; k < 3; ++k) put(out, static_cast<float>((*p)[k]));
+                }
+            }
+        }
+    }
+    geometry::write_file_atomic(mesh_path(project), out);
+}
+
+bool read_mesh_cache(const std::filesystem::path& project, const std::string& fingerprint, geometry::Axis axis,
+                     std::vector<PartMesh>& meshes) {
+    std::ifstream in(mesh_path(project), std::ios::binary | std::ios::ate);
+    if (!in) return false;
+    std::string data(static_cast<std::size_t>(in.tellg()), '\0');
+    in.seekg(0);
+    in.read(data.data(), static_cast<std::streamsize>(data.size()));
+    if (!in) return false;
+    std::size_t at = 0;
+    bool ok = true;
+    auto take = [&](auto& v) {
+        if (!ok || at + sizeof v > data.size()) return ok = false;
+        std::memcpy(&v, data.data() + at, sizeof v);
+        at += sizeof v;
+        return true;
+    };
+    auto take_string = [&](std::string& v) {
+        std::uint32_t n = 0;
+        if (!take(n) || at + n > data.size()) return ok = false;
+        v.assign(data, at, n);
+        at += n;
+        return true;
+    };
+    std::uint32_t magic = 0, version = 0, count = 0;
+    std::string stored;
+    double deflection = 0;
+    std::uint8_t stored_axis = 0;
+    if (!take(magic) || magic != kMeshMagic || !take(version) || version != kMeshVersion) return false;
+    if (!take_string(stored) || stored != fingerprint || !take(deflection) || deflection != kDeflection) return false;
+    if (!take(stored_axis) || stored_axis != static_cast<std::uint8_t>(axis) || !take(count)) return false;
+    std::vector<PartMesh> out(count);
+    for (PartMesh& m : out) {
+        std::uint8_t closed = 0;
+        if (!take_string(m.name) || !take(closed)) return false;
+        m.closed = closed != 0;
+        for (std::vector<Triangle>* list : {&m.triangles, &m.coarse}) {
+            std::uint32_t triangles = 0;
+            if (!take(triangles) || at + static_cast<std::size_t>(triangles) * 9 * sizeof(float) > data.size()) return false;
+            list->resize(triangles);
+            for (Triangle& t : *list) {
+                for (Point3* p : {&t.a, &t.b, &t.c}) {
+                    for (int k = 0; k < 3; ++k) {
+                        float v = 0;
+                        take(v);
+                        (*p)[k] = v;
+                    }
+                }
+            }
+        }
+    }
+    if (!ok) return false;
+    meshes = std::move(out);
+    return true;
 }
 
 // The articulation (a stem, lever or spring that moves) of a component, or -1.
@@ -76,10 +224,26 @@ Scene Scene::load(const std::filesystem::path& project, const std::filesystem::p
 
     std::filesystem::path step = step_override;
     if (step.empty()) step = project.parent_path() / s.movement_.source_geometry;
-    const auto imported = geometry::import_cad(step);
-    std::map<std::string, const geometry::ImportedPart*> by_name;
-    for (const auto& p : imported) by_name[p.name] = &p;
+    // The project's cache describes the CAD file it was imported from: it is used for any file it matches (the
+    // fingerprint says so) but only written from that file.
+    const std::string fingerprint = geometry::cad_fingerprint(step);
+    const bool owns_cache = step_override.empty() || geometry::is_project_source(step, project, s.movement_.source_geometry);
 
+    std::vector<PartMesh> meshes;
+    bool cached = !fingerprint.empty() && read_mesh_cache(project, fingerprint, dial_axis, meshes);
+    if (cached) {
+        std::map<std::string, int> have;
+        for (const PartMesh& m : meshes) have[m.name] = 1;
+        for (const auto& comp : s.movement_.components) cached = cached && have.contains(comp.features.name);
+    }
+    if (!cached) {
+        meshes = mesh_parts(geometry::load_parts(step, project, owns_cache), dial_axis);
+        if (owns_cache && !fingerprint.empty()) write_mesh_cache(project, fingerprint, dial_axis, meshes);
+    }
+    std::map<std::string, const PartMesh*> by_name;
+    for (const PartMesh& m : meshes) by_name[m.name] = &m;
+
+    const std::vector<int> mobile_at = s.movement_.mobile_index();
     for (std::size_t c = 0; c < s.movement_.components.size(); ++c) {
         const auto& comp = s.movement_.components[c];
         const auto found = by_name.find(comp.features.name);
@@ -87,22 +251,29 @@ Scene Scene::load(const std::filesystem::path& project, const std::filesystem::p
         ScenePart part;
         part.name = comp.features.name;
         part.role = comp.role;
-        part.mobile = s.movement_.mobile_of(static_cast<int>(c));
+        part.mobile = mobile_at[c];
         part.articulation = articulation_of(s.train_, static_cast<int>(c));
         if (part.mobile >= 0) {
             part.pivot_x = s.movement_.mobiles[part.mobile].center.x;
             part.pivot_y = s.movement_.mobiles[part.mobile].center.y;
         }
-        const TopoDS_Shape shape = geometry::orient_dial_axis_to_z(found->second->shape, dial_axis);
-        part.triangles = tessellate(shape, 0.02, part.pivot_x, part.pivot_y);
-        // At least one solid, and no face that is not in a solid (a loose sheet is seen from both sides).
-        part.closed = TopExp_Explorer(shape, TopAbs_SOLID).More() && !TopExp_Explorer(shape, TopAbs_FACE, TopAbs_SOLID).More();
+        part.closed = found->second->closed;
+        part.triangles = found->second->triangles;
+        part.coarse = found->second->coarse;
         part.z_min = std::numeric_limits<double>::max();
         part.z_max = std::numeric_limits<double>::lowest();
-        for (const auto& t : part.triangles) {
-            for (const Point3* p : {&t.a, &t.b, &t.c}) {
+        for (auto& t : part.triangles) {
+            for (Point3* p : {&t.a, &t.b, &t.c}) {
+                (*p)[0] -= part.pivot_x;
+                (*p)[1] -= part.pivot_y;
                 part.z_min = std::min(part.z_min, (*p)[2]);
                 part.z_max = std::max(part.z_max, (*p)[2]);
+            }
+        }
+        for (auto& t : part.coarse) {
+            for (Point3* p : {&t.a, &t.b, &t.c}) {
+                (*p)[0] -= part.pivot_x;
+                (*p)[1] -= part.pivot_y;
             }
         }
         s.parts_.push_back(std::move(part));
@@ -135,17 +306,21 @@ bool Scene::reload_rig(const std::filesystem::path& project, double beat_rate_vp
         train_error_ = e.what();
     }
     // The triangles are stored relative to the part's pivot, so a part whose mobile moved is shifted, not re-meshed.
+    const std::vector<int> mobile_at = movement_.mobile_index();
     for (std::size_t c = 0; c < parts_.size(); ++c) {
         ScenePart& part = parts_[c];
-        const int mobile = movement_.mobile_of(static_cast<int>(c));
+        const int mobile = mobile_at[c];
         const double px = mobile >= 0 ? movement_.mobiles[static_cast<std::size_t>(mobile)].center.x : 0.0;
         const double py = mobile >= 0 ? movement_.mobiles[static_cast<std::size_t>(mobile)].center.y : 0.0;
         const double dx = part.pivot_x - px, dy = part.pivot_y - py;
         if (dx != 0.0 || dy != 0.0) {
-            for (auto& t : part.triangles) {
-                for (Point3* p : {&t.a, &t.b, &t.c}) {
-                    (*p)[0] += dx;
-                    (*p)[1] += dy;
+            ++geometry_revision_;
+            for (auto* list : {&part.triangles, &part.coarse}) {
+                for (auto& t : *list) {
+                    for (Point3* p : {&t.a, &t.b, &t.c}) {
+                        (*p)[0] += dx;
+                        (*p)[1] += dy;
+                    }
                 }
             }
         }
@@ -271,7 +446,7 @@ std::vector<Scene::Trail> Scene::trails(int samples) const {
     return out;
 }
 
-Scene::Drawn Scene::draw_list() const {
+std::vector<Scene::PartPose> Scene::part_poses() const {
     std::vector<double> angles(movement_.mobiles.size(), 0.0);
     std::vector<double> part_angles(train_.articulations.size(), 0.0);
     if (can_animate()) {
@@ -279,6 +454,42 @@ Scene::Drawn Scene::draw_list() const {
         part_angles = kinematics::articulation_angles(train_, angles);
     }
     const double zc = centre_[2];
+
+    std::vector<PartPose> out(parts_.size());
+    for (std::size_t i = 0; i < parts_.size(); ++i) {
+        const ScenePart& part = parts_[i];
+        PartPose& pose = out[i];
+        pose.visible = visible(part.name);
+        const double lift = explode_ * ((part.z_min + part.z_max) / 2 - zc) * 2.0;
+        const kinematics::Articulation* art =
+            part.articulation >= 0 ? &train_.articulations[static_cast<std::size_t>(part.articulation)] : nullptr;
+        if (art) {
+            // A stem, lever or spring turns about a line of its own: Rodrigues' rotation about the axis k through the
+            // point P is R = cos I + sin [k]x + (1 - cos) k kT, and q = P + R (p - P).
+            const double turn = part_angles[static_cast<std::size_t>(part.articulation)];
+            const double ct = std::cos(turn), st = std::sin(turn);
+            const double* k = art->axis;
+            const double kx[3][3] = {{0, -k[2], k[1]}, {k[2], 0, -k[0]}, {-k[1], k[0], 0}};
+            for (int r = 0; r < 3; ++r) {
+                double t = art->point[r];
+                for (int c = 0; c < 3; ++c) {
+                    const double R = (r == c ? ct : 0.0) + st * kx[r][c] + (1.0 - ct) * k[r] * k[c];
+                    pose.m[static_cast<std::size_t>(4 * r + c)] = R;
+                    t -= R * art->point[c];
+                }
+                pose.m[static_cast<std::size_t>(4 * r + 3)] = t + (r == 2 ? lift : 0.0);
+            }
+        } else {
+            const double angle = part.mobile >= 0 && part.mobile < static_cast<int>(angles.size()) ? angles[part.mobile] : 0.0;
+            const double ca = std::cos(angle), sa = std::sin(angle);
+            pose.m = {ca, -sa, 0, part.pivot_x, sa, ca, 0, part.pivot_y, 0, 0, 1, lift};
+        }
+    }
+    return out;
+}
+
+Scene::Drawn Scene::draw_list(bool coarse) const {
+    const std::vector<PartPose> poses = part_poses();
 
     Drawn out;
     std::size_t most = has_field_ ? field_.triangles.size() : 0;  // built every frame: grow the lists once
@@ -288,29 +499,15 @@ Scene::Drawn Scene::draw_list() const {
     out.values.reserve(most);
     for (std::size_t i = 0; i < parts_.size(); ++i) {
         const ScenePart& part = parts_[i];
-        if (!visible(part.name)) continue;
-        const double angle = part.mobile >= 0 && part.mobile < static_cast<int>(angles.size()) ? angles[part.mobile] : 0.0;
-        const double ca = std::cos(angle), sa = std::sin(angle);
-        const double lift = explode_ * ((part.z_min + part.z_max) / 2 - zc) * 2.0;
-        // A stem, lever or spring turns about a line of its own: Rodrigues' rotation of the point about it.
-        const kinematics::Articulation* art =
-            part.articulation >= 0 ? &train_.articulations[static_cast<std::size_t>(part.articulation)] : nullptr;
-        const double turn = art ? part_angles[static_cast<std::size_t>(part.articulation)] : 0.0;
-        const double ct = std::cos(turn), st = std::sin(turn);
-        auto place = [&](const Point3& p) -> Point3 {
-            if (art) {
-                const double v[3] = {p[0] - art->point[0], p[1] - art->point[1], p[2] - art->point[2]};
-                const double* k = art->axis;
-                const double dot = k[0] * v[0] + k[1] * v[1] + k[2] * v[2];
-                const double cross[3] = {k[1] * v[2] - k[2] * v[1], k[2] * v[0] - k[0] * v[2], k[0] * v[1] - k[1] * v[0]};
-                double q[3];
-                for (int i = 0; i < 3; ++i) q[i] = art->point[i] + v[i] * ct + cross[i] * st + k[i] * dot * (1.0 - ct);
-                return {q[0], q[1], q[2] + lift};
-            }
-            return {part.pivot_x + ca * p[0] - sa * p[1], part.pivot_y + sa * p[0] + ca * p[1], p[2] + lift};
+        const PartPose& pose = poses[i];
+        if (!pose.visible) continue;
+        const double* m = pose.m.data();
+        auto place = [m](const Point3& p) -> Point3 {
+            return {m[0] * p[0] + m[1] * p[1] + m[2] * p[2] + m[3], m[4] * p[0] + m[5] * p[1] + m[6] * p[2] + m[7],
+                    m[8] * p[0] + m[9] * p[1] + m[10] * p[2] + m[11]};
         };
         const bool on_field = has_field_ && field_.part == part.name;
-        const std::vector<Triangle>& tris = on_field ? field_.triangles : part.triangles;
+        const std::vector<Triangle>& tris = on_field ? field_.triangles : coarse && !part.coarse.empty() ? part.coarse : part.triangles;
         for (std::size_t k = 0; k < tris.size(); ++k) {
             const Triangle& t = tris[k];
             Triangle w{place(t.a), place(t.b), place(t.c)};

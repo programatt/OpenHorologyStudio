@@ -45,7 +45,7 @@ GearData gear_data(const model::Component& c, double module_hint) {
     GearData g;
     g.teeth = c.features.teeth;
     g.module = c.gear && c.gear->module > 0 ? c.gear->module : (module_hint > 0 ? module_hint : model::module_from_tip(c.features.outer_radius, c.features.teeth));
-    g.alpha = (c.gear && c.gear->pressure_angle_deg > 5 ? c.gear->pressure_angle_deg : 20.0) * kPi / 180;
+    g.alpha = (c.gear && model::has_pressure_angle(*c.gear) ? c.gear->pressure_angle_deg : 20.0) * kPi / 180;
     g.ra = c.features.outer_radius;
     g.rb = c.gear && c.gear->base_radius > 0 ? c.gear->base_radius : 0.5 * g.module * g.teeth * std::cos(g.alpha);
     return g;

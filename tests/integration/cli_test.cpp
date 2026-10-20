@@ -128,10 +128,33 @@ TEST_CASE("ohs CLI end to end") {
         CHECK(solved["beat_rate_vph"] == 21600);
         CHECK(run("rig solve " + proj + " --apply --pick 7", dir).exit_code == 0);  // nothing to apply: no error
 
+        // Labels and meshes in one edit too, all or nothing.
+        CHECK(run("rig label " + proj + " --set fourth_wheel=Fourth center_wheel=Centre", dir).exit_code == 0 );
+        CHECK(run("rig label " + proj + " --set fourth_wheel=Fourth --set no_such_part=X", dir).exit_code == 2);
+        CHECK(run("rig label " + proj + " fourth_wheel", dir).exit_code == 0);  // the single form still clears one
+        CHECK(run("rig label " + proj + " center_wheel", dir).exit_code == 0);
+        CHECK(run("rig mesh " + proj, dir).exit_code == 2);
+        CHECK(run("rig mesh " + proj + " --pair fourth_wheel=no_such_part", dir).exit_code == 2);
+        CHECK(run("rig mesh " + proj + " --pair fourth_wheel", dir).exit_code == 2);
+
         CHECK(run("rig set " + proj + " fourth_wheel --role screw", dir).exit_code == 0);
         CHECK(nlohmann::json::parse(run("--json rig check " + proj, dir).output)["components"].size() == 15);
         CHECK(run("kinematics " + proj, dir).output.find("warning") != std::string::npos);
         CHECK(run("rig set " + proj + " fourth_wheel --role sprocket", dir).exit_code == 2);
+
+        // Several parts in one edit: one role for a list of parts, or a role for each with --assign. A part that is not
+        // there changes nothing; so does a role that does not exist.
+        CHECK(run("rig set " + proj + " fourth_wheel center_wheel --role wheel", dir).exit_code == 0);
+        CHECK(run("rig set " + proj + " fourth_wheel --role wheel", dir).output.find("is now wheel") != std::string::npos);
+        CHECK(run("rig set " + proj + " --assign fourth_wheel=screw --assign center_wheel=wheel", dir).output.find("2 parts changed") != std::string::npos);
+        CHECK(run("rig set " + proj + " fourth_wheel --role wheel", dir).exit_code == 0);
+        const auto settled = slurp(proj);
+        CHECK(run("rig set " + proj + " fourth_wheel no_such_part --role screw", dir).exit_code == 2);
+        CHECK(run("rig set " + proj + " --assign fourth_wheel=sprocket", dir).exit_code == 2);
+        CHECK(run("rig set " + proj + " --assign fourth_wheel", dir).exit_code == 2);
+        CHECK(run("rig set " + proj, dir).exit_code == 2);
+        CHECK(slurp(proj) == settled);
+        CHECK(run("rig set " + proj + " fourth_wheel --role screw", dir).exit_code == 0);
 
         // The wheel is a screw by the user's choice: the train is broken, and `rig auto` keeps the choice but
         // `--reset` finds the wheel again.

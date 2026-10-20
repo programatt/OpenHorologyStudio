@@ -30,6 +30,7 @@
 #include "explain/explain.hpp"
 #include "geometry/procedural.hpp"
 #include "geometry/cad_io.hpp"
+#include "geometry/part_cache.hpp"
 #include "kinematics/kinematics.hpp"
 #include "model/rig_io.hpp"
 #include "rigging/rigging.hpp"
@@ -96,6 +97,8 @@ struct Options {
 
     // rig set
     std::string part_name, part_b, role_name, label_text;
+    std::vector<std::string> part_names, assignments;  ///< rig set: the parts that get --role, and PART=ROLE pairs
+    std::vector<std::string> label_sets, mesh_pairs;   ///< rig label --set PART=LABEL, rig mesh --pair A=B
     bool in_train{false};  ///< rig winding: put the mesh back in the train
     bool apply_solution{false};  ///< rig solve: declare the mesh of a candidate
     int pick{0};           ///< rig solve: which candidate
@@ -146,6 +149,10 @@ int cmd_import(const Options& o) {
     if (o.up.empty() || o.up == "auto") opt.auto_axis = true;
     else opt.features.dial_axis = parse_axis(o.up);
     opt.features.min_teeth = o.min_teeth;
+    opt.cache_project = o.project_out;
+    const ohs::cli::ImportHooks hooks = ohs::cli::import_hooks();
+    opt.progress = hooks.progress;
+    opt.cancel = hooks.cancel;
     opt.rig.beat_rate_vph = o.beat_rate;
     if (!o.preset_file.empty()) {
         opt.rig.presets = ohs::app::load_role_presets(o.preset_file);
@@ -404,19 +411,53 @@ int cmd_kinematics(const Options& o) {
 
 int cmd_rig_set(const Options& o) {
     ohs::model::Movement m = ohs::model::load_rig(o.project);
-    const auto role = ohs::model::role_from_string(o.role_name);
-    if (!role) throw ohs::Error("unknown role '" + o.role_name + "'");
+    std::vector<std::pair<std::string, ohs::model::Role>> roles;
+    if (!o.part_names.empty()) {
+        if (o.role_name.empty()) throw ohs::Error("give --role for the parts named, or use --assign PART=ROLE");
+        const auto role = ohs::model::role_from_string(o.role_name);
+        if (!role) throw ohs::Error("unknown role '" + o.role_name + "'");
+        for (const std::string& part : o.part_names) roles.emplace_back(part, *role);
+    }
+    for (const std::string& assignment : o.assignments) {
+        // The last '=' splits them: a part name may hold a colon (OM10-00197:2) but a role name holds no '='.
+        const auto eq = assignment.rfind('=');
+        if (eq == std::string::npos || eq == 0) throw ohs::Error("--assign wants PART=ROLE, not '" + assignment + "'");
+        const std::string role_name = assignment.substr(eq + 1);
+        const auto role = ohs::model::role_from_string(role_name);
+        if (!role) throw ohs::Error("unknown role '" + role_name + "'");
+        roles.emplace_back(assignment.substr(0, eq), *role);
+    }
+    if (roles.empty()) throw ohs::Error("name the parts to change, with --role, or give --assign PART=ROLE");
     ohs::rigging::RigOptions rig;
     rig.min_teeth = o.min_teeth;
-    ohs::rigging::set_role(m, o.part_name, *role, rig);
+    ohs::rigging::set_roles(m, roles, rig);
     ohs::model::save_rig(m, o.project);
-    std::cout << o.part_name << " is now " << o.role_name << "; " << m.mobiles.size() << " mobiles, " << m.meshes.size()
-              << " meshes\n";
+    if (roles.size() == 1) {
+        std::cout << roles.front().first << " is now " << ohs::model::to_string(roles.front().second) << "; ";
+    } else {
+        std::cout << roles.size() << " parts changed; ";
+    }
+    std::cout << m.mobiles.size() << " mobiles, " << m.meshes.size() << " meshes\n";
     return kExitOk;
 }
 
 int cmd_rig_label(const Options& o) {
     ohs::model::Movement m = ohs::model::load_rig(o.project);
+    if (!o.label_sets.empty()) {
+        // Several at once: nothing is written unless every part is there.
+        if (!o.part_name.empty()) throw ohs::Error("give a part and a label, or --set PART=LABEL, not both");
+        for (const std::string& set : o.label_sets) {
+            const auto eq = set.find('=');
+            if (eq == std::string::npos || eq == 0) throw ohs::Error("--set wants PART=LABEL, not '" + set + "'");
+            const int idx = m.find_component(set.substr(0, eq));
+            if (idx < 0) throw ohs::Error("no component named '" + set.substr(0, eq) + "'");
+            m.components[static_cast<std::size_t>(idx)].label = set.substr(eq + 1);
+        }
+        ohs::model::save_rig(m, o.project);
+        std::cout << o.label_sets.size() << " labels set\n";
+        return kExitOk;
+    }
+    if (o.part_name.empty()) throw ohs::Error("name a part, or give --set PART=LABEL");
     const int idx = m.find_component(o.part_name);
     if (idx < 0) throw ohs::Error("no component named '" + o.part_name + "'");
     m.components[static_cast<std::size_t>(idx)].label = o.label_text;
@@ -512,9 +553,22 @@ int cmd_rig_winding(const Options& o) {
 int cmd_rig_mesh(const Options& o) {
     ohs::model::Movement m = ohs::model::load_rig(o.project);
     ohs::rigging::RigOptions rig;
-    ohs::rigging::add_manual_mesh(m, o.part_name, o.part_b, rig);
+    std::vector<std::pair<std::string, std::string>> pairs;
+    if (!o.part_name.empty() || !o.part_b.empty()) pairs.emplace_back(o.part_name, o.part_b);
+    for (const std::string& pair : o.mesh_pairs) {
+        // Part names hold colons (OM10-00197:2) but no '=': the pair splits there.
+        const auto eq = pair.find('=');
+        if (eq == std::string::npos || eq == 0 || eq + 1 == pair.size()) throw ohs::Error("--pair wants A=B, not '" + pair + "'");
+        pairs.emplace_back(pair.substr(0, eq), pair.substr(eq + 1));
+    }
+    if (pairs.empty() || (pairs.front().first.empty() || pairs.front().second.empty())) {
+        throw ohs::Error("name two parts, or give --pair A=B");
+    }
+    // Nothing is written unless every mesh could be declared.
+    for (const auto& [a, b] : pairs) ohs::rigging::add_manual_mesh(m, a, b, rig);
     ohs::model::save_rig(m, o.project);
-    std::cout << o.part_name << " now meshes with " << o.part_b << "; " << m.meshes.size() << " meshes\n";
+    if (pairs.size() == 1) std::cout << pairs.front().first << " now meshes with " << pairs.front().second << "; " << m.meshes.size() << " meshes\n";
+    else std::cout << pairs.size() << " meshes declared; " << m.meshes.size() << " meshes\n";
     return kExitOk;
 }
 
@@ -525,7 +579,7 @@ int cmd_animate(const Options& o) {
 
     fs::path step = o.step_override;
     if (step.empty()) step = fs::path(o.project).parent_path() / m.source_geometry;
-    const auto parts = ohs::geometry::import_cad(step);
+    const auto parts = ohs::geometry::load_parts(step, o.project, o.step_override.empty());
 
     ohs::animation::AnimationOptions opt;
     opt.duration_seconds = o.duration;
@@ -645,15 +699,17 @@ int ohs::cli::run(int argc, char** argv) {
 
     auto* set = rig->add_subcommand("set", "Override a part's role and re-infer mobiles and meshes");
     set->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);
-    set->add_option("part", o.part_name, "Part name")->required();
-    set->add_option("--role", o.role_name, "plate, bridge, barrel, arbor, wheel, pinion, escape_wheel, ...")->required();
+    set->add_option("parts", o.part_names, "Parts to give the --role (any number)");
+    set->add_option("--role", o.role_name, "plate, bridge, barrel, arbor, wheel, pinion, escape_wheel, ...");
+    set->add_option("--assign", o.assignments, "PART=ROLE, repeatable: several different roles in one edit");
     set->add_option("--min-teeth", o.min_teeth, "Fewest teeth to call a part toothed")->capture_default_str();
     set->callback(pick(cmd_rig_set));
 
     auto* label = rig->add_subcommand("label", "Give a part a label to show in place of its name (none clears it)");
     label->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);
-    label->add_option("part", o.part_name, "Part name")->required();
+    label->add_option("part", o.part_name, "Part name");
     label->add_option("label", o.label_text, "The label; leave out to remove it");
+    label->add_option("--set", o.label_sets, "PART=LABEL, repeatable: several labels in one edit");
     label->callback(pick(cmd_rig_label));
 
     auto* beat = rig->add_subcommand("beat-rate", "Set the beat rate of the project, in vibrations per hour");
@@ -684,8 +740,9 @@ int ohs::cli::run(int argc, char** argv) {
 
     auto* mesh = rig->add_subcommand("mesh", "Declare that two toothed parts mesh although the geometry does not show it");
     mesh->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);
-    mesh->add_option("part", o.part_name, "First part")->required();
-    mesh->add_option("part_b", o.part_b, "Second part")->required();
+    mesh->add_option("part", o.part_name, "First part");
+    mesh->add_option("part_b", o.part_b, "Second part");
+    mesh->add_option("--pair", o.mesh_pairs, "A=B, repeatable: several meshes in one edit");
     mesh->callback(pick(cmd_rig_mesh));
 
     auto* autorig = rig->add_subcommand("auto", "Run the auto-rig again on an imported project: roles, mobiles and meshes");

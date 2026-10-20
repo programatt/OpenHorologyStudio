@@ -8,6 +8,7 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QListWidget>
 #include <QThread>
 #include <QJsonArray>
@@ -38,9 +39,12 @@
 #include <QPainter>
 #include <QPixmap>
 #include <QPointer>
+#include <QSaveFile>
 #include <QProgressBar>
 #include <QActionGroup>
 #include <QSettings>
+#include <QStandardPaths>
+#include <QToolButton>
 #include <QStyle>
 #include <QMenuBar>
 #include <QPlainTextEdit>
@@ -230,6 +234,7 @@ void MainWindow::build_ui() {
     jobs_dock->setWidget(jobs_);
     addDockWidget(Qt::BottomDockWidgetArea, jobs_dock);
     queue_ = new JobQueue(worker_program(), this);
+    queue_->set_max_parallel(2);  // a quick analysis need not wait behind a long one
     connect(queue_, &JobQueue::changed, this, &MainWindow::on_job_changed);
     connect(queue_, &JobQueue::finished, this, &MainWindow::on_job_finished);
     connect(jobs_, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem*) { cancel_job(jobs_->currentRow()); });
@@ -278,6 +283,15 @@ void MainWindow::build_ui() {
     busy_->setTextVisible(false);
     busy_->hide();
     statusBar()->addPermanentWidget(busy_);
+    cancel_load_ = new QToolButton(this);
+    cancel_load_->setText(tr("Cancel"));
+    cancel_load_->setToolTip(tr("Stop opening or importing the project"));
+    cancel_load_->hide();
+    connect(cancel_load_, &QToolButton::clicked, this, [this] {
+        import_cancel_ = true;
+        cancel_load_->setEnabled(false);
+    });
+    statusBar()->addPermanentWidget(cancel_load_);
 
     // Menus in the usual order, and a toolbar for what is used all the time.
     auto* file = menuBar()->addMenu(tr("&File"));
@@ -454,6 +468,7 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 void MainWindow::update_busy() {
     const bool busy = importing_ || unfinished_jobs() > 0;
     busy_->setVisible(busy);
+    cancel_load_->setVisible(importing_);
     busy_->setToolTip(importing_ ? tr("Opening the project") : tr("%n job(s) queued or running", nullptr, unfinished_jobs()));
 }
 
@@ -630,7 +645,7 @@ QWidget* MainWindow::build_rig_page() {
     for (int c = 1; c < 4; ++c) rig_table_->horizontalHeader()->setSectionResizeMode(c, QHeaderView::ResizeToContents);
     rig_table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     rig_table_->setSelectionBehavior(QAbstractItemView::SelectRows);
-    rig_table_->setSelectionMode(QAbstractItemView::SingleSelection);
+    rig_table_->setSelectionMode(QAbstractItemView::ExtendedSelection);  // several parts can be given a role at once
     rig_table_->setAlternatingRowColors(true);
     rig_table_->setShowGrid(false);
     auto* parts_page = new QWidget;
@@ -751,7 +766,11 @@ QWidget* MainWindow::build_rig_page() {
     connect(label_edit_, &QLineEdit::returnPressed, this, &MainWindow::on_apply_label);
     connect(rig_table_, &QTableWidget::itemSelectionChanged, this, [this] {
         const auto rows = rig_table_->selectionModel()->selectedRows();
-        if (!rows.isEmpty() && !rebuilding_) select_part(rig_table_->item(rows.first().row(), 0)->data(Qt::UserRole).toString());
+        if (rows.isEmpty() || rebuilding_) return;
+        // The part clicked last is the one the other panels follow; the rest of the selection stays for "Set role".
+        const int row = rig_table_->currentRow() >= 0 && rig_table_->selectionModel()->isRowSelected(rig_table_->currentRow())
+                            ? rig_table_->currentRow() : rows.first().row();
+        select_part(rig_table_->item(row, 0)->data(Qt::UserRole).toString());
     });
     return page;
 }
@@ -913,7 +932,11 @@ QWidget* MainWindow::build_analysis_page(const QString& title, const QString& in
 }
 
 MainWindow::~MainWindow() {
-    if (import_thread_) import_thread_->wait();  // a running import cannot be abandoned mid-write
+    if (import_thread_) {
+        import_cancel_ = true;  // stops between parts rather than waiting for the whole import
+        import_thread_->wait();  // a running import cannot be abandoned mid-write
+    }
+    cli::set_import_hooks({});
 }
 
 void MainWindow::append_log(const QString& text) {
@@ -932,11 +955,7 @@ int MainWindow::run_command(const QStringList& args, QString* out) {
         return 2;
     }
     in_command_ = true;
-    if (const int queued = unfinished_jobs(); queued > 0) {
-        statusBar()->showMessage(tr("Waiting for %1 queued job(s) to finish before running %2").arg(queued).arg(args.value(0)));
-        wait_for_jobs();  // the command line runs one command at a time
-        statusBar()->clearMessage();
-    }
+    // No wait for queued jobs: they run on their own copies of the project, and the project is saved atomically.
     std::vector<std::string> a;
     for (const QString& s : args) a.push_back(s.toStdString());
     QStringList quoted;
@@ -1036,12 +1055,26 @@ void MainWindow::open_project_async(const QString& project) {
 void MainWindow::open_demo_async(const QString& dir) {
     QDir().mkpath(dir);
     const QString step = QDir(dir).filePath("demo.step"), project = QDir(dir).filePath("demo.hsproj");
+    const QString pristine = QDir(dir).filePath("demo.pristine.hsproj");
+    // Built once per directory: the movement is the same every time, so later opens only load it (from its cache).
+    // The project is put back as it was imported, as opening the demonstration always gave a fresh movement.
+    if (QFileInfo::exists(step) && QFileInfo::exists(pristine)) {
+        QFile::remove(project);
+        if (QFile::copy(pristine, project)) {
+            load_async(tr("Opening the demonstration movement..."), {}, project, step);
+            return;
+        }
+    }
     load_async(tr("Building the demonstration movement..."),
-               {{"dev", "gen-movement", "-o", step}, {"import", step, "-o", project, "--beat-rate", "28800"}}, project, step);
+               {{"dev", "gen-movement", "-o", step}, {"import", step, "-o", project, "--beat-rate", "28800"}}, project, step,
+               [project, pristine] {
+                   QFile::remove(pristine);
+                   QFile::copy(project, pristine);
+               });
 }
 
 void MainWindow::load_async(const QString& message, const std::vector<QStringList>& commands, const QString& project,
-                            const QString& step) {
+                            const QString& step, std::function<void()> on_loaded) {
     if (importing_) {
         statusBar()->showMessage(tr("A project is already being opened"), 5000);
         return;
@@ -1062,6 +1095,16 @@ void MainWindow::load_async(const QString& message, const std::vector<QStringLis
         cli_args.emplace_back();
         for (const QString& a : args) cli_args.back().push_back(a.toStdString());
     }
+    import_cancel_ = false;
+    cancel_load_->setEnabled(true);
+    cli::ImportHooks hooks;
+    hooks.cancel = &import_cancel_;
+    hooks.progress = [this](std::size_t done, std::size_t total) {
+        QMetaObject::invokeMethod(this, [this, done, total] {
+            if (importing_) statusBar()->showMessage(tr("Importing: part %1 of %2").arg(done).arg(total));
+        }, Qt::QueuedConnection);
+    };
+    cli::set_import_hooks(hooks);
     QThread* thread = QThread::create([result, cli_args, project, step] {
         for (const auto& args : cli_args) {
             result->captured.push_back(cli::run_captured(args));
@@ -1073,10 +1116,11 @@ void MainWindow::load_async(const QString& message, const std::vector<QStringLis
             result->error = QString::fromUtf8(e.what());
         }
     });
-    connect(thread, &QThread::finished, this, [this, thread, result, commands, step, project] {
+    connect(thread, &QThread::finished, this, [this, thread, result, commands, step, project, on_loaded] {
         thread->deleteLater();
         import_thread_ = nullptr;
         importing_ = false;
+        cli::set_import_hooks({});
         update_busy();
         for (std::size_t i = 0; i < result->captured.size(); ++i) {
             QStringList quoted;
@@ -1088,7 +1132,8 @@ void MainWindow::load_async(const QString& message, const std::vector<QStringLis
             if (!captured.err.empty()) append_log(QString::fromStdString(captured.err).trimmed());
             append_log(tr("exit code %1").arg(captured.exit_code));
             if (captured.exit_code != 0) {
-                statusBar()->showMessage(tr("%1 failed; see the log").arg(commands[i].value(0)), 8000);
+                const bool cancelled = import_cancel_ && QString::fromStdString(captured.err).contains("cancelled");
+                statusBar()->showMessage(cancelled ? tr("Import cancelled") : tr("%1 failed; see the log").arg(commands[i].value(0)), 8000);
                 return;
             }
         }
@@ -1100,6 +1145,7 @@ void MainWindow::load_async(const QString& message, const std::vector<QStringLis
         undo_->clear();  // the history belongs to one project
         install_scene(project, step, result->scene);
         statusBar()->showMessage(tr("Opened %1").arg(QFileInfo(project).fileName()), 5000);
+        if (on_loaded) on_loaded();
     });
     import_thread_ = thread;
     thread->start();
@@ -1137,13 +1183,11 @@ void MainWindow::attach_job_journal() {
 
 bool MainWindow::restore_project(const QByteArray& text) {
     if (project_.isEmpty()) return false;
-    QFile f(project_);
-    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    QSaveFile f(project_);  // a job reading the project sees the old file or the new one, never half of one
+    if (!f.open(QIODevice::WriteOnly) || f.write(text) != text.size() || !f.commit()) {
         append_log(tr("Cannot write %1").arg(project_));
         return false;
     }
-    f.write(text);
-    f.close();
     history_ << "# the project file was restored by undo or redo";
     return reload_rig();
 }
@@ -1541,6 +1585,10 @@ void MainWindow::refresh_panels() {
     // One repaint of each view at the end instead of one per inserted row.
     tree_->setUpdatesEnabled(false);
     rig_table_->setUpdatesEnabled(false);
+    // A ResizeToContents column measures every row on every insert, which makes filling the tables quadratic in
+    // the part count. Switch to fixed widths while they are filled and size the columns once at the end.
+    tree_->header()->setSectionResizeMode(1, QHeaderView::Fixed);
+    for (int c = 1; c < 4; ++c) rig_table_->horizontalHeader()->setSectionResizeMode(c, QHeaderView::Fixed);
 
     tree_->clear();
     std::vector<QTreeWidgetItem*> mobile_items;
@@ -1551,9 +1599,10 @@ void MainWindow::refresh_panels() {
     }
     auto* fixed = new QTreeWidgetItem(tree_, {tr("fixed parts"), QString()});
     fixed->setExpanded(true);
+    const std::vector<int> mobile_at = m.mobile_index();
     for (std::size_t i = 0; i < m.components.size(); ++i) {
         const auto& c = m.components[i];
-        const int mob = m.mobile_of(static_cast<int>(i));
+        const int mob = mobile_at[i];
         auto* parent = mob >= 0 ? mobile_items[mob] : fixed;
         auto* item = new QTreeWidgetItem(parent, {QString::fromStdString(c.display_name()),
                                                   QString::fromUtf8(model::to_string(c.role).data())});
@@ -1608,6 +1657,8 @@ void MainWindow::refresh_panels() {
     }
     if (const int keep = mesh_box_->findText(partner); keep >= 0) mesh_box_->setCurrentIndex(keep);
     refresh_rig_review();
+    tree_->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    for (int c = 1; c < 4; ++c) rig_table_->horizontalHeader()->setSectionResizeMode(c, QHeaderView::ResizeToContents);
     tree_->setUpdatesEnabled(true);
     rig_table_->setUpdatesEnabled(true);
     rebuilding_ = false;
@@ -1726,7 +1777,7 @@ void MainWindow::select_part(const QString& name) {
     for (int row = 0; row < rig_table_->rowCount(); ++row) {
         const auto* item = rig_table_->item(row, 0);
         if (item && item->data(Qt::UserRole).toString() == name) {
-            rig_table_->selectRow(row);
+            if (!rig_table_->selectionModel()->isRowSelected(row)) rig_table_->selectRow(row);  // keep a multiple selection
             rig_table_->scrollToItem(item);
             break;
         }
@@ -1912,14 +1963,10 @@ void MainWindow::on_run_analysis() {
         const QString part = args.value(args.indexOf("--part") + 1);
         args << "--vtu" << QFileInfo(project_).dir().filePath(part + ".shock.vtu");
     }
+    // One run gives the text and the data for the plot or the screen: the data is written beside the project as well.
+    if (args.value(0) == "timegrapher") args << "--csv" << project_ + ".timegrapher.csv" << "--json-out" << project_ + ".timegrapher.json";
+    if (args.value(0) == "timekeeping") args << "--json-out" << project_ + ".timekeeping.json";
     submit(static_cast<QPushButton*>(sender())->text(), args);
-    if (args.value(0) == "timegrapher") {
-        // The same run again with its beats written out, for the screen.
-        QStringList screen{"--json", "timegrapher"};
-        screen << args.mid(1) << "--csv" << project_ + ".timegrapher.csv";
-        submit(tr("Timegrapher screen data"), screen);
-    }
-    if (args.value(0) == "timekeeping") submit(tr("Timekeeping plot data"), {"--json", "timekeeping", project_});
 }
 
 bool MainWindow::change_role(const QString& part, const QString& role) {
@@ -1929,6 +1976,24 @@ bool MainWindow::change_role(const QString& part, const QString& role) {
     const QString from = QString::fromUtf8(model::to_string(scene_->movement().components[index].role).data());
     if (from == role) return true;
     return edit_project(tr("Role of %1: %2 to %3").arg(part, from, role), {"rig", "set", project_, part, "--role", role});
+}
+
+bool MainWindow::change_roles(const QStringList& parts, const QString& role) {
+    if (!scene_ || parts.isEmpty()) return false;
+    if (parts.size() == 1) return change_role(parts.first(), role);
+    QStringList args{"rig", "set", project_};
+    int changing = 0;
+    for (const QString& part : parts) {
+        const int index = scene_->movement().find_component(part.toStdString());
+        if (index < 0) return false;
+        const QString from = QString::fromUtf8(model::to_string(scene_->movement().components[static_cast<std::size_t>(index)].role).data());
+        if (from == role) continue;
+        args << part;
+        ++changing;
+    }
+    if (changing == 0) return true;
+    args << "--role" << role;
+    return edit_project(tr("Role of %n part(s): %1", nullptr, changing).arg(role), args);
 }
 
 bool MainWindow::change_label(const QString& part, const QString& label) {
@@ -1994,7 +2059,13 @@ void MainWindow::on_apply_role() {
         statusBar()->showMessage(tr("Select a part first"), 4000);
         return;
     }
-    change_role(QString::fromStdString(viewport_->selected()), role_box_->currentText());
+    // Every row selected in the part list gets the role, as one edit; with a single selection it is the selected part.
+    QStringList parts;
+    for (const QModelIndex& row : rig_table_->selectionModel()->selectedRows()) {
+        parts << rig_table_->item(row.row(), 0)->data(Qt::UserRole).toString();
+    }
+    if (parts.size() < 2) parts = {QString::fromStdString(viewport_->selected())};
+    change_roles(parts, role_box_->currentText());
 }
 
 QString MainWindow::worker_program() {
@@ -2011,8 +2082,33 @@ QString MainWindow::worker_program() {
 
 int MainWindow::unfinished_jobs() const { return queue_->unfinished(); }
 
+namespace {
+
+// A job's copy of the project is `<stem>.job<N><ext>` beside it, so it finds the same CAD file and cache.
+const QRegularExpression& snapshot_pattern() {
+    static const QRegularExpression pattern(R"(\.job\d+(\.[^./\\]*)?$)");
+    return pattern;
+}
+
+}  // namespace
+
+QString MainWindow::snapshot_project() {
+    static quint64 counter = static_cast<quint64>(QDateTime::currentMSecsSinceEpoch());
+    const QFileInfo info(project_);
+    const QString copy = info.dir().filePath(
+        info.completeBaseName() + QString(".job%1").arg(++counter) + (info.suffix().isEmpty() ? QString() : "." + info.suffix()));
+    QFile::remove(copy);
+    return QFile::copy(project_, copy) ? copy : QString();
+}
+
 void MainWindow::submit(const QString& label, const QStringList& args) {
-    queue_->submit(label, args);
+    // The job reads the project as it is now: a later rig edit changes the project, not this job's input.
+    QStringList job_args = args;
+    const int at = job_args.indexOf(project_);
+    if (at >= 0 && !project_.isEmpty()) {
+        if (const QString copy = snapshot_project(); !copy.isEmpty()) job_args[at] = copy;
+    }
+    queue_->submit(label, job_args);
     statusBar()->showMessage(tr("Started: %1. The result appears in the Results panel.").arg(label), 5000);
 }
 
@@ -2040,13 +2136,23 @@ void MainWindow::on_job_changed(int index) {
     QFont f = jobs_->font();
     f.setBold(job.state == JobQueue::State::Running);
     item->setFont(f);
+    // A finished job no longer needs its copy of the project.
+    if (job.state == JobQueue::State::Done || job.state == JobQueue::State::Failed || job.state == JobQueue::State::Cancelled) {
+        for (const QString& a : job.args) {
+            if (snapshot_pattern().match(a).hasMatch() && QFileInfo(a).dir() == QFileInfo(project_).dir()) QFile::remove(a);
+        }
+    }
     update_busy();
 }
 
 void MainWindow::on_job_finished(int index) {
     const auto& job = queue_->jobs()[static_cast<std::size_t>(index)];
     QStringList quoted;
-    for (const QString& s : job.args) quoted << shell_quote(s);
+    // The session script names the project, not the job's copy of it.
+    for (QString s : job.args) {
+        if (snapshot_pattern().match(s).hasMatch() && QFileInfo(s).dir() == QFileInfo(project_).dir()) s = project_;
+        quoted << shell_quote(s);
+    }
     history_ << "ohs " + quoted.join(' ');
     append_log("$ ohs " + quoted.join(' '));
     if (!job.err.isEmpty()) append_log(job.err.trimmed());
@@ -2060,11 +2166,26 @@ void MainWindow::on_job_finished(int index) {
 }
 
 void MainWindow::show_result(const QStringList& args, const QString& out, int code) {
-    // The JSON timekeeping job only feeds the plot: rate against amplitude from the full, half and low wind.
-    if (args.size() >= 2 && args[0] == "--json" && args[1] == "timekeeping") {
-        if (code != 0) return;
+    results_->setPlainText(out + (code == 0 ? QString() : tr("\n(exit code %1: see the log)").arg(code)));
+    // The panel may be closed, or behind the Log or Jobs tab: bring it forward so that a run is seen to have finished.
+    results_dock_->show();
+    results_dock_->raise();
+    statusBar()->showMessage(code == 0 ? tr("Finished: the result is in the Results panel") : tr("Failed (exit code %1): see the Results and Log panels").arg(code), 8000);
+
+    // The data written by the same run, for the plot (rate against amplitude from the full, half and low wind) or the screen.
+    const int data_at = args.indexOf("--json-out");
+    if (code != 0 || data_at < 0) return;
+    QFile data(args.value(data_at + 1));
+    if (!data.open(QIODevice::ReadOnly)) {
+        append_log(tr("The data of the run is missing: %1").arg(data.fileName()));
+        return;
+    }
+    const QString json_text = QString::fromUtf8(data.readAll());
+    if (args.value(0) == "timegrapher") {
+        show_timegrapher(args, json_text);
+    } else if (args.value(0) == "timekeeping") {
         try {
-            const auto j = nlohmann::json::parse(out.toStdString());
+            const auto j = nlohmann::json::parse(json_text.toStdString());
             std::vector<std::pair<double, double>> pts;
             for (const char* key : {"full", "half", "low"})
                 if (j.contains(key)) pts.emplace_back(j[key].at("amplitude_deg").get<double>(), j[key].at("rate_s_per_day").get<double>());
@@ -2073,18 +2194,7 @@ void MainWindow::show_result(const QStringList& args, const QString& out, int co
         } catch (const std::exception& e) {
             append_log(tr("Plot data unreadable: %1").arg(e.what()));
         }
-        return;
     }
-    if (args.size() >= 2 && args[0] == "--json" && args[1] == "timegrapher") {
-        if (code != 0) return;  // the text job of the same run says why
-        show_timegrapher(args, out);
-        return;
-    }
-    results_->setPlainText(out + (code == 0 ? QString() : tr("\n(exit code %1: see the log)").arg(code)));
-    // The panel may be closed, or behind the Log or Jobs tab: bring it forward so that a run is seen to have finished.
-    results_dock_->show();
-    results_dock_->raise();
-    statusBar()->showMessage(code == 0 ? tr("Finished: the result is in the Results panel") : tr("Failed (exit code %1): see the Results and Log panels").arg(code), 8000);
 }
 
 void MainWindow::show_timegrapher(const QStringList& args, const QString& json_text) {
@@ -2125,7 +2235,7 @@ void MainWindow::on_import() {
 }
 
 void MainWindow::on_demo() {
-    open_demo_async(QDir::temp().filePath("ohs-demo"));
+    open_demo_async(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/demo-" + OHS_VERSION);
 }
 
 }  // namespace ohs::gui

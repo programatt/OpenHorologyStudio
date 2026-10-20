@@ -44,6 +44,7 @@ add_executable(ohs_tests
   unit/netgen_test.cpp
   unit/pmi_test.cpp
   unit/hairspring_test.cpp
+  unit/performance_test.cpp
   integration/pipeline_test.cpp
   integration/animation_test.cpp
   integration/keyless_animation_test.cpp

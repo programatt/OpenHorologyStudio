@@ -13,6 +13,7 @@
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <Bnd_OBB.hxx>
 #include <GeomAbs_SurfaceType.hxx>
+#include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <gp_Cylinder.hxx>
 #include <BRepGProp.hxx>
@@ -26,6 +27,7 @@
 #include <gp_Trsf.hxx>
 
 #include "geometry/profile.hpp"
+#include "geometry/section.hpp"
 
 namespace ohs::geometry {
 
@@ -67,8 +69,15 @@ struct Outline {
 
 Outline sample_outline(const TopoDS_Shape& shape, double z, double cx, double cy, const FeatureOptions& o) {
     Outline out;
-    BRepAlgoAPI_Section section(shape, gp_Pln(gp_Pnt(0, 0, z), gp_Dir(0, 0, 1)));
-    if (!section.IsDone()) return out;
+    // A straight extrusion has the outline of its bottom face at every height: no boolean needed.
+    std::vector<TopoDS_Wire> prism;
+    const bool is_prism = prism_outline(shape, z, prism);
+    TopoDS_Shape cut;
+    if (!is_prism) {
+        BRepAlgoAPI_Section section(shape, gp_Pln(gp_Pnt(0, 0, z), gp_Dir(0, 0, 1)));
+        if (!section.IsDone()) return out;
+        cut = section.Shape();
+    }
 
     const int n = o.angular_bins;
     std::vector<double> bins(n, -1.0);
@@ -86,8 +95,16 @@ Outline sample_outline(const TopoDS_Shape& shape, double z, double cx, double cy
         out.points.push_back({r, a});
     };
 
-    for (TopExp_Explorer ex(section.Shape(), TopAbs_EDGE); ex.More(); ex.Next()) {
-        BRepAdaptor_Curve curve(TopoDS::Edge(ex.Current()));
+    std::vector<TopoDS_Edge> edges;
+    if (is_prism) {
+        for (const TopoDS_Wire& wire : prism) {
+            for (TopExp_Explorer ex(wire, TopAbs_EDGE); ex.More(); ex.Next()) edges.push_back(TopoDS::Edge(ex.Current()));
+        }
+    } else {
+        for (TopExp_Explorer ex(cut, TopAbs_EDGE); ex.More(); ex.Next()) edges.push_back(TopoDS::Edge(ex.Current()));
+    }
+    for (const TopoDS_Edge& edge : edges) {
+        BRepAdaptor_Curve curve(edge);
         // Parameter-uniform samples; the count follows a coarse length estimate so that small
         // closed edges (an arbor's circle) still cover every angular bin.
         const double u0 = curve.FirstParameter();
@@ -152,6 +169,8 @@ void fit_box(const TopoDS_Shape& shape, model::PartFeatures& f) {
 // split over several faces or runs through a stack of them.
 void find_holes(const TopoDS_Shape& shape, model::PartFeatures& f) {
     constexpr double kMerge = 1e-4;
+    // One classifier for the part: building it explores the whole solid, which costs far more than a probe.
+    BRepClass3d_SolidClassifier classifier(shape);
     for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next()) {
         const TopoDS_Face face = TopoDS::Face(ex.Current());
         BRepAdaptor_Surface surface(face);
@@ -166,7 +185,7 @@ void find_holes(const TopoDS_Shape& shape, model::PartFeatures& f) {
         const gp_Vec radial(gp_Pnt(a.X(), a.Y(), p.Z()), p);
         if (radial.Magnitude() < 1e-12) continue;
         const gp_Pnt inside = p.Translated(-0.2 * r * radial.Normalized());
-        BRepClass3d_SolidClassifier classifier(shape, inside, 1e-7);
+        classifier.Perform(inside, 1e-7);
         if (classifier.State() != TopAbs_OUT) continue;
         bool known = false;
         for (const model::Hole& h : f.holes) {

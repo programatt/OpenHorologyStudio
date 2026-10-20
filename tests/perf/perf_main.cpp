@@ -10,8 +10,14 @@
 #include <iostream>
 #include <map>
 #include <numbers>
+#include <sstream>
 #include <string>
 
+#include <filesystem>
+
+#include <spdlog/spdlog.h>
+
+#include "app/import.hpp"
 #include "dynamics/timekeeping.hpp"
 #include "dynamics/torque_chain.hpp"
 #include "fea/analysis.hpp"
@@ -19,7 +25,11 @@
 #include "gear/gear.hpp"
 #include "lessons/lessons.hpp"
 #include "manufacturing/collision.hpp"
+#include "geometry/features.hpp"
+#include "geometry/part_cache.hpp"
+#include "geometry/procedural.hpp"
 #include "geometry/section.hpp"
+#include "geometry/step_io.hpp"
 #include "manufacturing/dfm.hpp"
 #include "manufacturing/gear_export.hpp"
 #include "manufacturing/tolerance.hpp"
@@ -56,6 +66,7 @@ fea::Model cantilever(int nx, int order) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    spdlog::set_level(spdlog::level::warn);  // the import logs what it read to standard output, where the JSON goes
     const int runs = argc > 1 ? std::max(1, std::atoi(argv[1])) : 3;
     std::map<std::string, double> out;
 
@@ -107,6 +118,31 @@ int main(int argc, char** argv) {
         TopoDS_Shape solid;
         out["gear_solid_75_teeth"] = best_of(runs, [&] { solid = manufacturing::gear_solid(s, 0.8); });
         out["section_region_75_tooth_solid"] = best_of(runs, [&] { geometry::section_region(solid, 0.4, 0.001, 0.002); });
+        // Feature extraction of that wheel: the mass properties, the hole search over every cylindrical face, the outline
+        // section and the tooth fits. `find_holes` once built a classifier per face and took most of an import.
+        geometry::ImportedPart wheel{"wheel", solid};
+        out["extract_features_75_tooth_wheel"] = best_of(runs, [&] { geometry::extract_features(wheel, {}); });
+    }
+    {
+        // Import and the geometry cache on the generated movement: the STEP read, the whole import (features on
+        // threads, auto-rig), and what opening a project reads instead of the STEP once it has been imported.
+        // OCCT reports on every STEP it writes or reads on standard output, where the JSON goes: keep that out of it.
+        std::ostringstream chatter;
+        struct Silence {
+            std::streambuf* old;
+            explicit Silence(std::ostringstream& to) : old(std::cout.rdbuf(to.rdbuf())) {}
+            ~Silence() { std::cout.rdbuf(old); }
+        } silence(chatter);
+        const std::filesystem::path dir = std::filesystem::temp_directory_path() / "ohs_perf_import";
+        std::filesystem::create_directories(dir);
+        const std::filesystem::path step = dir / "movement.step", project = dir / "movement.hsproj";
+        geometry::export_step(geometry::make_test_movement(), step);
+        out["step_read_generated_movement"] = best_of(runs, [&] { geometry::import_step(step); });
+        out["import_movement_generated"] = best_of(std::max(1, runs - 1), [&] { app::import_movement(step, {}); });
+        const auto parts = geometry::import_step(step);
+        out["part_cache_write"] = best_of(runs, [&] { geometry::write_parts_cache(project, step, parts); });
+        out["part_cache_read"] = best_of(runs, [&] { geometry::load_parts(step, project, false); });
+        std::filesystem::remove_all(dir);
     }
     {
         reports::ReportOptions o;

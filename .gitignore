@@ -1,6 +1,8 @@
 build/
 .vcpkg/
 *.hsproj
+# The geometry cache beside a project (the parts as BRep, the display mesh): rebuilt from the CAD file.
+*.ohscache/
 # Third-party CAD (e.g. openmovement OM10, CC BY-SA 3.0) must never be committed.
 *.stp
 *.step

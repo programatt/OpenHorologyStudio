@@ -100,6 +100,19 @@ ohs-gui movement.hsproj
   --size 1280x720` (add `--view`, `--explode`), which renders and exits without opening a window.
 - **File, Save session as script** writes every command you ran as a shell script that repeats it.
 
+## Large movements
+
+An import is the slow step (10 to 20 seconds for a 160-part movement): the status bar shows "Importing: part 37 of
+166" and *Cancel* stops it between parts. It leaves a cache beside the project, `movement.hsproj.ohscache`, holding
+the parts and the display mesh, and the project then opens in a fraction of a second. The cache is used only while
+the CAD file is unchanged; delete the folder to drop it, and it is safe to leave out of version control. The
+analyses read it too, so `ohs dfm` and the other geometry commands skip the CAD file's 9 seconds of reading.
+
+An edit of the rig (a role, a label, a mesh) does not wait for queued analyses: each analysis works on a copy of the
+project made when you queued it (`movement.job<N>.hsproj`, removed when it ends), so its result matches the rig it
+was asked about. Two analyses run at a time. Select several rows of the Rig tab's part list and *Set role* to give
+them all a role in one undoable step.
+
 ## Not in the window
 
 The viewport has no OpenCASCADE viewer, VTK or PBR materials: the flat-shaded triangles, the field plot and the

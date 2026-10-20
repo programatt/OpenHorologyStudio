@@ -8,6 +8,8 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QGuiApplication>
+#include <QOpenGLWidget>
 #include <QLabel>
 #include <QCheckBox>
 #include <QComboBox>
@@ -39,6 +41,8 @@
 #include <QMenu>
 #include <QUndoStack>
 #include <QTreeWidgetItemIterator>
+#include <BRepPrimAPI_MakeBox.hxx>
+#include <gp_Pnt.hxx>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
@@ -123,6 +127,115 @@ TEST_CASE("gui: the renderer is a setting, falls back to the painter without a G
     CHECK_FALSE(view.using_opengl());
 }
 
+// The GPU keeps the parts still and moves them with a matrix: the turn of the train, the exploded view, the cut-away
+// plane and the selection must come out as the painter draws them. Needs a hardware GPU and a display (skipped without).
+TEST_CASE("gui: OpenGL draws the turned, exploded, cut and selected movement as the painter does", "[gui][renderer][gl]") {
+    app();
+    if (!ohs::gui::Viewport::gpu().hardware || QGuiApplication::platformName() == "offscreen") {
+        SUCCEED("no hardware GPU on a real display here: nothing to compare");
+        return;
+    }
+    const QString dir = fresh_dir("gl-parity");
+    const QString step = QDir(dir).filePath("demo.step"), project = QDir(dir).filePath("demo.hsproj");
+    REQUIRE(ohs::cli::run_captured({"dev", "gen-movement", "-o", step.toStdString()}).exit_code == 0);
+    REQUIRE(ohs::cli::run_captured({"import", step.toStdString(), "-o", project.toStdString(), "--beat-rate", "28800"}).exit_code == 0);
+    auto scene = std::make_shared<ohs::gui::Scene>(ohs::gui::Scene::load(project.toStdString()));
+    ohs::gui::Viewport view;
+    view.resize(480, 360);
+    view.set_scene(scene);
+    view.set_renderer(ohs::gui::Renderer::OpenGL);
+    view.show();
+    for (int i = 0; i < 20; ++i) QCoreApplication::processEvents();
+    REQUIRE(view.using_opengl());
+    auto* surface = view.findChild<QOpenGLWidget*>();
+    REQUIRE(surface);
+
+    // Pixels that differ clearly: edges differ a little between the antialiasing of the two.
+    const auto differing = [](const QImage& a, const QImage& b) {
+        REQUIRE(a.size() == b.size());
+        const QImage x = a.convertToFormat(QImage::Format_RGB32), y = b.convertToFormat(QImage::Format_RGB32);
+        int bad = 0;
+        for (int row = 0; row < x.height(); ++row) {
+            for (int col = 0; col < x.width(); ++col) {
+                const QRgb p = x.pixel(col, row), q = y.pixel(col, row);
+                if (std::max({std::abs(qRed(p) - qRed(q)), std::abs(qGreen(p) - qGreen(q)), std::abs(qBlue(p) - qBlue(q))}) > 48) ++bad;
+            }
+        }
+        return bad / static_cast<double>(x.width() * x.height());
+    };
+    const auto compare = [&](const char* what) {
+        view.repaint();
+        const QImage gpu = surface->grabFramebuffer();
+        const QImage painter = view.render(view.size());
+        CHECK(coloured_pixels(gpu) > 1000);
+        const double off = differing(gpu.size() == painter.size() ? gpu : gpu.scaled(painter.size()), painter);
+        INFO(what << ": " << off * 100 << " % of the pixels differ");
+        CHECK(off < 0.04);
+        gpu.save(QDir(dir).filePath(QString("gl-%1.png").arg(what)));
+        painter.save(QDir(dir).filePath(QString("painter-%1.png").arg(what)));
+    };
+
+    compare("rest");
+    scene->set_time(5000.0);  // the train has turned
+    compare("turned");
+    scene->set_explode(0.8);
+    compare("exploded");
+    scene->set_explode(0.0);
+    ohs::gui::SectionPlane cut;
+    cut.enabled = true;
+    cut.normal = {0, 0, 1};
+    cut.offset = 0.5 * (scene->centre()[2] + scene->radius() * 0.0);
+    scene->set_section(cut);
+    compare("cut");
+    scene->set_section({});
+    view.select("escape_wheel");
+    compare("selected");
+}
+
+TEST_CASE("gui: OpenGL draws a result field on its part", "[gui][renderer][gl]") {
+    app();
+    if (!ohs::gui::Viewport::gpu().hardware || QGuiApplication::platformName() == "offscreen") {
+        SUCCEED("no hardware GPU on a real display here: nothing to compare");
+        return;
+    }
+    const QString dir = fresh_dir("gl-field");
+    const QString step = QDir(dir).filePath("demo.step"), project = QDir(dir).filePath("demo.hsproj");
+    REQUIRE(ohs::cli::run_captured({"dev", "gen-movement", "-o", step.toStdString()}).exit_code == 0);
+    REQUIRE(ohs::cli::run_captured({"import", step.toStdString(), "-o", project.toStdString(), "--beat-rate", "28800"}).exit_code == 0);
+    auto scene = std::make_shared<ohs::gui::Scene>(ohs::gui::Scene::load(project.toStdString()));
+    ohs::gui::Viewport view;
+    view.resize(480, 360);
+    view.set_scene(scene);
+    view.set_renderer(ohs::gui::Renderer::OpenGL);
+    view.show();
+    for (int i = 0; i < 20; ++i) QCoreApplication::processEvents();
+    REQUIRE(view.using_opengl());
+    auto* surface = view.findChild<QOpenGLWidget*>();
+    REQUIRE(surface);
+    view.repaint();
+    const QImage plain = surface->grabFramebuffer();
+
+    // A field laid on the escape wheel: the triangles of its own part, with a value that rises along x.
+    const auto it = std::find_if(scene->parts().begin(), scene->parts().end(), [](const auto& p) { return p.name == "escape_wheel"; });
+    REQUIRE(it != scene->parts().end());
+    ohs::gui::FieldOverlay field;
+    field.part = it->name;
+    field.label = "test";
+    field.lo = -3;
+    field.hi = 3;
+    field.triangles = it->triangles;
+    for (const auto& t : field.triangles) field.values.push_back({t.a[0], t.b[0], t.c[0]});
+    scene->set_field(std::move(field));
+    view.repaint();
+    const QImage with_field = surface->grabFramebuffer();
+    CHECK(with_field != plain);  // the part is now coloured by the field, which differs from its role colour
+    const double hidden = scene->field() ? 0.0 : 1.0;
+    CHECK(hidden == 0.0);
+    scene->clear_field();
+    view.repaint();
+    CHECK(surface->grabFramebuffer() == plain);  // and clearing it brings the part back exactly
+}
+
 TEST_CASE("gui: the demonstration movement opens, is listed and is drawn", "[gui]") {
     app();
     ohs::gui::MainWindow w;
@@ -201,14 +314,11 @@ TEST_CASE("gui: clicking a part selects it and fills the Explain panel", "[gui]"
     CHECK(changed > 100);  // none without the tint: the wheel is wholly hidden from here
     w.select_part(QString::fromStdString(hit));
 
-    // A command does wait for the queue; one started from a click handled during that wait is refused rather
-    // than run inside the first.
-    int nested = -1;
-    QTimer::singleShot(0, &w, [&] { nested = w.run_command({"materials"}); });
+    // A command does not wait for the queue either: the job reads its own copy of the project.
     CHECK(w.run_command({"materials"}) == 0);
-    CHECK(w.unfinished_jobs() == 0);
-    CHECK(nested == 2);
-    CHECK(w.run_command({"materials"}) == 0);  // and the next one runs
+    CHECK(w.unfinished_jobs() == 1);
+    w.wait_for_jobs();
+    CHECK(w.run_command({"materials"}) == 0);
 }
 
 TEST_CASE("gui: the timeline turns the train, explode and cut-away change the picture", "[gui]") {
@@ -216,6 +326,7 @@ TEST_CASE("gui: the timeline turns the train, explode and cut-away change the pi
     ohs::gui::MainWindow w;
     w.show();
     REQUIRE(w.open_demo(fresh_dir("anim")));
+    w.viewport()->set_renderer(ohs::gui::Renderer::Software);  // the picture compared below is the painter's, not a GPU's
     auto* scene = w.viewport()->scene();
     REQUIRE(scene->can_animate());
 
@@ -367,16 +478,15 @@ TEST_CASE("gui: analyses run as queued jobs and the timekeeping plot is filled",
     REQUIRE(tor);
     tk->click();
     tor->click();
-    // Timekeeping queues two jobs (the report and its plot data), then the torque chain.
-    CHECK(w.job_list()->count() == 3);
+    // Timekeeping is one job (the report and its plot data come from the same run), then the torque chain.
+    CHECK(w.job_list()->count() == 2);
     CHECK(w.unfinished_jobs() > 0);
     // The window stays usable while they run: a queued job can be cancelled before it starts.
-    CHECK(w.cancel_job(2));
+    CHECK(w.cancel_job(1));
     w.wait_for_jobs();
     CHECK(w.unfinished_jobs() == 0);
     CHECK(w.job_list()->item(0)->text().startsWith("done"));
-    CHECK(w.job_list()->item(1)->text().startsWith("done"));
-    CHECK(w.job_list()->item(2)->text().startsWith("cancelled"));
+    CHECK(w.job_list()->item(1)->text().startsWith("cancelled"));
 
     // Rate against amplitude from the full, half and low wind.
     REQUIRE(w.plot()->points().size() == 3);
@@ -422,6 +532,38 @@ TEST_CASE("gui: role changes can be undone and redone", "[gui]") {
     // The same role again is not a change.
     REQUIRE(w.change_role(part, QString::fromUtf8(ohs::model::to_string(original).data())));
     CHECK(w.undo_stack()->count() == 1);
+}
+
+TEST_CASE("gui: several parts get a role in one edit, and one undo puts them all back", "[gui]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_demo(fresh_dir("multi-role")));
+    const auto role_of = [&](const QString& part) {
+        const auto& m = w.viewport()->scene()->movement();
+        return m.components[m.find_component(part.toStdString())].role;
+    };
+    const auto first = role_of("fourth_wheel"), second = role_of("center_wheel");
+    REQUIRE(first != ohs::model::Role::Screw);
+
+    // Selecting two rows of the part list and applying a role is one command and one undo step.
+    for (int row = 0; row < w.rig_table()->rowCount(); ++row) {
+        const QString name = w.rig_table()->item(row, 0)->data(Qt::UserRole).toString();
+        if (name == "fourth_wheel" || name == "center_wheel") w.rig_table()->selectionModel()->select(w.rig_table()->model()->index(row, 0), QItemSelectionModel::Select | QItemSelectionModel::Rows);
+    }
+    CHECK(w.rig_table()->selectionModel()->selectedRows().size() == 2);
+    const int history_before = w.history().size();
+    REQUIRE(w.change_roles({"fourth_wheel", "center_wheel"}, "screw"));
+    CHECK(role_of("fourth_wheel") == ohs::model::Role::Screw);
+    CHECK(role_of("center_wheel") == ohs::model::Role::Screw);
+    CHECK(w.undo_stack()->count() == 1);
+    CHECK(w.history().size() == history_before + 1);
+
+    w.undo_stack()->undo();
+    CHECK(role_of("fourth_wheel") == first);
+    CHECK(role_of("center_wheel") == second);
+    // Parts that already have the role are left out: nothing to do is not an edit.
+    REQUIRE(w.change_roles({"fourth_wheel", "center_wheel"}, QString::fromUtf8(ohs::model::to_string(first).data())) == true);
 }
 
 TEST_CASE("gui: a label replaces the part name in the model tree", "[gui]") {
@@ -682,6 +824,89 @@ TEST_CASE("job queue: a running job can be cancelled, and the queue carries on",
     CHECK(q.jobs()[next].out == "after\n");
     CHECK(q.jobs()[never].state == ohs::gui::JobQueue::State::Cancelled);
     CHECK_FALSE(q.cancel(next));  // finished jobs cannot be cancelled
+}
+
+TEST_CASE("gui: the demonstration movement is built once, then opened from its cache, as imported", "[gui]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    const QString dir = fresh_dir("demo-twice");
+    auto wait_loaded = [&] {
+        QElapsedTimer t;
+        t.start();
+        while (w.is_loading() && t.elapsed() < 300000) QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    };
+    w.open_demo_async(dir);
+    wait_loaded();
+    REQUIRE(w.viewport()->scene());
+    CHECK(QFileInfo::exists(QDir(dir).filePath("demo.hsproj.ohscache/parts.brep")));
+    CHECK(QFileInfo::exists(QDir(dir).filePath("demo.hsproj.ohscache/mesh.bin")));
+    const auto role_of = [&](const QString& part) {
+        const auto& m = w.viewport()->scene()->movement();
+        return m.components[m.find_component(part.toStdString())].role;
+    };
+    const auto original = role_of("escape_wheel");
+    REQUIRE(w.change_role("escape_wheel", "plate"));
+    CHECK(role_of("escape_wheel") == ohs::model::Role::Plate);
+
+    // The second open runs no commands (nothing is generated or imported) and gives the movement as it was imported.
+    const int commands_before = w.history().size();
+    QElapsedTimer t;
+    t.start();
+    w.open_demo_async(dir);
+    wait_loaded();
+    WARN("the demonstration movement opened again in " << t.elapsed() << " ms");
+    CHECK(w.history().size() == commands_before);
+    CHECK(role_of("escape_wheel") == original);
+}
+
+TEST_CASE("gui: an import can be cancelled between parts, and reports its progress", "[gui]") {
+    app();
+    const QString dir = fresh_dir("cancel-import");
+    const QString step = QDir(dir).filePath("demo.step"), project = QDir(dir).filePath("demo.hsproj");
+    REQUIRE(ohs::cli::run_captured({"dev", "gen-movement", "-o", step.toStdString()}).exit_code == 0);
+
+    std::atomic<std::size_t> last{0}, total{0};
+    ohs::cli::ImportHooks hooks;
+    hooks.progress = [&](std::size_t done, std::size_t n) {
+        last = done;
+        total = n;
+    };
+    ohs::cli::set_import_hooks(hooks);
+    REQUIRE(ohs::cli::run_captured({"import", step.toStdString(), "-o", project.toStdString()}).exit_code == 0);
+    CHECK(total > 5);
+    CHECK(last == total);
+
+    std::atomic<bool> stop{true};
+    hooks.cancel = &stop;
+    ohs::cli::set_import_hooks(hooks);
+    QFile::remove(project);
+    const auto cancelled = ohs::cli::run_captured({"import", step.toStdString(), "-o", project.toStdString()});
+    ohs::cli::set_import_hooks({});
+    CHECK(cancelled.exit_code != 0);
+    CHECK(cancelled.err.find("cancelled") != std::string::npos);
+    CHECK_FALSE(QFileInfo::exists(project));  // no half-made project is left behind
+}
+
+TEST_CASE("job queue: a quick job does not wait behind a long one when two may run at once", "[gui][jobs]") {
+    app();
+    ohs::gui::JobQueue q("/bin/sh");
+    q.set_max_parallel(2);
+    const int slow = q.submit("slow", {"-c", "sleep 60"});
+    const int quick = q.submit("quick", {"-c", "echo quick"});
+    const int third = q.submit("third", {"-c", "echo third"});
+    CHECK(q.jobs()[slow].state == ohs::gui::JobQueue::State::Running);
+    CHECK(q.jobs()[quick].state == ohs::gui::JobQueue::State::Running);
+    CHECK(q.jobs()[third].state == ohs::gui::JobQueue::State::Queued);  // only two at once
+    QElapsedTimer clock;
+    clock.start();
+    while (q.jobs()[third].state != ohs::gui::JobQueue::State::Done && clock.elapsed() < 20000) QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+    CHECK(q.jobs()[quick].state == ohs::gui::JobQueue::State::Done);
+    CHECK(q.jobs()[third].out == "third\n");  // started when the quick one ended, with the slow one still running
+    CHECK(q.jobs()[slow].state == ohs::gui::JobQueue::State::Running);
+    CHECK(q.cancel(slow));
+    q.wait();
+    CHECK(q.jobs()[slow].state == ohs::gui::JobQueue::State::Cancelled);
 }
 
 TEST_CASE("job queue: unfinished jobs survive a restart and finished ones keep their results", "[gui][jobs]") {
@@ -1348,17 +1573,27 @@ TEST_CASE("gui: the stem turns, a click rides up a tooth of the barrel and a spr
 // Hidden (run with `ohs_gui_tests "[bench]"`): where the time goes on the demonstration movement.
 TEST_CASE("bench: scene load, frame and pick times of the demonstration movement", "[.][bench]") {
     app();
-    const QString dir = fresh_dir("bench");
-    const QString step = QDir(dir).filePath("demo.step"), project = QDir(dir).filePath("demo.hsproj");
-    REQUIRE(ohs::cli::run_captured({"dev", "gen-movement", "-o", step.toStdString()}).exit_code == 0);
-    REQUIRE(ohs::cli::run_captured({"import", step.toStdString(), "-o", project.toStdString(), "--beat-rate", "28800"})
-                .exit_code == 0);
+    // OHS_BENCH_PROJECT names a larger project to measure (its CAD file beside it); the default is the demonstration.
+    QString project = qEnvironmentVariable("OHS_BENCH_PROJECT"), step;
+    if (project.isEmpty()) {
+        const QString dir = fresh_dir("bench");
+        step = QDir(dir).filePath("demo.step");
+        project = QDir(dir).filePath("demo.hsproj");
+        REQUIRE(ohs::cli::run_captured({"dev", "gen-movement", "-o", step.toStdString()}).exit_code == 0);
+        REQUIRE(ohs::cli::run_captured({"import", step.toStdString(), "-o", project.toStdString(), "--beat-rate", "28800"})
+                    .exit_code == 0);
+    }
     QElapsedTimer t;
     t.start();
     auto scene = std::make_shared<ohs::gui::Scene>(ohs::gui::Scene::load(project.toStdString(), step.toStdString()));
-    const qint64 load_ms = t.elapsed();
+    const qint64 load_ms = t.elapsed();  // from the cache when the project has one: a second run shows the difference
     std::size_t triangles = 0;
-    for (const auto& p : scene->parts()) triangles += p.triangles.size();
+    std::size_t coarse = 0;
+    for (const auto& p : scene->parts()) {
+        triangles += p.triangles.size();
+        coarse += p.coarse.size();
+    }
+    WARN(coarse << " triangles in the coarse mesh drawn while interacting");
     ohs::gui::Viewport v;
     v.resize(1024, 768);
     v.set_scene(scene);
@@ -1374,13 +1609,36 @@ TEST_CASE("bench: scene load, frame and pick times of the demonstration movement
         WARN(what << ": " << t.elapsed() / 5.0 << " ms per frame");
     };
     frame("plain");
+    {
+        QElapsedTimer f;
+        f.start();
+        for (int i = 0; i < 5; ++i) {
+            scene->set_time(i * 0.1);
+            (void)v.render(QSize(1024, 768), true);
+        }
+        WARN("fast (interactive): " << f.elapsed() / 5.0 << " ms per frame");
+    }
     scene->set_show_trails(true, 10.0);
     frame("with trails");
     scene->set_show_trails(false);
-    t.restart();
-    (void)v.pick(QPoint(512, 384));
-    const qint64 pick_ms = t.elapsed();
-    WARN("load " << load_ms << " ms, " << triangles << " triangles, centre() " << centre_ms << " ms, pick " << pick_ms << " ms");
+    (void)v.pick(QPoint(512, 384));  // builds the drawn list
+    QElapsedTimer q;
+    q.start();
+    std::string hit;
+    for (int i = 0; i < 20; ++i) hit = v.pick(QPoint(400 + 10 * i, 384));
+    const double pick_ms = q.nsecsElapsed() / 20e6;
+    v.select(hit.empty() ? scene->parts().front().name : hit);
+    q.restart();
+    for (int i = 0; i < 20; ++i) (void)v.screen_position(v.selected());
+    const double wheel_ms = q.nsecsElapsed() / 20e6;
+    q.restart();
+    for (int i = 0; i < 5; ++i) {
+        scene->set_time(i * 0.1);
+        (void)scene->draw_list();
+    }
+    const double draw_list_ms = q.nsecsElapsed() / 5e6;
+    WARN("load " << load_ms << " ms, " << triangles << " triangles, centre() " << centre_ms << " ms, pick " << pick_ms
+                 << " ms, screen_position " << wheel_ms << " ms, draw_list " << draw_list_ms << " ms");
 }
 
 TEST_CASE("gui: the rig page shows the train, what is left to rig and suggested meshes, and re-runs the auto-rig", "[gui][rig]") {
@@ -1615,4 +1873,68 @@ TEST_CASE("screenshots: the window on each workspace", "[.][screenshots]") {
     w.rig_tabs()->setCurrentIndex(1);
     pump();
     w.grab().save(QDir(out).filePath("92-rig-overlay.png"));
+}
+
+TEST_CASE("gui: a rig edit does not wait for queued jobs, and a job reads the project as it was when queued", "[gui][jobs]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    const QString dir = fresh_dir("edit-while-queued");
+    REQUIRE(w.open_demo(dir));
+    const QString project = QDir(dir).filePath("demo.hsproj");
+
+    w.submit("DFM", {"dfm", project});
+    REQUIRE(w.unfinished_jobs() == 1);
+    const auto job_args = w.job_queue()->jobs()[0].args;
+    CHECK(job_args[1] != project);  // its own copy
+    CHECK(QFileInfo(job_args[1]).dir() == QFileInfo(project).dir());
+    CHECK(QFileInfo::exists(job_args[1]));
+
+    // The edit runs at once with the job still going, and the project on disk is the edited one.
+    REQUIRE(w.change_role("escape_wheel", "plate"));
+    CHECK(w.unfinished_jobs() == 1);
+    CHECK(ohs::model::load_rig(project.toStdString()).components[0].role != ohs::model::Role::Unknown);
+
+    w.wait_for_jobs();
+    const auto& job = w.job_queue()->jobs()[0];
+    INFO("out: " << job.out.toStdString() << " err: " << job.err.toStdString() << " exit " << job.exit_code);
+    CHECK_FALSE(job.out.isEmpty());  // it ran on its copy and found the CAD file and the parts (DFM may flag findings: exit 1)
+    CHECK((job.exit_code == 0 || job.exit_code == 1));
+    CHECK_FALSE(QFileInfo::exists(job_args[1]));  // the copy is removed once the job has ended
+    // The cache the job used is the project's own.
+    CHECK(QFileInfo::exists(project + ".ohscache"));
+}
+
+// A movement of many plain parts: what a rig edit costs when the part table is long. Refilling the table used to
+// measure every row on every insert (quadratic: 0.85 s at 166 parts), so each edit froze the window.
+TEST_CASE("gui: a rig edit on a movement of 400 parts does not freeze the window", "[gui][perf]") {
+    app();
+    const QString dir = fresh_dir("many-parts");
+    const QString step = QDir(dir).filePath("many.step"), project = QDir(dir).filePath("many.hsproj");
+    std::vector<ohs::geometry::ExportPart> parts;
+    for (int i = 0; i < 400; ++i) {
+        const double w = 1.0 + 0.01 * (i % 17), h = 1.5 + 0.02 * (i % 11);
+        parts.push_back({"part_" + std::to_string(i), BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), w, h, 0.4).Shape(), 3.0 * (i % 20), 3.0 * (i / 20), 0.0, 0.0});
+    }
+    ohs::geometry::export_step(parts, step.toStdString());
+    REQUIRE(ohs::cli::run_captured({"import", step.toStdString(), "-o", project.toStdString(), "--beat-rate", "28800"}).exit_code == 0);
+
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_project(project));
+    CHECK(w.viewport()->scene()->movement().components.size() == 400);
+    // The table is only laid out while it is on screen: show its tab.
+    for (int i = 0; i < w.rig_tabs()->count(); ++i) {
+        if (w.rig_tabs()->widget(i)->isAncestorOf(w.rig_table())) w.rig_tabs()->setCurrentIndex(i);
+    }
+    QApplication::processEvents();
+    CHECK(w.rig_table()->isVisible());
+
+    QElapsedTimer t;
+    t.start();
+    for (int i = 0; i < 4; ++i) REQUIRE(w.change_role("part_7", i % 2 ? "plate" : "bridge"));
+    const double per_edit_ms = t.elapsed() / 4.0;
+    WARN("rig edit on 400 parts: " << per_edit_ms << " ms");
+    // Generous, as the machine may be busy: the quadratic table fill took several seconds here.
+    CHECK(per_edit_ms < 600.0);
 }

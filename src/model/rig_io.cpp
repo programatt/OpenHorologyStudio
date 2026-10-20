@@ -3,8 +3,11 @@
 
 #include <toml++/toml.hpp>
 
+#include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <unordered_map>
+#include <system_error>
 
 #include "core/error.hpp"
 
@@ -218,11 +221,16 @@ Movement from_toml(std::string_view text) {
         m.dial_axis = (*mv)["dial_axis"].value_or(std::string{"z"});
     }
 
-    auto index_of = [&m](const std::string& name) {
-        for (std::size_t i = 0; i < m.components.size(); ++i) {
-            if (m.components[i].features.name == name) return static_cast<int>(i);
+    // Components are all read before any reference to one, so the names are indexed once (not scanned for each).
+    std::unordered_map<std::string, int> by_name;
+    auto index_of = [&m, &by_name](const std::string& name) {
+        if (by_name.size() != m.components.size()) {
+            by_name.clear();
+            for (std::size_t i = m.components.size(); i-- > 0;) by_name[m.components[i].features.name] = static_cast<int>(i);  // the first wins, as a scan did
         }
-        throw Error("rig: reference to unknown component '" + name + "'");
+        const auto found = by_name.find(name);
+        if (found == by_name.end()) throw Error("rig: reference to unknown component '" + name + "'");
+        return found->second;
     };
 
     if (const toml::array* comps = root["component"].as_array()) {
@@ -264,10 +272,27 @@ Movement from_toml(std::string_view text) {
 }
 
 void save_rig(const Movement& movement, const std::filesystem::path& path) {
-    std::ofstream out(path, std::ios::binary);
-    if (!out) throw Error("cannot write " + path.string());
-    out << to_toml(movement);
-    if (!out) throw Error("write failed: " + path.string());
+    // Written beside the project and renamed over it: a job reading the project (or a crash while saving) sees the
+    // old file or the new one, never half of one.
+    std::filesystem::path tmp = path;
+    tmp += ".tmp";
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        if (!out) throw Error("cannot write " + path.string());
+        out << to_toml(movement);
+        out.flush();
+        if (!out) {
+            std::error_code ignored;
+            std::filesystem::remove(tmp, ignored);
+            throw Error("write failed: " + path.string());
+        }
+    }
+    std::error_code ec;
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) {
+        std::filesystem::remove(tmp, ec);
+        throw Error("cannot write " + path.string());
+    }
 }
 
 Movement load_rig(const std::filesystem::path& path) {

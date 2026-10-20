@@ -3,6 +3,7 @@
 
 #include <toml++/toml.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <regex>
 
@@ -10,6 +11,8 @@
 
 #include "core/error.hpp"
 #include "geometry/cad_io.hpp"
+#include "geometry/part_cache.hpp"
+#include "geometry/shape_groups.hpp"
 
 namespace ohs::app {
 
@@ -17,20 +20,30 @@ model::Movement import_movement(const std::filesystem::path& step_file, const Im
     const auto parts = geometry::import_cad(step_file);
     spdlog::info("read {} parts from {}", parts.size(), step_file.string());
 
+    if (!options.cache_project.empty()) geometry::write_parts_cache(options.cache_project, step_file, parts);
+
     geometry::FeatureOptions feature_options = options.features;
     if (options.auto_axis) {
         feature_options.dial_axis = geometry::detect_dial_axis(parts);
         spdlog::info("dial axis: {} (found from the geometry)", geometry::axis_name(feature_options.dial_axis));
     }
 
-    std::vector<model::PartFeatures> features;
-    features.reserve(parts.size());
-    for (const auto& part : parts) {
+    // Instances of one shape (screws, jewels, pins) are extracted by one thread in turn: see parallel_for_shapes.
+    std::vector<TopoDS_Shape> shapes;
+    shapes.reserve(parts.size());
+    for (const auto& part : parts) shapes.push_back(part.shape);
+    std::vector<model::PartFeatures> features(parts.size());
+    std::atomic<std::size_t> done{0};
+    geometry::parallel_for_shapes(shapes, [&](std::size_t i) {
+        if (options.cancel && options.cancel->load()) throw Error("import cancelled");
         const auto start = std::chrono::steady_clock::now();
-        features.push_back(geometry::extract_features(part, feature_options));
-        spdlog::debug("{}: volume {:.3f} mm3, {} teeth, {:.2f} s", part.name, features.back().volume,
-                      features.back().teeth, std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
-    }
+        features[i] = geometry::extract_features(parts[i], feature_options);
+        const std::size_t n = ++done;
+        spdlog::debug("part {} of {}: {}: volume {:.3f} mm3, {} teeth, {:.2f} s", n, parts.size(), parts[i].name,
+                      features[i].volume, features[i].teeth,
+                      std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
+        if (options.progress) options.progress(n, parts.size());
+    });
 
     rigging::RigOptions rig = options.rig;
     rig.min_teeth = options.features.min_teeth;

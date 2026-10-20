@@ -4,12 +4,14 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <exception>
 #include <numbers>
 #include <unordered_map>
 
 #include "core/error.hpp"
 #include "core/parallel.hpp"
 #include "geometry/section.hpp"
+#include "geometry/shape_groups.hpp"
 
 namespace ohs::manufacturing {
 
@@ -273,23 +275,34 @@ CollisionReport sweep_collisions(const model::Movement& m, const kinematics::Tra
 
 std::vector<CollisionPart> collision_parts(const model::Movement& m, const std::vector<geometry::ImportedPart>& step_parts, geometry::Axis axis,
                                            double tol) {
+    std::map<std::string, const geometry::ImportedPart*> by_name;
+    for (const auto& p : step_parts) by_name[p.name] = &p;
     std::vector<CollisionPart> out;
+    std::vector<TopoDS_Shape> shapes;
     for (std::size_t ci = 0; ci < m.components.size(); ++ci) {
         const auto& c = m.components[ci];
         if (c.features.volume <= 0) continue;
-        const geometry::ImportedPart* found = nullptr;
-        for (const auto& p : step_parts) {
-            if (p.name == c.features.name) found = &p;
-        }
-        if (!found) continue;
+        const auto found = by_name.find(c.features.name);
+        if (found == by_name.end()) continue;
         CollisionPart cp;
         cp.name = c.features.name;
         cp.z0 = c.features.z_min;
         cp.z1 = c.features.z_max;
         cp.mobile = m.mobile_of(static_cast<int>(ci));
-        const TopoDS_Shape shape = geometry::orient_dial_axis_to_z(found->shape, axis);
-        cp.region = geometry::section_region(shape, 0.5 * (cp.z0 + cp.z1), tol * 0.5, tol);
+        shapes.push_back(geometry::orient_dial_axis_to_z(found->second->shape, axis));
         out.push_back(std::move(cp));
+    }
+    // The sections are the slow part (seconds for a few hundred parts), and independent: on threads, each into its own slot.
+    std::vector<std::exception_ptr> failed(out.size());
+    geometry::parallel_for_shapes(shapes, [&](std::size_t k) {
+        try {
+            out[k].region = geometry::section_region(shapes[k], 0.5 * (out[k].z0 + out[k].z1), tol * 0.5, tol);
+        } catch (...) {
+            failed[k] = std::current_exception();
+        }
+    });
+    for (const std::exception_ptr& e : failed) {
+        if (e) std::rethrow_exception(e);
     }
     return out;
 }

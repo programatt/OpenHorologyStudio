@@ -69,10 +69,10 @@ ohs_library(ohs_explain explain/explain.cpp)
 target_link_libraries(ohs_explain PUBLIC ohs_kinematics)
 
 ohs_library(ohs_geometry geometry/profile.cpp geometry/step_io.cpp geometry/pmi.cpp geometry/cad_io.cpp geometry/netgen_mesh.cpp geometry/features.cpp
-            geometry/procedural.cpp geometry/section.cpp)
+            geometry/procedural.cpp geometry/section.cpp geometry/part_cache.cpp)
 target_include_directories(ohs_geometry SYSTEM PUBLIC ${OpenCASCADE_INCLUDE_DIR})
 target_link_directories(ohs_geometry PUBLIC ${OpenCASCADE_LIBRARY_DIR})
-target_link_libraries(ohs_geometry PUBLIC ohs_model ohs_mesh ${OHS_OCCT_LIBS})
+target_link_libraries(ohs_geometry PUBLIC ohs_model ohs_mesh ${OHS_OCCT_LIBS} PRIVATE spdlog::spdlog)
 
 # The DFM rule sets are embedded from data/dfm/rules.toml at configure time.
 file(READ ${PROJECT_SOURCE_DIR}/data/dfm/rules.toml OHS_DFM_TOML)
@@ -113,7 +113,7 @@ add_executable(ohs cli/entry.cpp)
 target_link_libraries(ohs PRIVATE ohs_cli)
 
 add_executable(ohs_perf ${PROJECT_SOURCE_DIR}/tests/perf/perf_main.cpp)
-target_link_libraries(ohs_perf PRIVATE ohs_lessons ohs_reports ohs_manufacturing ohs_fea ohs_gear ohs_dynamics)
+target_link_libraries(ohs_perf PRIVATE ohs_lessons ohs_reports ohs_manufacturing ohs_fea ohs_gear ohs_dynamics ohs_app spdlog::spdlog)
 
 # ---- Qt desktop application (optional) --------------------------------------------------------------
 if(OHS_BUILD_GUI)

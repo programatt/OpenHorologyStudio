@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "reports/report_builder.hpp"
 
+#include <map>
+#include <exception>
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
@@ -15,7 +17,9 @@
 #include "explain/explain.hpp"
 #include "geometry/features.hpp"
 #include "geometry/section.hpp"
+#include "geometry/shape_groups.hpp"
 #include "geometry/cad_io.hpp"
+#include "geometry/part_cache.hpp"
 #include "kinematics/kinematics.hpp"
 #include "manufacturing/collision.hpp"
 #include "rigging/rigging.hpp"
@@ -196,7 +200,7 @@ report::Document build_report(const model::Movement& m, const ReportOptions& o) 
     std::string geometry_note;
     if (!o.step_file.empty()) {
         try {
-            step_parts = geometry::import_cad(o.step_file);
+            step_parts = geometry::load_parts(o.step_file, o.cache_project, o.update_cache);
         } catch (const Error& e) {
             geometry_note = e.what();
         }
@@ -214,28 +218,38 @@ report::Document build_report(const model::Movement& m, const ReportOptions& o) 
     auto sections = [&]() -> const std::vector<Section>& {
         if (sections_built) return section_cache;
         sections_built = true;
+        std::map<std::string, const geometry::ImportedPart*> by_name;
+        for (const auto& p : step_parts) by_name[p.name] = &p;
+        std::vector<Section> built;
+        std::vector<TopoDS_Shape> shapes;
         for (std::size_t ci = 0; ci < m.components.size(); ++ci) {
             const auto& c = m.components[ci];
             if (c.features.volume <= 0) continue;
-            const geometry::ImportedPart* found = nullptr;
-            for (const auto& p : step_parts) {
-                if (p.name == c.features.name) found = &p;
-            }
-            if (!found) continue;
+            const auto found = by_name.find(c.features.name);
+            if (found == by_name.end()) continue;
             manufacturing::PartGeometry g;
             g.name = c.features.name;
             g.role = c.role;
             g.thickness = c.features.thickness();
             g.teeth = c.features.teeth;
             g.module = c.gear ? c.gear->module : 0.0;
-            if (c.gear && c.gear->pressure_angle_deg > 5) g.pressure_angle_deg = c.gear->pressure_angle_deg;
+            if (c.gear && model::has_pressure_angle(*c.gear)) g.pressure_angle_deg = c.gear->pressure_angle_deg;
             if (c.gear && c.gear->profile == "cycloidal") g.rolling_radius = c.gear->rolling_radius;
+            shapes.push_back(geometry::orient_dial_axis_to_z(found->second->shape, o.up));
+            built.push_back({static_cast<int>(ci), std::move(g)});
+        }
+        // The sections are the slow part and independent of each other: on threads, each into its own slot.
+        std::vector<char> ok(built.size(), 0);
+        geometry::parallel_for_shapes(shapes, [&](std::size_t k) {
+            const auto& f = m.components[static_cast<std::size_t>(built[k].component)].features;
             try {
-                g.region = geometry::section_region(geometry::orient_dial_axis_to_z(found->shape, o.up), 0.5 * (c.features.z_min + c.features.z_max), 0.001, 0.002);
+                built[k].geometry.region = geometry::section_region(shapes[k], 0.5 * (f.z_min + f.z_max), 0.001, 0.002);
+                ok[k] = 1;
             } catch (const Error&) {
-                continue;
             }
-            section_cache.push_back({static_cast<int>(ci), std::move(g)});
+        });
+        for (std::size_t k = 0; k < built.size(); ++k) {
+            if (ok[k]) section_cache.push_back(std::move(built[k]));
         }
         return section_cache;
     };
@@ -378,7 +392,7 @@ report::Document build_report(const model::Movement& m, const ReportOptions& o) 
                         job.component = ci;
                         job.input.spec.teeth = c.features.teeth;
                         job.input.spec.module = c.gear && c.gear->module > 0 ? c.gear->module : model::module_from_tip(c.features.outer_radius, c.features.teeth);
-                        if (c.gear && c.gear->pressure_angle_deg > 5) job.input.spec.pressure_angle_deg = c.gear->pressure_angle_deg;
+                        if (c.gear && model::has_pressure_angle(*c.gear)) job.input.spec.pressure_angle_deg = c.gear->pressure_angle_deg;
                         if (c.gear && c.gear->profile == "cycloidal") {
                             job.input.spec.profile = gear::Profile::Cycloidal;
                             job.input.spec.rolling_radius = c.gear->rolling_radius;

@@ -7,6 +7,21 @@
 
 namespace ohs::cli {
 
+namespace {
+std::mutex hooks_mutex;
+ImportHooks hooks;
+}  // namespace
+
+void set_import_hooks(ImportHooks value) {
+    std::lock_guard<std::mutex> lock(hooks_mutex);
+    hooks = std::move(value);
+}
+
+ImportHooks import_hooks() {
+    std::lock_guard<std::mutex> lock(hooks_mutex);
+    return hooks;
+}
+
 Captured run_captured(const std::vector<std::string>& args) {
     static std::mutex one_at_a_time;
     std::lock_guard<std::mutex> lock(one_at_a_time);

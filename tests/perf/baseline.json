@@ -1,14 +1,19 @@
 {
   "dfm_internal_radius_60_tooth_wheel": 6.4884e-05,
   "dfm_min_wall_60_tooth_wheel": 0.000970252,
+  "extract_features_75_tooth_wheel": 0.715003,
   "fea_assemble_tet10": 0.0185303,
   "fea_modal_4_modes": 1.49391,
   "fea_static_solve_tet10": 0.0834187,
   "gear_solid_75_teeth": 0.453585,
+  "import_movement_generated": 3.01034,
   "mesh2d_gear_sector": 0.0083239,
   "oscillator_steady_state": 0.0165058,
+  "part_cache_read": 0.0302983,
+  "part_cache_write": 0.0250326,
   "report_without_geometry": 0.441151,
   "section_region_75_tooth_solid": 0.0407432,
+  "step_read_generated_movement": 2.21403,
   "timekeeping_evaluate": 0.250369,
   "tolerance_20k_samples": 0.0488414
 }

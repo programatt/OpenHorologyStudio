@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "cli/manufacturing_cli.hpp"
 
+#include <map>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -12,7 +14,9 @@
 #include "core/error.hpp"
 #include "dynamics/calibre.hpp"
 #include "geometry/section.hpp"
+#include "geometry/shape_groups.hpp"
 #include "geometry/cad_io.hpp"
+#include "geometry/part_cache.hpp"
 #include "kinematics/kinematics.hpp"
 #include "manufacturing/collision.hpp"
 #include "manufacturing/dfm.hpp"
@@ -87,7 +91,7 @@ std::vector<manufacturing::ProcessRules> extra_rules(const MfgOptions& o) {
 std::vector<geometry::ImportedPart> load_parts(const MfgOptions& o, const model::Movement& m) {
     fs::path step = o.step_override;
     if (step.empty()) step = fs::path(o.project).parent_path() / m.source_geometry;
-    return geometry::import_cad(step);
+    return geometry::load_parts(step, o.project, o.step_override.empty());
 }
 
 int cmd_gear(const MfgOptions& options, bool as_json) {
@@ -240,28 +244,40 @@ int cmd_dfm(const MfgOptions& o, bool as_json) {
     const auto step_parts = load_parts(o, m);
 
     // One section per part, shared by every process and plugin.
-    std::vector<manufacturing::PartGeometry> parts;
-    for (const auto& c : m.components) {
+    std::map<std::string, const geometry::ImportedPart*> by_name;
+    for (const auto& p : step_parts) by_name[p.name] = &p;
+    std::vector<manufacturing::PartGeometry> built;
+    std::vector<TopoDS_Shape> shapes;
+    std::vector<std::size_t> from;  // the component each geometry belongs to
+    for (std::size_t ci = 0; ci < m.components.size(); ++ci) {
+        const auto& c = m.components[ci];
         if (c.features.volume <= 0) continue;
-        const geometry::ImportedPart* found = nullptr;
-        for (const auto& p : step_parts) {
-            if (p.name == c.features.name) found = &p;
-        }
-        if (!found) continue;
+        const auto found = by_name.find(c.features.name);
+        if (found == by_name.end()) continue;
         manufacturing::PartGeometry g;
         g.name = c.features.name;
         g.role = c.role;
         g.thickness = c.features.thickness();
         g.teeth = c.features.teeth;
         g.module = c.gear ? c.gear->module : 0.0;
-        if (c.gear && c.gear->pressure_angle_deg > 5) g.pressure_angle_deg = c.gear->pressure_angle_deg;
+        if (c.gear && model::has_pressure_angle(*c.gear)) g.pressure_angle_deg = c.gear->pressure_angle_deg;
         if (c.gear && c.gear->profile == "cycloidal") g.rolling_radius = c.gear->rolling_radius;
+        shapes.push_back(geometry::orient_dial_axis_to_z(found->second->shape, axis_of(o.up, m)));
+        from.push_back(ci);
+        built.push_back(std::move(g));
+    }
+    std::vector<char> ok(built.size(), 0);
+    geometry::parallel_for_shapes(shapes, [&](std::size_t k) {
+        const auto& f = m.components[from[k]].features;
         try {
-            g.region = geometry::section_region(geometry::orient_dial_axis_to_z(found->shape, axis_of(o.up, m)), 0.5 * (c.features.z_min + c.features.z_max), 0.002, 0.002);
+            built[k].region = geometry::section_region(shapes[k], 0.5 * (f.z_min + f.z_max), 0.002, 0.002);
+            ok[k] = 1;
         } catch (const Error&) {
-            continue;
         }
-        parts.push_back(std::move(g));
+    });
+    std::vector<manufacturing::PartGeometry> parts;
+    for (std::size_t k = 0; k < built.size(); ++k) {
+        if (ok[k]) parts.push_back(std::move(built[k]));
     }
 
     int errors = 0, warnings = 0;
@@ -317,6 +333,8 @@ int cmd_collisions(const MfgOptions& o, bool as_json) {
 int cmd_report(const MfgOptions& o, bool as_json) {
     const model::Movement m = model::load_rig(o.project);
     reports::ReportOptions ro;
+    ro.cache_project = o.project;
+    ro.update_cache = o.step_override.empty();
     ro.step_file = o.step_override.empty() ? (fs::path(o.project).parent_path() / m.source_geometry).string() : o.step_override;
     if (!fs::exists(ro.step_file)) ro.step_file.clear();
     ro.up = axis_of(o.up, m);

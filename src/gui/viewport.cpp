@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "gui/viewport.hpp"
 
+#include "core/parallel.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <numbers>
@@ -73,6 +75,8 @@ void Viewport::set_scene(std::shared_ptr<Scene> scene) {
     selected_.clear();
     drawn_valid_ = false;
     drawn_ = {};
+    coarse_valid_ = false;
+    drawn_coarse_ = {};
     ++look_;
     fit();
 }
@@ -82,8 +86,43 @@ const Scene::Drawn& Viewport::drawn() const {
         drawn_ = scene_->draw_list();
         drawn_revision_ = scene_->revision();
         drawn_valid_ = true;
+        // One run of triangles per part (draw_list goes part by part): its box and centroid, for picking and the wheel.
+        bounds_.assign(scene_->parts().size(), PartBounds{});
+        std::vector<std::size_t> corners(bounds_.size(), 0);
+        std::vector<std::array<double, 3>> sum(bounds_.size(), {0, 0, 0});
+        for (std::size_t i = 0; i < drawn_.triangles.size(); ++i) {
+            PartBounds& b = bounds_[static_cast<std::size_t>(drawn_.part_index[i])];
+            const std::size_t k = static_cast<std::size_t>(drawn_.part_index[i]);
+            if (corners[k] == 0) {
+                b.first = i;
+                b.lo = {1e300, 1e300, 1e300};
+                b.hi = {-1e300, -1e300, -1e300};
+            }
+            b.last = i + 1;
+            for (const Point3* p : {&drawn_.triangles[i].a, &drawn_.triangles[i].b, &drawn_.triangles[i].c}) {
+                for (int a = 0; a < 3; ++a) {
+                    b.lo[a] = std::min(b.lo[a], (*p)[a]);
+                    b.hi[a] = std::max(b.hi[a], (*p)[a]);
+                    sum[k][a] += (*p)[a];
+                }
+                ++corners[k];
+            }
+        }
+        for (std::size_t k = 0; k < bounds_.size(); ++k) {
+            if (corners[k] == 0) continue;
+            for (int a = 0; a < 3; ++a) bounds_[k].centroid[a] = sum[k][a] / static_cast<double>(corners[k]);
+        }
     }
     return drawn_;
+}
+
+const Scene::Drawn& Viewport::drawn_coarse() const {
+    if (!coarse_valid_ || coarse_revision_ != scene_->revision()) {
+        drawn_coarse_ = scene_->draw_list(true);
+        coarse_revision_ = scene_->revision();
+        coarse_valid_ = true;
+    }
+    return drawn_coarse_;
 }
 
 QColor Viewport::backdrop() const {
@@ -368,58 +407,72 @@ void Viewport::draw_overlays(QPainter& painter, const QSize& size) const {
     }
 }
 
-std::vector<Viewport::Projected> Viewport::project(const QSize& size) const {
-    std::vector<Projected> out;
-    if (!scene_) return out;
-    const Scene::Drawn& drawn = this->drawn();
-    const Point3 c = scene_->centre();
-    const double r = scene_->radius();
-    const double scale = 0.45 * std::min(size.width(), size.height()) / r * zoom_;
+Viewport::View Viewport::view_for(const QSize& size) const {
     const double yaw = yaw_ * std::numbers::pi / 180.0, pitch = pitch_ * std::numbers::pi / 180.0;
-    const double cy = std::cos(yaw), sy = std::sin(yaw), cp = std::cos(pitch), sp = std::sin(pitch);
+    return {scene_->centre(), 0.45 * std::min(size.width(), size.height()) / scene_->radius() * zoom_,
+            std::cos(yaw), std::sin(yaw), std::cos(pitch), std::sin(pitch),
+            size.width() / 2.0 + pan_x_, size.height() / 2.0 + pan_y_};
+}
 
+bool Viewport::project_triangle(const Scene::Drawn& drawn, std::size_t i, const View& v, Projected& p) const {
     // Rotate about Z by yaw, then tilt about X by pitch (0 looks down the dial axis, -90 is edge-on, -180 looks from below).
-    auto view = [&](const Point3& p, double& sx, double& sy_, double& depth) {
-        const double x = p[0] - c[0], y = p[1] - c[1], z = p[2] - c[2];
-        const double x1 = cy * x - sy * y, y1 = sy * x + cy * y;
-        const double y2 = cp * y1 - sp * z, z2 = sp * y1 + cp * z;
-        sx = size.width() / 2.0 + pan_x_ + scale * x1;
-        sy_ = size.height() / 2.0 + pan_y_ - scale * y2;
-        depth = z2;
+    auto to_view = [&](const Point3& q) {
+        const double x = q[0] - v.c[0], y = q[1] - v.c[1], z = q[2] - v.c[2];
+        const double x1 = v.cy * x - v.sy * y, y1 = v.sy * x + v.cy * y;
+        return Point3{x1, v.cp * y1 - v.sp * z, v.sp * y1 + v.cp * z};  // x right, y up, z towards the viewer
     };
     // Light from the upper left, in view space.
     const double lx = -0.4, ly = 0.5, lz = 0.77;
-    const bool cull = !scene_->section().enabled;
-    out.reserve(drawn.triangles.size());
-    for (std::size_t i = 0; i < drawn.triangles.size(); ++i) {
-        const Triangle& t = drawn.triangles[i];
-        Projected p{};
-        double d[3];
-        view(t.a, p.x[0], p.y[0], d[0]);
-        view(t.b, p.x[1], p.y[1], d[1]);
-        view(t.c, p.x[2], p.y[2], d[2]);
-        p.depth = (d[0] + d[1] + d[2]) / 3.0;
-        p.part = drawn.part_index[i];
-        p.value = (drawn.values[i][0] + drawn.values[i][1] + drawn.values[i][2]) / 3.0;
-
-        // Face normal in view space (x right, y up, z towards the viewer).
-        auto vp = [&](const Point3& q) {
-            const double x = q[0] - c[0], y = q[1] - c[1], z = q[2] - c[2];
-            const double x1 = cy * x - sy * y, y1 = sy * x + cy * y;
-            return Point3{x1, cp * y1 - sp * z, sp * y1 + cp * z};
-        };
-        const Point3 a = vp(t.a), b = vp(t.b), cc = vp(t.c);
-        const Point3 u{b[0] - a[0], b[1] - a[1], b[2] - a[2]}, v{cc[0] - a[0], cc[1] - a[1], cc[2] - a[2]};
-        Point3 n{u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]};
-        const double len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-        if (len < 1e-12) continue;
-        // The far side of a closed solid is always covered by its near side, so it is not drawn: about half the
-        // triangles. Not with a cut-away (it shows the inside), nor on a field plot (its faces are not oriented).
-        if (n[2] < 0 && cull && scene_->parts()[static_cast<std::size_t>(p.part)].closed && std::isnan(p.value)) continue;
-        const double dot = (n[0] * lx + n[1] * ly + n[2] * lz) / len;
-        p.shade = 0.35 + 0.65 * std::abs(dot);
-        out.push_back(p);
+    const Triangle& t = drawn.triangles[i];
+    p = Projected{};
+    const Point3 a = to_view(t.a), b = to_view(t.b), cc = to_view(t.c);
+    const Point3* corners[3] = {&a, &b, &cc};
+    for (int k = 0; k < 3; ++k) {
+        p.x[k] = v.half_w + v.scale * (*corners[k])[0];
+        p.y[k] = v.half_h - v.scale * (*corners[k])[1];
     }
+    p.depth = (a[2] + b[2] + cc[2]) / 3.0;
+    p.part = drawn.part_index[i];
+    p.value = (drawn.values[i][0] + drawn.values[i][1] + drawn.values[i][2]) / 3.0;
+
+    const Point3 u{b[0] - a[0], b[1] - a[1], b[2] - a[2]}, w{cc[0] - a[0], cc[1] - a[1], cc[2] - a[2]};
+    const Point3 n{u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]};
+    const double len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+    if (len < 1e-12) return false;
+    // The far side of a closed solid is always covered by its near side, so it is not drawn: about half the
+    // triangles. Not with a cut-away (it shows the inside), nor on a field plot (its faces are not oriented).
+    if (n[2] < 0 && !scene_->section().enabled && scene_->parts()[static_cast<std::size_t>(p.part)].closed && std::isnan(p.value)) return false;
+    const double dot = (n[0] * lx + n[1] * ly + n[2] * lz) / len;
+    p.shade = 0.35 + 0.65 * std::abs(dot);
+    return true;
+}
+
+std::vector<Viewport::Projected> Viewport::project(const QSize& size, bool skip_tiny) const {
+    std::vector<Projected> out;
+    if (!scene_) return out;
+    // A frame that is about to be replaced is drawn from the coarse mesh, without the triangles under a pixel.
+    const Scene::Drawn& drawn = skip_tiny ? drawn_coarse() : this->drawn();
+    const View view = view_for(size);
+    // Projecting is independent per triangle: chunks of the list on threads, joined in order.
+    constexpr std::size_t kChunk = 16384;
+    const std::size_t n = drawn.triangles.size();
+    const std::size_t chunks = (n + kChunk - 1) / kChunk;
+    std::vector<std::vector<Projected>> parts(chunks);
+    parallel_for(chunks, [&](std::size_t c) {
+        std::vector<Projected>& mine = parts[c];
+        mine.reserve(std::min(kChunk, n - c * kChunk));
+        for (std::size_t i = c * kChunk; i < std::min(n, (c + 1) * kChunk); ++i) {
+            Projected p;
+            if (!project_triangle(drawn, i, view, p)) continue;
+            if (skip_tiny) {
+                const double area2 = std::abs((p.x[1] - p.x[0]) * (p.y[2] - p.y[0]) - (p.x[2] - p.x[0]) * (p.y[1] - p.y[0]));
+                if (area2 < 0.5) continue;  // under a quarter of a pixel
+            }
+            mine.push_back(p);
+        }
+    }, chunks > 1 ? 0u : 1u);
+    out.reserve(n);
+    for (auto& mine : parts) out.insert(out.end(), mine.begin(), mine.end());
     // Painter's algorithm: far to near. View-space z grows towards the viewer.
     std::sort(out.begin(), out.end(), [](const Projected& a, const Projected& b) { return a.depth < b.depth; });
     return out;
@@ -451,7 +504,7 @@ void Viewport::draw(QPainter& painter, const QSize& size, bool fast) const {
     std::vector<QPolygonF> selected_outline;  // the selected part's triangles, drawn again on top
     std::vector<QColor> colours(scene_->parts().size());
     for (std::size_t i = 0; i < colours.size(); ++i) colours[i] = part_colour(static_cast<int>(i), selected);
-    for (const Projected& p : project(size)) {
+    for (const Projected& p : project(size, fast)) {
         QColor base = colours[static_cast<std::size_t>(p.part)];
         if (p.part == selected) selected_outline.push_back(QPolygonF({{p.x[0], p.y[0]}, {p.x[1], p.y[1]}, {p.x[2], p.y[2]}}));
         if (field && !std::isnan(p.value)) {
@@ -538,35 +591,61 @@ void Viewport::draw_notes(QPainter& painter) const {
     }
 }
 
-QImage Viewport::render(const QSize& size) const {
+QImage Viewport::render(const QSize& size, bool fast) const {
     QImage image(size, QImage::Format_ARGB32);
     QPainter painter(&image);
-    draw(painter, size);
+    draw(painter, size, fast);
     return image;
 }
 
 std::string Viewport::pick(const QPoint& pos) const {
-    const auto tris = project(size());
-    // Nearest to the viewer first.
-    for (auto it = tris.rbegin(); it != tris.rend(); ++it) {
-        const QPolygonF poly({{it->x[0], it->y[0]}, {it->x[1], it->y[1]}, {it->x[2], it->y[2]}});
-        if (poly.containsPoint(QPointF(pos), Qt::OddEvenFill)) return scene_->parts()[it->part].name;
+    if (!scene_) return {};
+    // The front-most triangle under the cursor, as the painter's order would have it, without projecting or sorting
+    // the whole movement: only the parts whose screen box holds the point are looked into.
+    const Scene::Drawn& drawn = this->drawn();
+    const View view = view_for(size());
+    const double px = pos.x(), py = pos.y();
+    double best_depth = -1e300;
+    int best_part = -1;
+    for (std::size_t k = 0; k < bounds_.size(); ++k) {
+        const PartBounds& b = bounds_[k];
+        if (b.last <= b.first) continue;
+        double x0 = 1e300, x1 = -1e300, y0 = 1e300, y1 = -1e300;
+        for (int corner = 0; corner < 8; ++corner) {
+            const Point3 q{corner & 1 ? b.hi[0] : b.lo[0], corner & 2 ? b.hi[1] : b.lo[1], corner & 4 ? b.hi[2] : b.lo[2]};
+            const QPointF s = to_screen(q, size());
+            x0 = std::min(x0, s.x());
+            x1 = std::max(x1, s.x());
+            y0 = std::min(y0, s.y());
+            y1 = std::max(y1, s.y());
+        }
+        if (px < x0 - 1 || px > x1 + 1 || py < y0 - 1 || py > y1 + 1) continue;
+        for (std::size_t i = b.first; i < b.last; ++i) {
+            Projected p;
+            if (!project_triangle(drawn, i, view, p) || p.depth <= best_depth) continue;
+            // On the same side of all three edges.
+            const double d0 = (p.x[1] - p.x[0]) * (py - p.y[0]) - (p.y[1] - p.y[0]) * (px - p.x[0]);
+            const double d1 = (p.x[2] - p.x[1]) * (py - p.y[1]) - (p.y[2] - p.y[1]) * (px - p.x[1]);
+            const double d2 = (p.x[0] - p.x[2]) * (py - p.y[2]) - (p.y[0] - p.y[2]) * (px - p.x[2]);
+            const bool negative = d0 < 0 || d1 < 0 || d2 < 0, positive = d0 > 0 || d1 > 0 || d2 > 0;
+            if (negative && positive) continue;
+            best_depth = p.depth;
+            best_part = p.part;
+        }
     }
-    return {};
+    return best_part < 0 ? std::string{} : scene_->parts()[static_cast<std::size_t>(best_part)].name;
 }
 
 std::optional<QPointF> Viewport::screen_position(const std::string& part) const {
     if (!scene_ || part.empty()) return std::nullopt;
-    double x = 0, y = 0;
-    int n = 0;
-    for (const Projected& p : project(size())) {
-        if (scene_->parts()[static_cast<std::size_t>(p.part)].name != part) continue;
-        x += p.x[0] + p.x[1] + p.x[2];
-        y += p.y[0] + p.y[1] + p.y[2];
-        n += 3;
+    (void)drawn();
+    const auto& parts = scene_->parts();
+    for (std::size_t k = 0; k < parts.size() && k < bounds_.size(); ++k) {
+        if (parts[k].name != part) continue;
+        if (bounds_[k].last <= bounds_[k].first) return std::nullopt;  // hidden
+        return to_screen(bounds_[k].centroid, size());  // one point: where the part's triangles are centred
     }
-    if (n == 0) return std::nullopt;
-    return QPointF(x / n, y / n);
+    return std::nullopt;
 }
 
 void Viewport::mousePressEvent(QMouseEvent* e) {

@@ -74,6 +74,11 @@ Options:
 Subcommands:
   check                       Validate a project's rig
   set                         Override a part's role and re-infer mobiles and meshes
+  label                       Give a part a label to show in place of its name (none clears it)
+  beat-rate                   Set the beat rate of the project, in vibrations per hour
+  solve                       Find what drives the loose end of the train, and which wheels turn the hands
+  unmesh                      Take away a mesh that was declared by hand
+  winding                     Leave a mesh out of the going train (the winding work), or put it back
   mesh                        Declare that two toothed parts mesh although the geometry does not show it
   auto                        Run the auto-rig again on an imported project: roles, mobiles and meshes
   suggest                     List toothed parts that probably mesh but were not accepted, and optionally declare them
@@ -94,16 +99,37 @@ Options:
   --strict                    Treat warnings as failures
 ```
 
+#### `ohs rig set`
+
+```text
+Override a part's role and re-infer mobiles and meshes
+Usage: ohs rig set [OPTIONS] project [parts...]
+
+Positionals:
+  project TEXT:FILE REQUIRED  Project file
+  parts TEXT ...              Parts to give the --role (any number)
+
+Options:
+  -h,--help                   Print this help message and exit
+  --role TEXT                 plate, bridge, barrel, arbor, wheel, pinion, escape_wheel, ...
+  --assign TEXT ...           PART=ROLE, repeatable: several different roles in one edit
+  --min-teeth INT [6]         Fewest teeth to call a part toothed
+```
+
 #### `ohs rig label`
 
 ```text
 Give a part a label to show in place of its name (none clears it)
-Usage: ohs rig label [OPTIONS] project part [label]
+Usage: ohs rig label [OPTIONS] project [part] [label]
 
 Positionals:
   project TEXT:FILE REQUIRED  Project file
-  part TEXT REQUIRED          Part name
+  part TEXT                   Part name
   label TEXT                  The label; leave out to remove it
+
+Options:
+  -h,--help                   Print this help message and exit
+  --set TEXT ...              PART=LABEL, repeatable: several labels in one edit
 ```
 
 #### `ohs rig beat-rate`
@@ -115,6 +141,9 @@ Usage: ohs rig beat-rate [OPTIONS] project rate
 Positionals:
   project TEXT:FILE REQUIRED  Project file
   rate FLOAT REQUIRED         Vibrations per hour: 18000, 21600, 25200, 28800 ...
+
+Options:
+  -h,--help                   Print this help message and exit
 ```
 
 #### `ohs rig solve`
@@ -127,6 +156,7 @@ Positionals:
   project TEXT:FILE REQUIRED  Project file
 
 Options:
+  -h,--help                   Print this help message and exit
   --beat-rate FLOAT           Beat rate in vph (the project's when left out)
   --min-teeth INT [6]         Fewest teeth to call a part toothed
   --apply                     Declare the mesh of the best candidate
@@ -143,10 +173,10 @@ Positionals:
   project TEXT:FILE REQUIRED  Project file
   part TEXT REQUIRED          One of the two parts
   partner TEXT REQUIRED       The other
-```
 
-A mesh found from the geometry cannot be removed, as it would be found again; `ohs rig winding` leaves it out of the
-train instead.
+Options:
+  -h,--help                   Print this help message and exit
+```
 
 #### `ohs rig winding`
 
@@ -160,38 +190,24 @@ Positionals:
   partner TEXT REQUIRED       The other
 
 Options:
-  --in-train                  Put the mesh back in the train
-```
-
-#### `ohs rig set`
-
-```text
-Override a part's role and re-infer mobiles and meshes
-Usage: ohs rig set [OPTIONS] project part
-
-Positionals:
-  project TEXT:FILE REQUIRED  Project file
-  part TEXT REQUIRED          Part name
-
-Options:
   -h,--help                   Print this help message and exit
-  --role TEXT REQUIRED        plate, bridge, barrel, arbor, wheel, pinion, escape_wheel, ...
-  --min-teeth INT [6]         Fewest teeth to call a part toothed
+  --in-train                  Put the mesh back in the train
 ```
 
 #### `ohs rig mesh`
 
 ```text
 Declare that two toothed parts mesh although the geometry does not show it
-Usage: ohs rig mesh [OPTIONS] project part part_b
+Usage: ohs rig mesh [OPTIONS] project [part] [part_b]
 
 Positionals:
   project TEXT:FILE REQUIRED  Project file
-  part TEXT REQUIRED          First part
-  part_b TEXT REQUIRED        Second part
+  part TEXT                   First part
+  part_b TEXT                 Second part
 
 Options:
   -h,--help                   Print this help message and exit
+  --pair TEXT ...             A=B, repeatable: several meshes in one edit
 ```
 
 #### `ohs rig auto`
@@ -411,6 +427,7 @@ Options:
   --jitter-us FLOAT [0]       Timing noise in microseconds rms
   --seed UINT [1]             Noise seed
   --csv TEXT                  Write the beats as CSV
+  --json-out TEXT             Also write the readout as JSON to this file (one run for the text and the data)
   --no-trace                  Print only the readout
 ```
 
@@ -427,6 +444,7 @@ Options:
   -h,--help                   Print this help message and exit
   --calibre TEXT:FILE         Calibre parameters (TOML); default: a reference lever calibre
   --beat-rate FLOAT           Beat rate in vph (default: from project)
+  --json-out TEXT             Also write the result as JSON to this file (one run for the text and the data)
 ```
 
 ### `ohs whatif`

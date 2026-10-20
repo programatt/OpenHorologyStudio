@@ -94,7 +94,7 @@ public:
     /// Name of the part under `pos` (widget coordinates), or an empty string.
     std::string pick(const QPoint& pos) const;
     /// Renders the current view; used for tests and image export.
-    QImage render(const QSize& size) const;
+    QImage render(const QSize& size, bool fast = false) const;
 
 signals:
     void part_picked(const QString& name);
@@ -114,6 +114,8 @@ private:
     /// The triangles of the visible parts in world space, worked out again only when the scene changes: orbiting,
     /// panning and zooming reuse them.
     const Scene::Drawn& drawn() const;
+    /// The same at the coarse mesh, for the frames drawn while the view is being moved.
+    const Scene::Drawn& drawn_coarse() const;
     QColor backdrop() const;
     /// The colour a part is drawn in before shading: its role, the rig and walk overlays, or the selection.
     QColor part_colour(int part, int selected) const;
@@ -129,7 +131,25 @@ private:
         double shade;
         double value;  ///< field value at the triangle (mean of its corners), NaN without a field
     };
-    std::vector<Projected> project(const QSize& size) const;
+    /// The visible triangles in view, far to near. With `skip_tiny` those that cover well under a pixel are left out:
+    /// a frame drawn while interacting has no use for them.
+    std::vector<Projected> project(const QSize& size, bool skip_tiny = false) const;
+    /// The camera for one size of widget, worked out once for all the triangles.
+    struct View {
+        Point3 c;
+        double scale, cy, sy, cp, sp, half_w, half_h;
+    };
+    View view_for(const QSize& size) const;
+    /// Projects triangle `i` of the drawn list; false when it is degenerate or the far side of a closed solid.
+    bool project_triangle(const Scene::Drawn& drawn, std::size_t i, const View& view, Projected& out) const;
+    /// What picking needs per part, worked out when the drawn list is: the part's triangles are one run of the
+    /// list, and its box and centroid are in world space.
+    struct PartBounds {
+        std::size_t first{0}, last{0};  ///< triangles [first, last) of the drawn list
+        Point3 lo{}, hi{};
+        Point3 centroid{};
+    };
+    mutable std::vector<PartBounds> bounds_;
     /// `fast` fills the triangles without antialiasing or outlines: about a ninth of the time, with jagged
     /// silhouettes, for frames that are about to be replaced.
     void draw(QPainter& painter, const QSize& size, bool fast = false) const;
@@ -162,6 +182,9 @@ private:
     mutable Scene::Drawn drawn_;
     mutable std::uint64_t drawn_revision_{0};
     mutable bool drawn_valid_{false};
+    mutable Scene::Drawn drawn_coarse_;
+    mutable std::uint64_t coarse_revision_{0};
+    mutable bool coarse_valid_{false};
 };
 
 }  // namespace ohs::gui

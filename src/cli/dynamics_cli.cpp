@@ -39,7 +39,7 @@ constexpr int kExitCheckFailed = 1;
 
 struct DynOptions {
     std::string project, calibre_file, position = "dial_up", level = "reduced", engine = "builtin", duration = "60s", out, events_out;
-    std::string study_file, readings_file, csv_out, calibre_out;
+    std::string study_file, readings_file, csv_out, calibre_out, json_out;
     double wind = 1.0, beat_rate = 0.0, jitter_us = 0.0;
     double amp_tolerance_percent = 2.0, rate_tolerance = 1.0;
     unsigned long seed = 1;
@@ -228,13 +228,15 @@ int cmd_timegrapher(const DynOptions& o, bool as_json) {
     simulate_oscillator(s.calibre, c, log.sink());
     const TimegrapherTrace tr = virtual_timegrapher(log.events, s.calibre, settle, settle + seconds, o.jitter_us, o.seed);
     if (!o.csv_out.empty()) write_file(o.csv_out, trace_csv(tr));
-    if (as_json) {
-        json j = {{"position", to_string(pos)}, {"wind", o.wind}, {"beats", tr.reading.beats},
-                  {"rate_s_per_day", tr.reading.rate_s_per_day}, {"amplitude_deg", tr.reading.amplitude_deg},
-                  {"beat_error_ms", tr.reading.beat_error_ms}, {"beat_rate_vph", s.calibre.beat_rate_vph},
-                  {"lift_angle_deg", s.calibre.lift_angle_deg}};
-        std::cout << j.dump(2) << '\n';
-    } else {
+    if (as_json || !o.json_out.empty()) {
+        const json j = {{"position", to_string(pos)}, {"wind", o.wind}, {"beats", tr.reading.beats},
+                        {"rate_s_per_day", tr.reading.rate_s_per_day}, {"amplitude_deg", tr.reading.amplitude_deg},
+                        {"beat_error_ms", tr.reading.beat_error_ms}, {"beat_rate_vph", s.calibre.beat_rate_vph},
+                        {"lift_angle_deg", s.calibre.lift_angle_deg}};
+        if (!o.json_out.empty()) write_file(o.json_out, j.dump(2) + "\n");
+        if (as_json) std::cout << j.dump(2) << '\n';
+    }
+    if (!as_json) {
         std::cout << "virtual timegrapher, " << to_string(pos) << ", wind " << o.wind << ", " << seconds << " s\n";
         if (!o.no_trace) std::cout << trace_ascii(tr);
         else
@@ -247,7 +249,7 @@ int cmd_timegrapher(const DynOptions& o, bool as_json) {
 int cmd_timekeeping(const DynOptions& o, bool as_json) {
     const Setup s = load_setup(o);
     const Timekeeping t = evaluate(s.calibre, s.chain);
-    if (as_json) {
+    if (as_json || !o.json_out.empty()) {
         json j;
         j["full"] = to_json(t.full);
         j["half"] = to_json(t.half);
@@ -264,8 +266,11 @@ int cmd_timekeeping(const DynOptions& o, bool as_json) {
                                   {"lost_friction", t.budget.lost_friction_j}, {"lost_air", t.budget.lost_air_j},
                                   {"lost_passing_spring", t.budget.lost_passing_j}, {"efficiency", t.budget.efficiency}};
         j["escapement"] = to_string(s.calibre.escapement);
-        std::cout << j.dump(2) << '\n';
-        return kExitOk;
+        if (!o.json_out.empty()) write_file(o.json_out, j.dump(2) + "\n");
+        if (as_json) {
+            std::cout << j.dump(2) << '\n';
+            return kExitOk;
+        }
     }
     std::cout << std::fixed << std::setprecision(1);
     std::cout << "amplitude dial up: " << t.full.amplitude_deg << " deg fully wound, " << t.half.amplitude_deg
@@ -480,11 +485,13 @@ void add_dynamics_commands(CLI::App& app, const bool& json_flag, std::function<i
     tg->add_option("--jitter-us", o->jitter_us, "Timing noise in microseconds rms")->capture_default_str();
     tg->add_option("--seed", o->seed, "Noise seed")->capture_default_str();
     tg->add_option("--csv", o->csv_out, "Write the beats as CSV");
+    tg->add_option("--json-out", o->json_out, "Also write the readout as JSON to this file (one run for the text and the data)");
     tg->add_flag("--no-trace", o->no_trace, "Print only the readout");
     tg->callback(pick(cmd_timegrapher));
 
     auto* tk = app.add_subcommand("timekeeping", "Amplitude, rate, isochronism, positions, power reserve and energy budget");
     common(tk);
+    tk->add_option("--json-out", o->json_out, "Also write the result as JSON to this file (one run for the text and the data)");
     tk->callback(pick(cmd_timekeeping));
 
     auto* wi = app.add_subcommand("whatif", "Compare the baseline with a modified design from a study file");

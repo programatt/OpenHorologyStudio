@@ -27,6 +27,7 @@ struct ScenePart {
     double z_min{}, z_max{};
     bool closed{false};       ///< made only of solids, with outward faces: its back faces are hidden by its front ones
     std::vector<Triangle> triangles;
+    std::vector<Triangle> coarse;  ///< the same part at a larger deflection, for frames drawn while interacting (may be empty)
 };
 
 /// A cut-away plane: triangles on the positive side of `normal . p = offset` are removed.
@@ -98,11 +99,13 @@ public:
     void set_field(FieldOverlay field) {
         field_ = std::move(field);
         has_field_ = true;
+        ++field_serial_;
         ++revision_;
     }
     void clear_field() {
         has_field_ = false;
         field_ = {};
+        ++field_serial_;
         ++revision_;
     }
     const FieldOverlay* field() const { return has_field_ ? &field_ : nullptr; }
@@ -138,6 +141,21 @@ public:
     double trail_seconds() const { return trail_seconds_; }
     std::vector<Trail> trails(int samples = 48) const;
 
+    /// Where one part is now: `m` holds the rows of the affine map [R | t] (3 x 4, row major) that takes the part's
+    /// stored triangles (in its pivot frame) to world space: the turn of its mobile, or of the stem, lever or spring
+    /// about its own axis, and the lift of the exploded view. The cut-away is not part of it. draw_list() places
+    /// every point with this, and a GPU renderer keeps the geometry still and moves it with the matrix.
+    struct PartPose {
+        std::array<double, 12> m{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
+        bool visible{true};
+    };
+    std::vector<PartPose> part_poses() const;
+    /// Moves when the stored triangles of the parts change (a load, or a rig edit that moved a pivot): a GPU copy of
+    /// them is then stale. Time, explode, cut-away, visibility and rig edits that move nothing leave it alone.
+    std::uint64_t geometry_revision() const { return geometry_revision_; }
+    /// Moves when the field overlay is set or cleared.
+    std::uint64_t field_serial() const { return field_serial_; }
+
     /// Triangles of every visible part in world space at the current time, exploded and cut.
     /// `part_index[i]` is the index into parts() of triangle i; `values[i]` the field at its corners
     /// (NaN where there is no field).
@@ -146,7 +164,7 @@ public:
         std::vector<int> part_index;
         std::vector<std::array<double, 3>> values;
     };
-    Drawn draw_list() const;
+    Drawn draw_list(bool coarse = false) const;
 
     /// Bounding box centre and radius of the assembled (unexploded) movement. Worked out once when the
     /// geometry is loaded: the viewport asks for them for every point it projects.
@@ -164,6 +182,8 @@ private:
     std::string train_error_;
     std::unordered_set<std::string> hidden_;  ///< looked up for every part on every frame
     std::uint64_t revision_{0};
+    std::uint64_t geometry_revision_{1};
+    std::uint64_t field_serial_{0};
     double time_{0};
     bool stepped_{false};
     double explode_{0};

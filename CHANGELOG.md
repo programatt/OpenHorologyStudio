@@ -8,7 +8,43 @@ Semantic Versioning, with the Python API and the plugin ABI versioned as describ
 
 Found by running the plan's gates on the real OM10 file.
 
+### Performance
+Measured on the 166-part OM10 file (18.7 MB STEP) and the generated demonstration movement, Release build, 16 threads.
+- `ohs import` takes 16 s instead of 140 s on OM10 and 3.7 s instead of 42 s on the demonstration movement. The hole
+  search built a solid classifier for every cylindrical face (104 s of the OM10 import); it now builds one per part.
+  The outline of a straight extrusion is taken from its bottom face instead of a boolean section, and the features
+  of the parts are extracted on threads. Instances of one shape (screws, jewels, pins share one `TShape`) are taken by
+  one thread in turn, since OCCT writes into the shapes it works on. The fit residuals of a wheel differ in the
+  sixth decimal place, as the outline is sampled from exact edges.
+- A geometry cache beside the project (`<project>.ohscache`): the parts as OCCT's binary BRep and the display mesh,
+  written by `ohs import` and the first open, and used while the CAD file is unchanged (size, time and a hash of its
+  first and last megabyte are checked). A missing or stale cache is never an error. Opening OM10 takes 0.1 s instead
+  of 10 s; `ohs dfm`, `collisions`, `animate`, `draw` and `fea --case shock` no longer read the STEP file again
+  (8.7 s on OM10). A file given with `--step` never replaces the cache.
+- The part sections of `ohs dfm`, `collisions` and `report` are cut on threads: 12 s to 1.5 s, 13 s to 1.9 s, and the
+  OM10 report, which crashed before, takes 4 s.
+- A rig edit in the desktop application no longer freezes the window: refilling the part table measured every row on
+  every insert (4.4 s per edit at 400 parts, 0.9 s at 166; now 30 ms). A rig edit no longer waits for queued jobs:
+  the project is saved through a temporary file and a rename, and each job reads a copy of the project made when it
+  was queued. Two jobs run at once, so a quick analysis does not wait behind a long one.
+- Timekeeping and the timegrapher run once for their text and their plot or screen (`--json-out FILE`), not twice.
+- Opening the demonstration movement builds it once per version and opens it from its cache afterwards
+  (43 s the first time and every time before, 0.06 s after). The import in the window shows its progress
+  ("Importing: part 37 of 166") and a *Cancel* button stops it between parts.
+- The OpenGL viewport keeps every part's triangles in a static buffer and moves them with a matrix per part (the turn
+  of the train, the swing of a lever, the exploded view) and a clip plane in the shader, instead of rebuilding and
+  uploading the whole vertex buffer when anything moves: 16 ms of CPU per frame on OM10 becomes 0.1 ms.
+- Picking and the zoom toward the selection no longer project every triangle: a click is 1.3 ms on OM10 (15 ms
+  before), the wheel 0.001 ms (13.5 ms). Frames drawn while the view moves use a coarse mesh and skip triangles under a
+  pixel: 27 ms instead of 52 ms on OM10 with the painter.
+- `Movement::mobile_index`, a name index when reading a rig, and preset patterns compiled once, take the cubic
+  scans out of the rigging for large assemblies.
+
 ### Added
+- `ohs rig set` takes several parts (`ohs rig set P a b c --role wheel`) or `--assign PART=ROLE` repeated, `ohs rig
+  label` takes `--set PART=LABEL` and `ohs rig mesh` takes `--pair A=B`, each one edit that writes nothing unless
+  all of it applies. The Rig tab's part list takes a multiple selection, and *Set role* gives every selected part the
+  role as one undoable edit.
 - An OpenGL viewport, chosen in *View, Renderer* (Automatic, OpenGL or Software; the `OHS_RENDERER` environment
   variable overrides it). Automatic uses the graphics card when there is one and Qt's painter when there is not
   (including a software rasteriser such as llvmpipe); OpenGL falls back to the painter when no context can be made.
@@ -108,6 +144,14 @@ Found by running the plan's gates on the real OM10 file.
 - OM10 preset: escape wheel, barrel and the barrel mesh.
 
 ### Fixed
+- `ohs fea` and `ohs report` crashed on OM10 (a segmentation fault in the sparse factorisation) when a part's fitted
+  module was far too small: the mesh of 600,000 unknowns was solved before it was checked against the size limit. The
+  limit is now checked first and the command reports it.
+- A gear fit whose pressure angle was 45 degrees or more (a doubtful module put the pitch circle far from the real one)
+  was stored, and `ohs fea` then refused the part ("the pressure angle must be between 0 and 45 degrees"). Such a fit
+  is no longer stored, and older projects with one are read as having no angle.
+- Meshing the parts of a movement on threads corrupted the shared triangulation of instances of one shape (a double
+  free on OM10); parts are now grouped by shape so that no two threads touch one.
 - A round part whose teeth are on a rim at one end, with a smooth tube between (a barrel modelled in one piece), is
   now counted: when no teeth are found at mid-height and the part is wider than that outline, other heights are
   tried. The OM10's barrel is found to have 107 teeth.

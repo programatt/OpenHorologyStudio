@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <atomic>
+#include <cstddef>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -19,5 +22,15 @@ struct Captured {
 /// Runs `ohs <args>` in this process with std::cout and std::cerr captured. One run at a time
 /// (it swaps the global stream buffers), so the Python module serialises calls.
 Captured run_captured(const std::vector<std::string>& args);
+
+/// What an application running `ohs import` in this process can watch and stop: called after each part's
+/// features are extracted (from any thread), and a flag that makes the import stop between parts.
+struct ImportHooks {
+    std::function<void(std::size_t done, std::size_t total)> progress;
+    const std::atomic<bool>* cancel{nullptr};
+};
+/// Sets the hooks the next imports use (an empty value clears them). Thread safe.
+void set_import_hooks(ImportHooks hooks);
+ImportHooks import_hooks();
 
 }  // namespace ohs::cli

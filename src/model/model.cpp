@@ -83,6 +83,16 @@ int Movement::mobile_of(int component) const {
     return -1;
 }
 
+std::vector<int> Movement::mobile_index() const {
+    std::vector<int> out(components.size(), -1);
+    for (std::size_t m = 0; m < mobiles.size(); ++m) {
+        for (int c : mobiles[m].components) {
+            if (c >= 0 && static_cast<std::size_t>(c) < out.size() && out[static_cast<std::size_t>(c)] < 0) out[static_cast<std::size_t>(c)] = static_cast<int>(m);
+        }
+    }
+    return out;
+}
+
 int Movement::find_component(std::string_view name) const {
     for (std::size_t i = 0; i < components.size(); ++i) {
         if (components[i].features.name == name) return static_cast<int>(i);

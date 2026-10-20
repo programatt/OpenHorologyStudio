@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <numbers>
 #include <regex>
+#include <unordered_map>
 
 #include "core/error.hpp"
 #include "model/followers.hpp"
@@ -105,14 +106,19 @@ bool is_flat_small(const PartFeatures& p) {
 }  // namespace
 
 Classification classify(const PartFeatures& part, const RigOptions& options) {
+    // Compiling a regex costs far more than matching it, and every part is matched against every preset: compile
+    // each pattern once per thread.
+    static thread_local std::unordered_map<std::string, std::regex> compiled;
     for (const RolePreset& preset : options.presets) {
-        std::regex re;
-        try {
-            re = std::regex(preset.pattern, std::regex::icase | std::regex::ECMAScript);
-        } catch (const std::regex_error&) {
-            throw Error("invalid preset pattern '" + preset.pattern + "'");
+        auto found = compiled.find(preset.pattern);
+        if (found == compiled.end()) {
+            try {
+                found = compiled.emplace(preset.pattern, std::regex(preset.pattern, std::regex::icase | std::regex::ECMAScript)).first;
+            } catch (const std::regex_error&) {
+                throw Error("invalid preset pattern '" + preset.pattern + "'");
+            }
         }
-        if (std::regex_search(part.name, re)) return {preset.role, 1.0, "preset"};
+        if (std::regex_search(part.name, found->second)) return {preset.role, 1.0, "preset"};
     }
 
     const std::string name = lower(part.name);
@@ -207,9 +213,14 @@ void fit_gears(Movement& m, const RigOptions& o) {
         g.addendum = f.outer_radius / g.module - f.teeth / 2.0;
         g.dedendum = f.root_radius > 0 ? f.teeth / 2.0 - f.root_radius / g.module : 0.0;
         const double pitch_radius = g.module * f.teeth / 2.0;
-        if (f.flank_rms >= 0.0 && f.flank_base_radius > 0.0 && f.flank_base_radius < pitch_radius) {
+        // A flank fit whose pressure angle the gear code would refuse (45 degrees or more) is a bad fit, not a
+        // gear: a module taken from a doubtful mesh can put the pitch circle far from the real one.
+        const double fitted_angle = f.flank_base_radius > 0.0 && f.flank_base_radius < pitch_radius
+                                        ? std::acos(f.flank_base_radius / pitch_radius) * 180.0 / std::numbers::pi
+                                        : 0.0;
+        if (f.flank_rms >= 0.0 && fitted_angle > 0.0 && fitted_angle < model::kMaxPressureAngleDeg) {
             g.base_radius = f.flank_base_radius;
-            g.pressure_angle_deg = std::acos(g.base_radius / pitch_radius) * 180.0 / std::numbers::pi;
+            g.pressure_angle_deg = fitted_angle;
             g.profile = f.flank_rms <= o.involute_rms_modules * g.module ? "involute" : "unknown";
         } else {
             g.profile = "unknown";
@@ -281,13 +292,14 @@ void infer_structure(Movement& m, const RigOptions& options) {
         }
     }
 
+    const std::vector<int> mobile_at = m.mobile_index();
     for (int i = 0; i < n; ++i) {
         const Component& ci = m.components[i];
         if (!model::is_toothed_role(ci.role) || !is_toothed(ci.features, options)) continue;
         for (int j = i + 1; j < n; ++j) {
             const Component& cj = m.components[j];
             if (!model::is_toothed_role(cj.role) || !is_toothed(cj.features, options)) continue;
-            if (m.mobile_of(i) == m.mobile_of(j)) continue;
+            if (mobile_at[static_cast<std::size_t>(i)] == mobile_at[static_cast<std::size_t>(j)]) continue;
             const double overlap = std::min(ci.features.z_max, cj.features.z_max) -
                                    std::max(ci.features.z_min, cj.features.z_min);
             if (overlap <= 0.0) continue;
@@ -371,13 +383,24 @@ void add_manual_mesh(Movement& m, const std::string& a, const std::string& b, co
     fit_gears(m, options);
 }
 
-void set_role(Movement& m, const std::string& name, Role role, const RigOptions& options) {
-    const int idx = m.find_component(name);
-    if (idx < 0) throw Error("no component named '" + name + "'");
-    m.components[idx].role = role;
-    m.components[idx].role_confidence = 1.0;
-    m.components[idx].role_source = "user";
+void set_roles(Movement& m, const std::vector<std::pair<std::string, Role>>& roles, const RigOptions& options) {
+    std::vector<int> indices;
+    for (const auto& [name, role] : roles) {
+        const int idx = m.find_component(name);
+        if (idx < 0) throw Error("no component named '" + name + "'");
+        indices.push_back(idx);
+    }
+    for (std::size_t i = 0; i < roles.size(); ++i) {
+        Component& c = m.components[static_cast<std::size_t>(indices[i])];
+        c.role = roles[i].second;
+        c.role_confidence = 1.0;
+        c.role_source = "user";
+    }
     infer_structure(m, options);
+}
+
+void set_role(Movement& m, const std::string& name, Role role, const RigOptions& options) {
+    set_roles(m, {{name, role}}, options);
 }
 
 void spot_rotors(std::vector<Component>& components) {
@@ -489,14 +512,15 @@ std::vector<MeshSuggestion> suggest_meshes(const Movement& m, const RigOptions& 
         });
     };
     std::vector<MeshSuggestion> out;
+    const std::vector<int> mobile_at = m.mobile_index();
     for (std::size_t i = 0; i < n; ++i) {
         const Component& ci = m.components[i];
-        if (!model::is_toothed_role(ci.role) || !is_toothed(ci.features, o) || m.mobile_of(static_cast<int>(i)) < 0) continue;
+        if (!model::is_toothed_role(ci.role) || !is_toothed(ci.features, o) || mobile_at[i] < 0) continue;
         for (std::size_t j = i + 1; j < n; ++j) {
             const Component& cj = m.components[j];
-            if (!model::is_toothed_role(cj.role) || !is_toothed(cj.features, o) || m.mobile_of(static_cast<int>(j)) < 0) continue;
+            if (!model::is_toothed_role(cj.role) || !is_toothed(cj.features, o) || mobile_at[j] < 0) continue;
             if (meshed[i] && meshed[j]) continue;  // nothing is left to rig for either
-            if (m.mobile_of(static_cast<int>(i)) == m.mobile_of(static_cast<int>(j))) continue;
+            if (mobile_at[i] == mobile_at[j]) continue;
             if (already(static_cast<int>(i), static_cast<int>(j))) continue;
             const PartFeatures& fi = ci.features;
             const PartFeatures& fj = cj.features;

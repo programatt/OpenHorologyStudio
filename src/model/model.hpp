@@ -104,6 +104,9 @@ struct PartFeatures {
     double thickness() const { return z_max - z_min; }
 };
 
+/// The gear code refuses a pressure angle at or above this, so a fit that gives one is not stored.
+inline constexpr double kMaxPressureAngleDeg = 45.0;
+
 /// Gear parameters fitted to a toothed part and its meshes.
 struct GearFit {
     double module{};
@@ -115,6 +118,11 @@ struct GearFit {
     double rolling_radius{};    ///< rolling circle in modules; cycloidal profiles only
     std::string profile;        ///< "involute", "cycloidal" or "unknown"
 };
+
+/// True when the fit carries a pressure angle worth using (an older project may hold one outside the range).
+inline bool has_pressure_angle(const GearFit& g) {
+    return g.pressure_angle_deg > 5 && g.pressure_angle_deg < kMaxPressureAngleDeg;
+}
 
 struct Component {
     PartFeatures features;
@@ -160,6 +168,9 @@ struct Movement {
 
     /// Index of the mobile holding component `component`, or -1.
     int mobile_of(int component) const;
+    /// For every component the index of its mobile, or -1: mobile_of for all of them in one pass, for loops over
+    /// pairs of parts (mobile_of alone scans every mobile each time).
+    std::vector<int> mobile_index() const;
     /// Index of the component called `name`, or -1.
     int find_component(std::string_view name) const;
     /// True when the mesh is a link of the going train, which runs from the barrel to the escape wheel. Not so a mesh

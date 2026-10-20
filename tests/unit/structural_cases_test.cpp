@@ -211,6 +211,29 @@ TEST_CASE("tooth bending case reports the Lewis stress next to the FE peak") {
     CHECK_THROWS_AS(cases::run_tooth_case(in), Error);
 }
 
+TEST_CASE("a tooth mesh over the size limit is refused before it is solved") {
+    // The barrel of the OM10 movement as the gear fit gave it: a module far too small for its size and a dedendum of 3.5
+    // modules. Its sector meshed to 600,000 unknowns, and the factorisation of that crashed (a segmentation fault) because
+    // the limit on the size was checked only after the solve.
+    cases::ToothCaseInput in;
+    in.spec.teeth = 63;
+    in.spec.module = 0.19130174464299646;
+    in.spec.pressure_angle_deg = 24.915291054579836;
+    in.spec.addendum = -0.62835263985019907;
+    in.spec.dedendum = 3.5047542342045475;
+    in.face_width = 0.48;
+    in.tangential_load_n = 0.1;
+    in.material = brass();
+    try {
+        cases::run_tooth_case(in);
+        FAIL("the oversized mesh was solved");
+    } catch (const Error& e) {
+        const std::string text = e.what();
+        INFO(text);
+        CHECK(text.find("dofs") != std::string::npos);
+    }
+}
+
 TEST_CASE("the fast physics verification set passes") {
     const auto checks = cases::run_physics_checks(false);
     REQUIRE(checks.size() >= 4);

@@ -40,7 +40,7 @@ JobQueue::JobQueue(QString program, QObject* parent) : QObject(parent), program_
 
 JobQueue::~JobQueue() {
     if (save_pending_) save();
-    stop_worker();
+    stop_workers();
 }
 
 QString JobQueue::state_name(State state) {
@@ -54,21 +54,27 @@ QString JobQueue::state_name(State state) {
     return "failed";
 }
 
-void JobQueue::stop_worker() {
-    if (!process_) return;
-    // The job stays "running" in the journal on purpose: that is how a restart knows to run it again.
-    process_->disconnect(this);
-    process_->kill();
-    process_->waitForFinished(3000);
-    delete process_;
-    process_ = nullptr;
-    running_ = -1;
-    cancel_requested_ = false;
+void JobQueue::stop_workers() {
+    // The jobs stay "running" in the journal on purpose: that is how a restart knows to run them again.
+    for (Worker& w : workers_) {
+        w.process->disconnect(this);
+        w.process->kill();
+        w.process->waitForFinished(3000);
+        delete w.process;
+    }
+    workers_.clear();
+}
+
+JobQueue::Worker* JobQueue::worker_of(QProcess* process) {
+    for (Worker& w : workers_) {
+        if (w.process == process) return &w;
+    }
+    return nullptr;
 }
 
 void JobQueue::detach() {
     if (save_pending_) save();  // the old project's journal gets its last change
-    stop_worker();
+    stop_workers();
     jobs_.clear();
     journal_.clear();
 }
@@ -166,11 +172,13 @@ bool JobQueue::cancel(int index) {
         emit changed(index);
         return true;
     }
-    if (job.state == State::Running && index == running_ && process_ && !cancel_requested_) {
-        cancel_requested_ = true;
-        process_->terminate();
+    if (job.state != State::Running) return false;
+    for (Worker& w : workers_) {
+        if (w.index != index || w.cancel_requested) continue;
+        w.cancel_requested = true;
+        w.process->terminate();
         // A worker that ignores the polite request is killed.
-        QPointer<QProcess> p = process_;
+        QPointer<QProcess> p = w.process;
         QTimer::singleShot(1500, this, [p] {
             if (p && p->state() != QProcess::NotRunning) p->kill();
         });
@@ -180,58 +188,57 @@ bool JobQueue::cancel(int index) {
 }
 
 void JobQueue::start_next() {
-    if (running_ >= 0) return;
-    for (std::size_t i = 0; i < jobs_.size(); ++i) {
+    for (std::size_t i = 0; i < jobs_.size() && static_cast<int>(workers_.size()) < max_parallel_; ++i) {
         Job& job = jobs_[i];
         if (job.state != State::Queued) continue;
         job.state = State::Running;
         ++job.attempts;
         job.out.clear();
         job.err.clear();
-        running_ = static_cast<int>(i);
-        cancel_requested_ = false;
-        process_ = new QProcess(this);
-        connect(process_, &QProcess::finished, this, &JobQueue::on_process_finished);
-        connect(process_, &QProcess::errorOccurred, this, &JobQueue::on_process_error);
-        process_->setProgram(program_);
-        process_->setArguments(job.args);
+        auto* process = new QProcess(this);
+        workers_.push_back({process, static_cast<int>(i), false});
+        connect(process, &QProcess::finished, this,
+                [this, process](int code, QProcess::ExitStatus status) { on_process_finished(process, code, status); });
+        connect(process, &QProcess::errorOccurred, this,
+                [this, process](QProcess::ProcessError error) { on_process_error(process, error); });
+        process->setProgram(program_);
+        process->setArguments(job.args);
         save_soon();
-        emit changed(running_);
-        process_->start();
-        return;
+        emit changed(static_cast<int>(i));
+        process->start();
     }
 }
 
-void JobQueue::on_process_finished(int exit_code, QProcess::ExitStatus status) {
-    if (running_ < 0 || !process_) return;
-    const int index = running_;
+void JobQueue::on_process_finished(QProcess* process, int exit_code, QProcess::ExitStatus status) {
+    Worker* worker = worker_of(process);
+    if (!worker) return;
+    const int index = worker->index;
+    const bool cancelled = worker->cancel_requested;
     Job& job = jobs_[static_cast<std::size_t>(index)];
-    job.out = clip(process_->readAllStandardOutput());
-    job.err = clip(process_->readAllStandardError());
+    job.out = clip(process->readAllStandardOutput());
+    job.err = clip(process->readAllStandardError());
     job.exit_code = status == QProcess::NormalExit ? exit_code : -1;
-    if (status == QProcess::CrashExit && !cancel_requested_) job.err += "\nthe worker process crashed";
-    job.state = cancel_requested_ ? State::Cancelled : (job.exit_code == 0 ? State::Done : State::Failed);
-    const bool cancelled = cancel_requested_;
-    process_->deleteLater();
-    process_ = nullptr;
-    running_ = -1;
-    cancel_requested_ = false;
+    if (status == QProcess::CrashExit && !cancelled) job.err += "\nthe worker process crashed";
+    job.state = cancelled ? State::Cancelled : (job.exit_code == 0 ? State::Done : State::Failed);
+    process->deleteLater();
+    workers_.erase(workers_.begin() + (worker - workers_.data()));
     save_soon();
     emit changed(index);
     if (!cancelled) emit finished(index);
     start_next();
 }
 
-void JobQueue::on_process_error(QProcess::ProcessError error) {
-    if (error != QProcess::FailedToStart || running_ < 0 || !process_) return;
-    const int index = running_;
+void JobQueue::on_process_error(QProcess* process, QProcess::ProcessError error) {
+    if (error != QProcess::FailedToStart) return;
+    Worker* worker = worker_of(process);
+    if (!worker) return;
+    const int index = worker->index;
     Job& job = jobs_[static_cast<std::size_t>(index)];
     job.state = State::Failed;
     job.exit_code = -1;
-    job.err = "cannot start the worker program " + program_ + ": " + process_->errorString();
-    process_->deleteLater();
-    process_ = nullptr;
-    running_ = -1;
+    job.err = "cannot start the worker program " + program_ + ": " + process->errorString();
+    process->deleteLater();
+    workers_.erase(workers_.begin() + (worker - workers_.data()));
     save_soon();
     emit changed(index);
     emit finished(index);

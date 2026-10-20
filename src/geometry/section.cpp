@@ -107,7 +107,7 @@ bool inside(const mesh::Ring& ring, const mesh::P2& p) {
 /// the same section at every height: the outline of the bottom face. Finding it from the topology
 /// takes microseconds, where intersecting a plane with a solid of thousands of faces takes seconds.
 /// Returns false (leaving `wires` empty) when the part is not such a prism.
-bool prism_outline(const TopoDS_Shape& shape, double z, std::vector<TopoDS_Wire>& wires) {
+bool prism_outline_impl(const TopoDS_Shape& shape, double z, std::vector<TopoDS_Wire>& wires) {
     Bnd_Box box;
     BRepBndLib::AddOptimal(shape, box, false, false);
     double x0, y0, z0, x1, y1, z1;
@@ -158,9 +158,13 @@ bool prism_outline(const TopoDS_Shape& shape, double z, std::vector<TopoDS_Wire>
 
 }  // namespace
 
+bool prism_outline(const TopoDS_Shape& shape, double z, std::vector<TopoDS_Wire>& wires) {
+    return prism_outline_impl(shape, z, wires);
+}
+
 mesh::Region section_region(const TopoDS_Shape& shape, double z, double deflection, double simplify) {
     std::vector<TopoDS_Wire> wire_list;
-    if (!prism_outline(shape, z, wire_list)) {
+    if (!prism_outline_impl(shape, z, wire_list)) {
         BRepAlgoAPI_Section section(shape, gp_Pln(gp_Pnt(0, 0, z), gp_Dir(0, 0, 1)), false);
         section.SetRunParallel(true);
         section.Approximation(false);

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <atomic>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -39,6 +41,7 @@ class QTreeWidget;
 class QTreeWidgetItem;
 class QAction;
 class QDockWidget;
+class QToolButton;
 class QProgressBar;
 class QGroupBox;
 
@@ -68,14 +71,15 @@ public:
     bool is_loading() const { return importing_; }
     /// Runs `ohs <args>` in-process; logs the command and its output. Returns the exit code. Refused (exit
     /// code 2) while a project is being opened in the background: the project is about to be replaced, and
-    /// the command line runs one command at a time, so it would block the window until the load ends. Also
-    /// refused when called while another run_command is waiting for the job queue (from a click handled
-    /// during that wait).
+    /// the command line runs one command at a time, so it would block the window until the load ends. It does
+    /// not wait for queued jobs: they run on their own copies of the project (see submit).
     int run_command(const QStringList& args, QString* out = nullptr);
     /// Changes a part's role through `ohs rig set` and reloads. Not undoable; see change_role.
     bool set_role(const QString& part, const QString& role);
     /// The undoable role change the rig page uses: pushes onto the undo stack.
     bool change_role(const QString& part, const QString& role);
+    /// The same for several parts at once: one command, one undo step.
+    bool change_roles(const QStringList& parts, const QString& role);
     /// Gives a part a label shown in place of its name in every view (empty clears it). Undoable.
     bool change_label(const QString& part, const QString& label);
     /// Declares that two toothed parts mesh (`ohs rig mesh`), undoable.
@@ -128,11 +132,13 @@ public:
     QUndoStack* undo_stack() const { return undo_; }
     QComboBox* mesh_partner_box() const { return mesh_box_; }
 
-    /// Queues `ohs <args>` to run in a worker process so the window stays responsive. Jobs run one at a
-    /// time in order. A queued job, or the running one (its process is killed), can be cancelled. The
+    /// Queues `ohs <args>` to run in a worker process so the window stays responsive. Up to two jobs
+    /// run at once, started in order. The job reads a copy of the project made when it was queued. A queued job, or the running one (its process is killed), can be cancelled. The
     /// queue is journalled beside the project (`<project>.jobs.json`): after a restart the jobs that
     /// were unfinished run again and the finished ones keep their results (select one to see them).
     void submit(const QString& label, const QStringList& args);
+    /// A copy of the project file for one job to read (`<stem>.job<N><ext>` beside it), or empty on failure.
+    QString snapshot_project();
     bool cancel_job(int index);
     JobQueue* job_queue() const { return queue_; }
     /// The `ohs` program the worker processes run.
@@ -234,8 +240,10 @@ private:
     bool install_scene(const QString& project, const QString& step, std::shared_ptr<Scene> scene);
     /// Runs `ohs <commands>` in order, then loads `project`, on a worker thread, and installs the scene when
     /// done. One at a time; `message` shows in the status bar meanwhile.
+    /// `on_loaded` runs once the scene is installed. While it runs the status bar shows the import's progress,
+    /// and the Cancel button next to it stops an import between parts.
     void load_async(const QString& message, const std::vector<QStringList>& commands, const QString& project,
-                    const QString& step);
+                    const QString& step, std::function<void()> on_loaded = {});
     void attach_job_journal();
     void refresh_panels();
     /// Fills the rig page's train line, to-do list and suggested meshes from the scene's review.
@@ -331,6 +339,8 @@ private:
     QLabel* explode_label_{};
     QLabel* selection_label_{};
     QProgressBar* busy_{};
+    QToolButton* cancel_load_{};  ///< stops an import in progress
+    std::atomic<bool> import_cancel_{false};
     QAction* play_action_{};
     QByteArray default_state_;  ///< the layout as built, for View > Reset layout
 };

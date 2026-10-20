@@ -50,10 +50,12 @@ ToothCaseResult run_tooth_case(const ToothCaseInput& in) {
     fea::Vec load = fea::Vec::Zero(r.model.dofs());
     fea::add_traction(r.model, load, patch, {0, in.tangential_load_n / area, 0});
 
-    r.solution = fea::solve_static(r.model, load);
     r.nodes = r.model.mesh.nodes.size();
     r.dofs = r.model.dofs();
+    // Checked before the solve: a mesh this size (a part whose fitted module is far too small) crashed the
+    // factorisation instead of failing cleanly.
     if (r.dofs > 250000) throw Error("the tooth mesh has " + std::to_string(r.dofs) + " dofs: use a larger --size-factor");
+    r.solution = fea::solve_static(r.model, load);
     r.lewis_mpa = gear::lewis_stress(s, in.tangential_load_n, in.face_width);
     r.fe_max_principal_mpa = r.solution.max_principal;
     r.fe_max_von_mises_mpa = r.solution.max_von_mises;

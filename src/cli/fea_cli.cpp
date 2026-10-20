@@ -19,6 +19,7 @@
 #include "fea/vtk_adapter.hpp"
 #include "geometry/features.hpp"
 #include "geometry/cad_io.hpp"
+#include "geometry/part_cache.hpp"
 #include "kinematics/kinematics.hpp"
 #include "model/rig_io.hpp"
 
@@ -124,7 +125,7 @@ int cmd_fea(const FeaOptions& o, bool as_json) {
         cases::ToothCaseInput in;
         in.spec.teeth = comp.features.teeth;
         in.spec.module = comp.gear && comp.gear->module > 0 ? comp.gear->module : model::module_from_tip(comp.features.outer_radius, comp.features.teeth);
-        if (comp.gear && comp.gear->pressure_angle_deg > 5) in.spec.pressure_angle_deg = comp.gear->pressure_angle_deg;
+        if (comp.gear && model::has_pressure_angle(*comp.gear)) in.spec.pressure_angle_deg = comp.gear->pressure_angle_deg;
         if (comp.gear && comp.gear->profile == "cycloidal") {
             in.spec.profile = gear::Profile::Cycloidal;
             in.spec.rolling_radius = comp.gear->rolling_radius;
@@ -177,7 +178,7 @@ int cmd_fea(const FeaOptions& o, bool as_json) {
     } else if (o.case_name == "shock") {
         fs::path step = o.step_override;
         if (step.empty()) step = fs::path(o.project).parent_path() / rig.movement.source_geometry;
-        const auto parts = geometry::import_cad(step);
+        const auto parts = geometry::load_parts(step, o.project, o.step_override.empty());
         TopoDS_Shape shape;
         bool found = false;
         for (const auto& p : parts) {

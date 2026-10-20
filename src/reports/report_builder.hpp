@@ -16,6 +16,8 @@ namespace ohs::reports {
 
 struct ReportOptions {
     std::string step_file;            ///< CAD geometry for DFM, drawings and collisions; empty skips those sections
+    std::string cache_project;        ///< project whose geometry cache the parts are read from; empty reads step_file directly
+    bool update_cache = true;         ///< write that cache when it is stale (false for a CAD file the project was not made from)
     geometry::Axis up = geometry::Axis::Z;
     bool timekeeping = true;
     bool tolerance = true;

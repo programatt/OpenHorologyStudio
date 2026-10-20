@@ -11,8 +11,9 @@
 
 namespace ohs::gui {
 
-/// A queue of `ohs` commands run one at a time, each in its own worker process, so a running job can be
-/// cancelled by killing the process and a crash in a job cannot take the window down. With a journal file
+/// A queue of `ohs` commands, each run in its own worker process (one at a time unless set_max_parallel allows
+/// more), so a running job can be cancelled by killing the process and a crash in a job cannot take the window
+/// down. With a journal file
 /// the queue survives a restart of the application: every change is written to the journal, and when it is
 /// loaded again the jobs that were still queued, or running when the application ended, are queued again.
 class JobQueue : public QObject {
@@ -49,6 +50,10 @@ public:
     /// Starts the next queued job if none is running.
     void resume();
 
+    /// How many jobs may run at once (default 1). Jobs still start in the order they were queued.
+    void set_max_parallel(int n) { max_parallel_ = n < 1 ? 1 : n; }
+    int max_parallel() const { return max_parallel_; }
+
     const std::vector<Job>& jobs() const { return jobs_; }
     int unfinished() const;
     /// Keeps the event loop running until every job has finished.
@@ -61,10 +66,17 @@ signals:
     void finished(int index);  ///< a job ended on its own: done or failed (not cancelled)
 
 private:
+    /// One running job: its process, which job it is, and whether it was asked to stop.
+    struct Worker {
+        QProcess* process{};
+        int index{-1};
+        bool cancel_requested{false};
+    };
     void start_next();
-    void on_process_finished(int exit_code, QProcess::ExitStatus status);
-    void on_process_error(QProcess::ProcessError error);
-    void stop_worker();
+    void on_process_finished(QProcess* process, int exit_code, QProcess::ExitStatus status);
+    void on_process_error(QProcess* process, QProcess::ProcessError error);
+    Worker* worker_of(QProcess* process);
+    void stop_workers();
     void save();
     /// Saves at the next turn of the event loop: a burst of changes (a job submitted and started, one
     /// finished and the next started) is one write of the journal, not one each.
@@ -73,9 +85,8 @@ private:
     QString program_;
     QString journal_;
     std::vector<Job> jobs_;
-    QProcess* process_{};
-    int running_{-1};
-    bool cancel_requested_{false};
+    std::vector<Worker> workers_;
+    int max_parallel_{1};
     bool save_pending_{false};
 };
 

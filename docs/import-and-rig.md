@@ -62,7 +62,12 @@ What `import` does, in order:
 ```
 ohs rig check movement.hsproj          # every part, role, confidence, gear fit and warning
 ohs rig set movement.hsproj "third wheel" --role pinion
+ohs rig set movement.hsproj Part_01 Part_02 Part_03 --role screw       # one role for several parts, in one edit
+ohs rig set movement.hsproj --assign Part_04=wheel --assign Part_05=pinion
 ```
+
+`ohs rig label --set PART=LABEL` and `ohs rig mesh --pair A=B` do the same for labels and meshes. Each is one edit:
+if one part is not there, nothing is written.
 
 A part name from a CAD file is often a number. `ohs rig label movement.hsproj Part_017 "Third wheel"` gives
 the part a label, stored in the project, that the desktop application shows in place of the name (hover over it

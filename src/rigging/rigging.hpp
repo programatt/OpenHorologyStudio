@@ -52,6 +52,11 @@ model::Movement auto_rig(std::string movement_name, std::vector<model::PartFeatu
 /// Recomputes mobiles, meshes and gear fits from the components' roles and features.
 void infer_structure(model::Movement& movement, const RigOptions& options);
 
+/// Sets several roles at once (source "user", confidence 1), re-inferring the structure once. Throws ohs::Error
+/// for a part that is not in the movement, before changing anything.
+void set_roles(model::Movement& movement, const std::vector<std::pair<std::string, model::Role>>& roles,
+               const RigOptions& options);
+
 /// Overrides a component's role (source "user", confidence 1) and re-infers the structure.
 /// Throws ohs::Error if there is no component called `name`.
 void set_role(model::Movement& movement, const std::string& name, model::Role role, const RigOptions& options);
