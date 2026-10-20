@@ -6,6 +6,8 @@ enough, checks that you can make it with your tools, and teaches you as you go.
 See [`plan.md`](plan.md) for the design and the roadmap, and [`docs/`](docs/index.md) for the
 user guide.
 
+![The ohs-gui desktop application](docs/images/ohs-gui.png)
+
 **Status: 1.0.** A complete command-line and Python tool (`ohs`):
 
 | You want to | Command |
