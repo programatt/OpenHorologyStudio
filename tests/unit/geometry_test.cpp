@@ -4,6 +4,7 @@
 #include <fstream>
 #include <numbers>
 
+#include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -41,6 +42,22 @@ TEST_CASE("gear tooth counts, radius and bore are measured from the B-rep") {
     CHECK(f.center.y == Approx(0).margin(1e-3));
     CHECK(f.z_min == Approx(1.0));
     CHECK(f.z_max == Approx(1.8));
+}
+
+TEST_CASE("a barrel with its teeth on a rim at one end is counted, though its middle is a smooth tube") {
+    // A tall smooth drum below the roots of a thin toothed ring at its foot, as in a barrel modelled in one piece.
+    const int teeth = 80;
+    const double module = 0.15;
+    const TopoDS_Shape ring = geometry::make_gear(teeth, module, 0.0, 0.3, 0.0);
+    const TopoDS_Shape drum = geometry::make_arbor((teeth + 2) * module / 2 - 2.25 * module - 0.1, 0.0, 2.0);
+    const geometry::ImportedPart barrel{"barrel", BRepAlgoAPI_Fuse(ring, drum).Shape()};
+    const auto f = geometry::extract_features(barrel);
+    CHECK(f.teeth == teeth);
+    CHECK(f.outer_radius == Approx((teeth + 2) * module / 2).epsilon(0.002));
+
+    // A smooth drum with no toothed rim stays untoothed, whatever the level tried.
+    const auto smooth = geometry::extract_features({"drum", drum});
+    CHECK(smooth.teeth == 0);
 }
 
 TEST_CASE("plain parts have no teeth and no bore") {

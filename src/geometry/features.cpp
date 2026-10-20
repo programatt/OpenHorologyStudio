@@ -206,14 +206,31 @@ model::PartFeatures extract_features(const ImportedPart& part, const FeatureOpti
     fit_box(shape, f);
     find_holes(shape, f);
 
-    const Outline outline = sample_outline(shape, 0.5 * (f.z_min + f.z_max), c.X(), c.Y(), options);
+    Outline outline = sample_outline(shape, 0.5 * (f.z_min + f.z_max), c.X(), c.Y(), options);
     if (!outline.ok) return f;
+
+    ToothResult teeth = detect_teeth(outline.outer, options.min_teeth);
+    // A round part wider than its mid-height outline, with no teeth there, may carry them at another height: a
+    // barrel drum is a smooth tube with its toothed rim at one end. The levels are tried and the best toothed
+    // outline is the one used.
+    const double reach = 0.5 * std::max(f.extent_x, f.extent_y);
+    const double mid_radius = *std::max_element(outline.outer.begin(), outline.outer.end());
+    if (teeth.teeth == 0 && reach > 1.02 * mid_radius && std::abs(f.extent_x - f.extent_y) < 0.03 * reach) {
+        for (const double at : {0.96, 0.9, 0.82, 0.72, 0.62, 0.38, 0.28, 0.18, 0.1, 0.04}) {
+            Outline other = sample_outline(shape, f.z_min + at * (f.z_max - f.z_min), c.X(), c.Y(), options);
+            if (!other.ok) continue;
+            const ToothResult found = detect_teeth(other.outer, options.min_teeth);
+            if (found.teeth > 0 && found.confidence > teeth.confidence) {
+                teeth = found;
+                outline = std::move(other);
+            }
+        }
+    }
 
     f.outer_radius = *std::max_element(outline.outer.begin(), outline.outer.end());
     const double root = *std::min_element(outline.outer.begin(), outline.outer.end());
     if (outline.min_radius < 0.9 * root) f.bore_radius = outline.min_radius;
 
-    const ToothResult teeth = detect_teeth(outline.outer, options.min_teeth);
     f.teeth = teeth.teeth;
     f.tooth_confidence = teeth.confidence;
     if (f.teeth > 0) {
