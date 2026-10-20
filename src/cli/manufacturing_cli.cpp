@@ -139,12 +139,10 @@ int cmd_draw(const MfgOptions& o, bool as_json) {
     const int ci = m.find_component(o.part);
     if (ci < 0) throw Error("no part called '" + o.part + "' in the project");
     const auto& c = m.components[static_cast<std::size_t>(ci)];
-    const auto parts = load_parts(o, m);
-    const geometry::ImportedPart* found = nullptr;
-    for (const auto& p : parts) {
-        if (p.name == o.part) found = &p;
-    }
-    if (!found) throw Error("the STEP file has no part called '" + o.part + "'");
+    fs::path step = o.step_override;
+    if (step.empty()) step = fs::path(o.project).parent_path() / m.source_geometry;
+    const geometry::ImportedPart part = geometry::load_part(step, o.project, o.part, o.step_override.empty());  // this part only
+    const geometry::ImportedPart* found = &part;
     manufacturing::PartDrawingInput in;
     in.title = o.part;
     in.thickness = c.features.thickness();

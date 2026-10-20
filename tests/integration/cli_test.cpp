@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <signal.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
 #include <cmath>
 #include <cstdlib>
@@ -12,6 +14,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
 
+#include "cli/daemon_protocol.hpp"
 #include "dynamics/chrono_adapter.hpp"
 #include "geometry/pmi.hpp"
 #include "geometry/procedural.hpp"
@@ -203,6 +206,48 @@ TEST_CASE("ohs CLI end to end") {
         CHECK(bad.exit_code == 2);
         CHECK(bad.error.find("error:") != std::string::npos);
     }
+    fs::remove_all(dir);
+}
+
+TEST_CASE("ohs serve runs commands for a client, keeps going after a bad one, and the client falls back without it") {
+    const fs::path dir = fs::temp_directory_path() / "ohs-serve-test";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    const std::string socket = (dir / "d.sock").string();
+    const pid_t daemon_pid = fork();
+    REQUIRE(daemon_pid >= 0);
+    if (daemon_pid == 0) {
+        execl(OHS_CLI_PATH, "ohs", "serve", "--socket", socket.c_str(), nullptr);
+        _exit(127);
+    }
+    for (int i = 0; i < 200 && !fs::exists(socket); ++i) usleep(50000);
+    REQUIRE(fs::exists(socket));
+
+    using ohs::cli::daemon::run_remote;
+    const auto version = run_remote({"--version"}, socket, dir.string());
+    REQUIRE(version);
+    CHECK(version->exit_code == 0);
+    CHECK(version->out.find("1.0") != std::string::npos);
+
+    // A command with files in its working directory, and one that fails: the exit code and the messages come back.
+    const auto generated = run_remote({"dev", "gen-movement", "-o", "m.step"}, socket, dir.string());
+    REQUIRE(generated);
+    CHECK(generated->exit_code == 0);
+    CHECK(fs::exists(dir / "m.step"));
+    const auto bad = run_remote({"rig", "check", "no_such.hsproj"}, socket, dir.string());
+    REQUIRE(bad);
+    CHECK(bad->exit_code != 0);
+    // The daemon is still there for the next.
+    const auto again = run_remote({"--version"}, socket, dir.string());
+    REQUIRE(again);
+    CHECK(again->exit_code == 0);
+    // A second daemon on the same socket is refused.
+    CHECK(run("serve --socket '" + socket + "'", dir).exit_code != 0);
+
+    kill(daemon_pid, SIGTERM);
+    int status = 0;
+    waitpid(daemon_pid, &status, 0);
+    CHECK_FALSE(run_remote({"--version"}, socket, dir.string()));  // gone: nobody answers, the caller runs the command itself
     fs::remove_all(dir);
 }
 

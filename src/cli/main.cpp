@@ -21,6 +21,8 @@
 #include <spdlog/sinks/stdout_sinks.h>
 
 #include "cli/cli_run.hpp"
+#include "cli/daemon.hpp"
+#include "cli/daemon_protocol.hpp"
 #include "cli/dynamics_cli.hpp"
 #include "cli/lessons_cli.hpp"
 #include "cli/fea_cli.hpp"
@@ -120,6 +122,8 @@ struct Options {
 
     // dev gen-movement
     std::string gen_out;
+    std::string socket_path;
+    std::vector<std::string> warm_projects;
 
     // thirdparty
     std::vector<std::string> om10_args;
@@ -634,6 +638,10 @@ int cmd_explain(const Options& o) {
     return kExitOk;
 }
 
+int cmd_serve(const Options& o) {
+    return ohs::cli::serve(o.socket_path.empty() ? ohs::cli::daemon::default_socket_path() : o.socket_path, o.warm_projects);
+}
+
 int cmd_gen_movement(const Options& o) {
     ohs::geometry::export_step(ohs::geometry::make_test_movement(), o.gen_out);
     std::cout << "wrote " << o.gen_out << '\n';
@@ -791,6 +799,11 @@ int ohs::cli::run(int argc, char** argv) {
     kin->add_option("--root", o.root_mobile, "Root mobile name (default: the barrel's mobile)");
     kin->add_option("--expect", o.expect, "Check a mobile's speed, NAME=RPM (repeatable)");
     kin->callback(pick(cmd_kinematics));
+
+    auto* serve = app.add_subcommand("serve", "Run commands for `ohs-client` from a resident process (Unix sockets): no start-up, warm geometry");
+    serve->add_option("--socket", o.socket_path, "Socket path (default: $OHS_SOCKET, else $XDG_RUNTIME_DIR/ohs.sock)");
+    serve->add_option("--warm", o.warm_projects, "A project whose geometry is read now and kept for every request; repeatable");
+    serve->callback(pick(cmd_serve));
 
     auto* dev = app.add_subcommand("dev", "Developer tools");
     dev->require_subcommand(1);

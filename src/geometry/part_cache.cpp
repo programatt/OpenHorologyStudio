@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <mutex>
 #include <regex>
 #include <sstream>
 #include <system_error>
@@ -18,6 +19,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include "core/error.hpp"
 #include "geometry/cad_io.hpp"
 #include "geometry/section.hpp"
 
@@ -40,6 +42,11 @@ std::uint64_t fnv(std::uint64_t h, const char* data, std::size_t n) {
 
 fs::path parts_path(const fs::path& project) { return cache_dir(project) / "parts.brep"; }
 fs::path manifest_path(const fs::path& project) { return cache_dir(project) / "manifest.txt"; }
+fs::path part_path(const fs::path& project, std::size_t index) { return cache_dir(project) / "parts" / (std::to_string(index) + ".brep"); }
+
+bool memo_on = false;
+std::mutex memo_mutex;
+std::map<std::string, std::vector<ImportedPart>> memo;
 
 struct Manifest {
     std::string fingerprint;
@@ -182,6 +189,13 @@ void write_parts_cache(const fs::path& project, const fs::path& cad_file, const 
         if (ec) return;
         fs::rename(tmp, parts_path(project), ec);
         if (ec) return;
+        // Each part on its own too, for a command that needs one (load_part).
+        fs::create_directories(cache_dir(project) / "parts", ec);
+        for (std::size_t i = 0; i < parts.size(); ++i) {
+            fs::path one = part_path(project, i);
+            one += ".tmp";
+            if (BinTools::Write(parts[i].shape, one.string().c_str())) fs::rename(one, part_path(project, i), ec);
+        }
         write_file_atomic(manifest_path(project), format_manifest(m));
     } catch (const std::exception& e) {
         spdlog::debug("could not write the geometry cache: {}", e.what());
@@ -195,16 +209,63 @@ bool is_project_source(const fs::path& cad_file, const fs::path& project, const 
     return fs::equivalent(cad_file, project.parent_path() / source_geometry, ec) && !ec;
 }
 
+void set_parts_memo(bool on) {
+    std::lock_guard<std::mutex> lock(memo_mutex);
+    memo_on = on;
+    if (!on) memo.clear();
+}
+
 std::vector<ImportedPart> load_parts(const fs::path& cad_file, const fs::path& project, bool update_cache) {
     if (project.empty()) return import_cad(cad_file);
+    std::string key;
+    {
+        std::lock_guard<std::mutex> lock(memo_mutex);
+        if (memo_on) {
+            key = cad_file.string() + "|" + cad_fingerprint(cad_file);
+            const auto found = memo.find(key);
+            if (found != memo.end()) return found->second;
+        }
+    }
     std::vector<ImportedPart> parts;
     if (read_cache(cad_file, project, parts)) {
         spdlog::debug("read {} parts from {}", parts.size(), cache_dir(project).string());
-        return parts;
+    } else {
+        parts = import_cad(cad_file);
+        if (update_cache) write_parts_cache(project, cad_file, parts);
     }
-    parts = import_cad(cad_file);
-    if (update_cache) write_parts_cache(project, cad_file, parts);
+    if (!key.empty()) {
+        std::lock_guard<std::mutex> lock(memo_mutex);
+        memo[key] = parts;
+    }
     return parts;
+}
+
+ImportedPart load_part(const fs::path& cad_file, const fs::path& project, const std::string& name, bool update_cache) {
+    bool memoised;
+    {
+        std::lock_guard<std::mutex> lock(memo_mutex);
+        memoised = memo_on;
+    }
+    if (!project.empty() && !memoised) {
+        Manifest m;
+        if (read_manifest(manifest_path(project), m)) {
+            const std::string now = cad_fingerprint(cad_file);
+            const auto at = std::find(m.names.begin(), m.names.end(), name);
+            if (!now.empty() && now == m.fingerprint && at != m.names.end()) {
+                try {
+                    TopoDS_Shape shape;
+                    if (BinTools::Read(shape, part_path(project, static_cast<std::size_t>(at - m.names.begin())).string().c_str()) && !shape.IsNull()) {
+                        return {name, shape};
+                    }
+                } catch (const Standard_Failure&) {
+                }
+            }
+        }
+    }
+    for (ImportedPart& p : load_parts(cad_file, project, update_cache)) {
+        if (p.name == name) return std::move(p);
+    }
+    throw Error("the CAD file has no part called '" + name + "'");
 }
 
 // ---- the section cache -----------------------------------------------------------------------------------------------

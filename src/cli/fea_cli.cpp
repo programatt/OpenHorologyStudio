@@ -178,16 +178,8 @@ int cmd_fea(const FeaOptions& o, bool as_json) {
     } else if (o.case_name == "shock") {
         fs::path step = o.step_override;
         if (step.empty()) step = fs::path(o.project).parent_path() / rig.movement.source_geometry;
-        const auto parts = geometry::load_parts(step, o.project, o.step_override.empty());
-        TopoDS_Shape shape;
-        bool found = false;
-        for (const auto& p : parts) {
-            if (p.name == o.part) {
-                shape = geometry::orient_dial_axis_to_z(p.shape, axis_of(o.up, rig.movement));
-                found = true;
-            }
-        }
-        if (!found) throw Error("the STEP file has no part called '" + o.part + "'");
+        const geometry::ImportedPart part = geometry::load_part(step, o.project, o.part, o.step_override.empty());
+        const TopoDS_Shape shape = geometry::orient_dial_axis_to_z(part.shape, axis_of(o.up, rig.movement));
         cases::PartCaseInput in;
         in.shape = shape;
         in.element_size = o.size;

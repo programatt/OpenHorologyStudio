@@ -177,6 +177,36 @@ TEST_CASE("sections are cut once and read back from the cache while the CAD file
     fs::remove_all(dir);
 }
 
+TEST_CASE("one part is read on its own from the cache, and a resident process keeps the parts it has read") {
+    const fs::path dir = fresh("onepart");
+    const fs::path step = dir / "movement.step", project = dir / "movement.hsproj";
+    geometry::export_step(geometry::make_test_movement(), step);
+    const auto parts = geometry::load_parts(step, project);  // writes the cache, with a file per part
+    REQUIRE(parts.size() > 3);
+    CHECK(fs::exists(geometry::cache_dir(project) / "parts" / "2.brep"));
+
+    const std::string name = parts[2].name;
+    const geometry::ImportedPart one = geometry::load_part(step, project, name);
+    CHECK(one.name == name);
+    CHECK(geometry::extract_features(one, {}).volume == Catch::Approx(geometry::extract_features(parts[2], {}).volume).epsilon(1e-9));
+    CHECK_THROWS_AS(geometry::load_part(step, project, "no_such_part"), Error);
+    // Without a cache (or with a damaged part file) it still finds the part, from the whole read.
+    fs::remove(geometry::cache_dir(project) / "parts" / "2.brep");
+    CHECK(geometry::load_part(step, project, name).name == name);
+    fs::remove_all(geometry::cache_dir(project));
+    CHECK(geometry::load_part(step, project, name, false).name == name);
+
+    // The memo: the second read of the same file does not touch the file or the cache.
+    geometry::set_parts_memo(true);
+    const auto first = geometry::load_parts(step, project);
+    fs::remove_all(geometry::cache_dir(project));
+    const auto second = geometry::load_parts(step, project);
+    REQUIRE(second.size() == first.size());
+    CHECK(second[0].shape.TShape() == first[0].shape.TShape());  // the same shapes, shared
+    geometry::set_parts_memo(false);
+    fs::remove_all(dir);
+}
+
 TEST_CASE("an atomic write leaves the old file or the new one") {
     const fs::path dir = fresh("atomic");
     const fs::path file = dir / "project.hsproj";

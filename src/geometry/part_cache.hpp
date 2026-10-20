@@ -30,6 +30,16 @@ std::string cad_fingerprint(const std::filesystem::path& cad_file);
 std::vector<ImportedPart> load_parts(const std::filesystem::path& cad_file, const std::filesystem::path& project,
                                      bool update_cache = true);
 
+/// Reads one part of `cad_file` by name. From the project's cache this reads only that part's own file (a millisecond
+/// or two, against 0.2 s for the whole movement and 8.7 s for the STEP file of a 166-part one); with no usable cache it
+/// reads all the parts as load_parts does and picks. Throws ohs::Error when there is no such part.
+ImportedPart load_part(const std::filesystem::path& cad_file, const std::filesystem::path& project, const std::string& name,
+                       bool update_cache = true);
+
+/// A resident process (`ohs serve`) keeps the parts it has read, keyed by file and fingerprint, so that its next
+/// load_parts costs a copy of handles. Off by default: a one-shot command has no use for it.
+void set_parts_memo(bool on);
+
 /// True when `cad_file` is the CAD file `project` was imported from (`source_geometry` beside the project), so
 /// that the project's cache may be written from it.
 bool is_project_source(const std::filesystem::path& cad_file, const std::filesystem::path& project,

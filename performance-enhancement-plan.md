@@ -427,10 +427,8 @@ Added afterwards:
 | 2.3 | `geometry::translate_features`: another placement of a shape that differs by a translation only gets the first one's features, moved (centre, heights, holes, fingerprint) | tested against a full extraction. OM10 has few such pairs (10 of 166), so the import time does not change |
 | 3.4 | A role edit in the window runs on the scene's own rig (`Scene::reload_rig(Movement)`), is written once and logged as the `ohs rig set` it stands for | rig edit at 400 parts 27 ms → 9 ms |
 
-Not done, and why:
-- **6.2 (read one part from the STEP).** The cache makes it moot, as the plan says: a command that needs one part no longer
-  reads the STEP file at all (`fea --case shock` 12.2 s → 0.3 s). The XCAF reader cannot transfer one label of a flat assembly
-  more cheaply than the cache loads the lot.
-- **7 (the daemon).** The plan says to build it only if start-up still shows after sections 2, 3 and 5. A rig command on
-  OM10 takes 128 ms in all (62 ms of it the process start), the window runs rig commands in-process, and `dfm`
-  is 0.8 s warm, so start-up is not what a user waits for. Revisit for scripts of hundreds of commands.
+| 6.2 | `geometry::load_part`: the cache also holds each part in a file of its own, and a command that needs one part reads that file | `fea --case shock` 12.2 s → 0.29 s in all; `draw` the same |
+| 7 | `ohs serve [--socket] [--warm project…]` and the thin `ohs-client` (`src/cli/daemon*.{hpp,cpp}`, `client_main.cpp`): length-prefixed requests over a Unix socket, each run in a forked child of the daemon; the daemon keeps the parts of warm projects (`set_parts_memo`); the client falls back to `ohs` when nothing listens | `rig check` on OM10 128 ms → 29 ms; `dfm` 0.76 s warm. Crash isolation is the fork: a failing request does not stop the daemon (the test checks a failing command and a second daemon refused). Not on Windows |
+
+Left out of 7: streamed progress lines for long jobs (a reply carries the whole output at the end) and the job queue of the
+window using the daemon (it runs `ohs` worker processes as before, which can be killed to cancel).

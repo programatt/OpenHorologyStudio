@@ -20,6 +20,7 @@ Subcommands:
   animate                     Export the running train as an animated binary glTF (.glb) or OpenUSD text file (.usda)
   explain                     Explain a part or walk through the gear train with this movement's numbers
   kinematics                  Rigid-body ratios and speeds of the going train
+  serve                       Run commands for `ohs-client` from a resident process (Unix sockets): no start-up, warm geometry
   dev                         Developer tools
   thirdparty                  Third-party data (never committed to the repo)
   torque                      Torque chain from the barrel to the escape wheel
@@ -308,6 +309,18 @@ Options:
   --beat-rate FLOAT           Beat rate in vph (default: from project)
   --root TEXT                 Root mobile name (default: the barrel's mobile)
   --expect TEXT ...           Check a mobile's speed, NAME=RPM (repeatable)
+```
+
+### `ohs serve`
+
+```text
+Run commands for `ohs-client` from a resident process (Unix sockets): no start-up, warm geometry
+Usage: ohs serve [OPTIONS]
+
+Options:
+  -h,--help                   Print this help message and exit
+  --socket TEXT               Socket path (default: $OHS_SOCKET, else $XDG_RUNTIME_DIR/ohs.sock)
+  --warm TEXT ...             A project whose geometry is read now and kept for every request; repeatable
 ```
 
 ### `ohs dev`

@@ -44,6 +44,10 @@ Measured on the 166-part OM10 file (18.7 MB STEP) and the generated demonstratio
   scans out of the rigging for large assemblies.
 
 ### Added
+- `ohs serve` and `ohs-client`: a resident process that runs commands for a thin client over a Unix socket, each in a
+  forked child (a crash in one command leaves the daemon up), with the geometry of `--warm` projects read once and kept.
+  A rig command on OM10 takes 29 ms through it against 128 ms. The client runs `ohs` itself when no daemon is listening.
+- Commands that need one part (`ohs fea --case shock`, `ohs draw`) read only that part's file from the cache.
 - `ohs rig set` takes several parts (`ohs rig set P a b c --role wheel`) or `--assign PART=ROLE` repeated, `ohs rig
   label` takes `--set PART=LABEL` and `ohs rig mesh` takes `--pair A=B`, each one edit that writes nothing unless
   all of it applies. The Rig tab's part list takes a multiple selection, and *Set role* gives every selected part the

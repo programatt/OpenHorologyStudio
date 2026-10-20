@@ -57,6 +57,23 @@ What `import` does, in order:
     A wheel and pinion fused into one solid are measured at mid-height only. Split them in the CAD
     export, or correct the rig.
 
+## Many commands: the resident process
+
+Every `ohs` call loads its libraries (about 60 ms) before it does anything, which is most of the time of a rig command.
+For a script of hundreds of commands, run `ohs serve` once and call `ohs-client` in place of `ohs`:
+
+```
+ohs serve --warm movement.hsproj &        # reads the project's geometry once, then waits on a Unix socket
+ohs-client rig check movement.hsproj       # 29 ms on the 166-part OM10, against 128 ms
+ohs-client dfm movement.hsproj
+```
+
+`ohs-client` takes the same words as `ohs`, passes its working directory, and prints what the command printed and returns
+its exit code. Each request runs in a forked child of the daemon, so a command that crashes does not stop it, and the
+child starts with the libraries and the warm geometry loaded. With no daemon listening, `ohs-client` runs `ohs`
+itself, so a script works either way (`OHS_NO_DAEMON=1` forces that). The socket is `$XDG_RUNTIME_DIR/ohs.sock`, or
+`--socket`/`$OHS_SOCKET`, readable by you only. Linux and macOS; not Windows.
+
 ## Check and correct
 
 ```

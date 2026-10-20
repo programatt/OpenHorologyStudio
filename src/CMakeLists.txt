@@ -104,13 +104,21 @@ target_include_directories(ohs_plugins PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(ohs_plugins PUBLIC ohs_manufacturing ${CMAKE_DL_LIBS})
 
 # The command line as a library, so the Python module can run it in-process.
-ohs_library(ohs_cli cli/main.cpp cli/dynamics_cli.cpp cli/fea_cli.cpp cli/manufacturing_cli.cpp cli/lessons_cli.cpp cli/cli_run.cpp)
+ohs_library(ohs_cli cli/main.cpp cli/dynamics_cli.cpp cli/fea_cli.cpp cli/manufacturing_cli.cpp cli/lessons_cli.cpp cli/cli_run.cpp cli/daemon.cpp)
 target_link_libraries(ohs_cli PUBLIC ohs_app ohs_reports ohs_cases ohs_kinematics ohs_dynamics ohs_explain ohs_animation ohs_lessons ohs_plugins
                       CLI11::CLI11 nlohmann_json::nlohmann_json spdlog::spdlog)
 target_compile_definitions(ohs_cli PUBLIC OHS_VERSION="${PROJECT_VERSION}" OHS_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
 add_executable(ohs cli/entry.cpp)
 target_link_libraries(ohs PRIVATE ohs_cli)
+
+# ohs-client: runs a command in `ohs serve` when it is listening, else hands over to `ohs`. Nothing heavy is linked.
+if(NOT WIN32)
+  add_executable(ohs-client cli/client_main.cpp)
+  target_include_directories(ohs-client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(ohs-client PRIVATE ohs_options)
+  install(TARGETS ohs-client RUNTIME DESTINATION bin)
+endif()
 
 add_executable(ohs_perf ${PROJECT_SOURCE_DIR}/tests/perf/perf_main.cpp)
 target_link_libraries(ohs_perf PRIVATE ohs_lessons ohs_reports ohs_manufacturing ohs_fea ohs_gear ohs_dynamics ohs_app spdlog::spdlog)
