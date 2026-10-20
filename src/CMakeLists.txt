@@ -12,7 +12,7 @@ endfunction()
 ohs_library(ohs_model model/model.cpp model/followers.cpp model/rig_io.cpp)
 target_link_libraries(ohs_model PRIVATE tomlplusplus::tomlplusplus)
 
-ohs_library(ohs_rigging rigging/rigging.cpp)
+ohs_library(ohs_rigging rigging/rigging.cpp rigging/solve.cpp)
 target_link_libraries(ohs_rigging PUBLIC ohs_model)
 
 ohs_library(ohs_kinematics kinematics/kinematics.cpp)

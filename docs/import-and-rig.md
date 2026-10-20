@@ -74,6 +74,14 @@ says ratchet, click, crown, winding or clutch are left out automatically. For an
 round, `ohs rig winding movement.hsproj "part" "partner"` leaves it out of the train (the walk and the animation then
 go another way) and `--in-train` puts it back. The choice is kept when the rig is run again.
 
+`ohs rig solve movement.hsproj` closes a broken train. From the escape wheel and the beat rate it works out how many
+times an hour each wheel joined to the escape wheel turns, so it can name the wheels that turn the seconds hand (60
+turns an hour), the minute hand (1) and the hour hand (1/12). If the train stops short, it looks for the part that
+drives the gear at the loose end: a candidate must sit in the same layer, at the centre distance that the gear's
+module gives, and have a tip radius that fits. A part whose teeth were not found (a smooth-looking barrel drum) has
+them worked out from that distance, and the result says so. `--apply` declares the best candidate's mesh and stores
+the worked-out tooth count. The Rig tab's *Solve the train* button does the same after asking.
+
 `rig check --strict` fails on warnings; use it in scripts. Setting a role re-infers mobiles and
 meshes, and your choice is recorded with confidence 1 and source `user`.
 

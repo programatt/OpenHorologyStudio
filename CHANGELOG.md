@@ -9,6 +9,11 @@ Semantic Versioning, with the Python API and the plugin ABI versioned as describ
 Found by running the plan's gates on the real OM10 file.
 
 ### Added
+- A *Beat rate* box in the Rig tab and `ohs rig beat-rate`, to set the project's beat rate, which a project imported
+  from the window did not have; *Solve the train* sends you to it when it is missing.
+- `ohs rig solve` and the Rig tab's *Solve the train*: from the escape wheel and the beat rate, name the wheels
+  of the seconds, minute and hour hands and find what drives the loose end of the train, working out the teeth of a
+  barrel drum whose teeth were not found.
 - A search box above the Rig tab's part list, and clearer picking: a prompt in the viewport, a cross cursor, Esc to
   cancel, and the reason in the status bar when a picked mesh cannot be declared.
 - The train starts at the barrel. A mesh with a ratchet, click, crown, winding or clutch part (by name or label) is

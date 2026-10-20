@@ -106,6 +106,33 @@ Positionals:
   label TEXT                  The label; leave out to remove it
 ```
 
+#### `ohs rig beat-rate`
+
+```text
+Set the beat rate of the project, in vibrations per hour
+Usage: ohs rig beat-rate [OPTIONS] project rate
+
+Positionals:
+  project TEXT:FILE REQUIRED  Project file
+  rate FLOAT REQUIRED         Vibrations per hour: 18000, 21600, 25200, 28800 ...
+```
+
+#### `ohs rig solve`
+
+```text
+Find what drives the loose end of the train, and which wheels turn the hands
+Usage: ohs rig solve [OPTIONS] project
+
+Positionals:
+  project TEXT:FILE REQUIRED  Project file
+
+Options:
+  --beat-rate FLOAT           Beat rate in vph (the project's when left out)
+  --min-teeth INT [6]         Fewest teeth to call a part toothed
+  --apply                     Declare the mesh of the best candidate
+  --pick INT [0]              With --apply: the candidate to declare, as numbered in the list
+```
+
 #### `ohs rig winding`
 
 ```text

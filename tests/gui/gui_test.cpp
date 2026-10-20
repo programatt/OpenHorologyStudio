@@ -12,6 +12,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
+#include <QDockWidget>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QProcess>
@@ -488,6 +489,59 @@ TEST_CASE("gui: the part list can be searched, and a pick says what the next cli
     emit w.viewport()->part_picked(QString());  // a click beside the movement cancels
     CHECK_FALSE(w.is_picking());
     CHECK(w.viewport()->cursor().shape() != Qt::CrossCursor);
+}
+
+TEST_CASE("gui: solving the train reports the wheels of the hands and changes nothing when it is connected", "[gui]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_demo(fresh_dir("solve")));
+    REQUIRE(w.viewport()->scene()->review().chain.connected);
+    const int edits = w.undo_stack()->count();
+    CHECK(w.solve_train(false));
+    CHECK(w.undo_stack()->count() == edits);
+    CHECK(w.statusBar()->currentMessage().contains("connected"));
+}
+
+TEST_CASE("gui: the beat rate of the project can be set in the Rig tab, undoably", "[gui]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_demo(fresh_dir("beat")));
+    QComboBox* box = nullptr;
+    for (auto* c : w.findChildren<QComboBox*>()) {
+        if (c->isEditable() && c->lineEdit() && c->lineEdit()->placeholderText().startsWith("not set")) box = c;
+    }
+    REQUIRE(box);
+    const auto rate = [&] { return w.viewport()->scene()->movement().beat_rate_vph; };
+    const double before = rate();
+    CHECK(box->lineEdit()->text().toDouble() == before);
+
+    REQUIRE(w.set_beat_rate(25200));
+    CHECK(rate() == 25200);
+    CHECK(box->lineEdit()->text() == "25200");
+    CHECK(w.undo_stack()->undoText().contains("25200"));
+    w.undo_stack()->undo();
+    CHECK(rate() == before);
+    CHECK(box->lineEdit()->text().toDouble() == before);
+    CHECK_FALSE(w.set_beat_rate(0));
+}
+
+TEST_CASE("gui: running an analysis shows the Results panel even when it was closed", "[gui]") {
+    app();
+    ohs::gui::MainWindow w;
+    w.show();
+    REQUIRE(w.open_demo(fresh_dir("results")));
+    w.results_dock()->hide();
+    REQUIRE_FALSE(w.results_dock()->isVisible());
+    auto* run = button(w, "Timegrapher (60 s)");
+    REQUIRE(run);
+    run->click();
+    w.wait_for_jobs();
+    QCoreApplication::processEvents();
+    CHECK(w.results_dock()->isVisible());
+    CHECK(w.results()->toPlainText().contains("virtual timegrapher"));
+    CHECK(w.statusBar()->currentMessage().contains("Results"));
 }
 
 TEST_CASE("job queue: jobs run in worker processes, failures and bad programs are reported", "[gui][jobs]") {

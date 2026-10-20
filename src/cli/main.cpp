@@ -97,6 +97,8 @@ struct Options {
     // rig set
     std::string part_name, part_b, role_name, label_text;
     bool in_train{false};  ///< rig winding: put the mesh back in the train
+    bool apply_solution{false};  ///< rig solve: declare the mesh of a candidate
+    int pick{0};           ///< rig solve: which candidate
 
     // rig auto / suggest
     bool apply = false;
@@ -424,6 +426,71 @@ int cmd_rig_label(const Options& o) {
     return kExitOk;
 }
 
+int cmd_rig_beat_rate(const Options& o) {
+    if (!(o.beat_rate > 0.0)) throw ohs::Error("the beat rate must be above zero (vibrations per hour, for example 28800)");
+    ohs::model::Movement m = ohs::model::load_rig(o.project);
+    m.beat_rate_vph = o.beat_rate;
+    ohs::model::save_rig(m, o.project);
+    std::cout << "beat rate " << o.beat_rate << " vph (" << o.beat_rate / 7200.0 << " Hz)\n";
+    return kExitOk;
+}
+
+int cmd_rig_solve(const Options& o) {
+    ohs::model::Movement m = ohs::model::load_rig(o.project);
+    ohs::rigging::RigOptions rig = rig_options(o);
+    const double vph = o.beat_rate > 0 ? o.beat_rate : m.beat_rate_vph;
+    auto solution = ohs::rigging::solve_train(m, vph, rig);
+    const auto name = [&m](int component) { return m.components[static_cast<std::size_t>(component)].display_name(); };
+    const auto part = [&m](int component) { return m.components[static_cast<std::size_t>(component)].features.name; };
+
+    bool applied = false;
+    const std::string solved_input = solution.input >= 0 ? part(solution.input) : std::string{};
+    if (o.apply_solution && !solution.candidates.empty()) {
+        const auto pick = static_cast<std::size_t>(o.pick);
+        if (pick >= solution.candidates.size()) throw ohs::Error("there is no candidate " + std::to_string(o.pick));
+        ohs::rigging::apply_solution(m, solution.candidates[pick], rig);
+        ohs::model::save_rig(m, o.project);
+        applied = true;
+        solution = ohs::rigging::solve_train(m, vph, rig);  // the hands, now that the train is joined up
+    }
+
+    if (o.json_output) {
+        json j;
+        j["connected"] = ohs::rigging::train_chain(m).connected;
+        j["beat_rate_vph"] = vph;
+        j["applied"] = applied;
+        j["candidates"] = json::array();
+        for (const auto& c : solution.candidates) {
+            j["candidates"].push_back({{"driver", part(c.driver)}, {"input", part(c.input)}, {"teeth", c.teeth},
+                                       {"estimated", c.estimated}, {"centre_distance", c.centre}, {"module", c.module},
+                                       {"residual", c.residual}, {"driver_turns_per_hour", c.driver_rate}});
+        }
+        j["hands"] = json::array();
+        for (const auto& h : solution.hands) j["hands"].push_back({{"hand", h.hand}, {"mobile", h.description}, {"turns_per_hour", h.rate}});
+        j["notes"] = solution.notes;
+        std::cout << j.dump(2) << '\n';
+        return kExitOk;
+    }
+
+    const bool connected = ohs::rigging::train_chain(m).connected;
+    if (applied) std::cout << "declared the mesh that drives " << solved_input << "\n";
+    std::cout << "the train is " << (connected ? "connected from the barrel to the escape wheel" : "not connected") << ", beat rate " << vph << " vph\n";
+    if (!solution.candidates.empty()) {
+        std::cout << "what could drive " << name(solution.input) << " (" << part(solution.input) << "):\n";
+        std::size_t k = 0;
+        for (const auto& c : solution.candidates) {
+            std::cout << "  " << k++ << ": " << name(c.driver) << " (" << part(c.driver) << "), " << c.teeth << " teeth"
+                      << (c.estimated ? " (worked out, none found)" : "") << ", centre distance " << c.centre << " mm, module " << c.module
+                      << ", fit " << std::fixed << std::setprecision(3) << c.residual << std::defaultfloat << ", would turn " << c.driver_rate
+                      << " times an hour\n";
+        }
+        std::cout << "declare the first with `ohs rig solve --apply` (or `--pick N`)\n";
+    }
+    for (const auto& h : solution.hands) std::cout << h.hand << " wheel: " << h.description << ", " << h.rate << " turns an hour\n";
+    for (const auto& n : solution.notes) std::cout << "note: " << n << '\n';
+    return kExitOk;
+}
+
 int cmd_rig_winding(const Options& o) {
     ohs::model::Movement m = ohs::model::load_rig(o.project);
     ohs::rigging::set_mesh_winding(m, o.part_name, o.part_b, !o.in_train);
@@ -580,6 +647,19 @@ int ohs::cli::run(int argc, char** argv) {
     label->add_option("part", o.part_name, "Part name")->required();
     label->add_option("label", o.label_text, "The label; leave out to remove it");
     label->callback(pick(cmd_rig_label));
+
+    auto* beat = rig->add_subcommand("beat-rate", "Set the beat rate of the project, in vibrations per hour");
+    beat->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);
+    beat->add_option("rate", o.beat_rate, "Vibrations per hour: 18000, 21600, 25200, 28800 ...")->required();
+    beat->callback(pick(cmd_rig_beat_rate));
+
+    auto* solve = rig->add_subcommand("solve", "Find what drives the loose end of the train, and which wheels turn the hands");
+    solve->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);
+    solve->add_option("--beat-rate", o.beat_rate, "Beat rate in vph (the project's when left out)");
+    solve->add_option("--min-teeth", o.min_teeth, "Fewest teeth to call a part toothed")->capture_default_str();
+    solve->add_flag("--apply", o.apply_solution, "Declare the mesh of the best candidate");
+    solve->add_option("--pick", o.pick, "With --apply: the candidate to declare, as numbered in the list")->capture_default_str();
+    solve->callback(pick(cmd_rig_solve));
 
     auto* winding = rig->add_subcommand("winding", "Leave a mesh out of the going train (the winding work), or put it back");
     winding->add_option("project", o.project, "Project file")->required()->check(CLI::ExistingFile);

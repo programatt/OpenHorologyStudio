@@ -128,6 +128,9 @@ struct Component {
     const std::string& display_name() const { return label.empty() ? features.name : label; }
 };
 
+/// True for a part of the winding work (a ratchet, click, crown, winding or clutch part, by its name or label).
+bool is_winding_part(const Component& component);
+
 /// Components that rotate together about one axis.
 struct Mobile {
     std::string name;

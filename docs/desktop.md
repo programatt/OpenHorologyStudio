@@ -21,6 +21,12 @@ ohs-gui movement.hsproj
   viewport: a prompt appears across the top of the viewport, the cursor becomes a cross and the status bar says what
   is expected. Click the part to declare the mesh; click beside the movement, press Esc or press the button again
   to cancel. If the mesh cannot be made the status bar says why (a part with no tooth count, say).
+- **Beat rate.** The *Beat rate* box in the Rig tab sets the project's vibrations per hour (pick a common rate or
+  type one and press Enter; undoable). A project imported from the window starts without one, and the animation, the
+  simulations and *Solve the train* need it.
+- **Solve the train.** In the Rig tab, *Solve the train* works back from the escape wheel and the beat rate to find
+  what drives the loose end of the train (it asks before declaring the mesh, and the declaration is undoable) and
+  says which wheels turn the seconds, minute and hour hands.
 - **Parts list.** The search box above the list narrows it by part name, label or role.
 - **Model dock.** Mobiles and their parts, with each part's role. Untick a part to hide it. A part shows its
   label when it has one (press F2 to give it one, or use *Label* under *Selected part*); hover over it for the part name.

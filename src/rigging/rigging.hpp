@@ -145,6 +145,45 @@ struct TrainWalk {
 TrainWalk walk_train(const model::Movement& movement, const TrainChain& chain,
                      const std::vector<MeshSuggestion>& suggestions);
 
+/// A way to close the going train: `driver` (a part of another mobile) drives `input`, the toothed part at the loose
+/// end of the train that nothing drives. A driver whose teeth were not found has them worked out from the centre
+/// distance and the module of `input`, and they are stored with the mesh.
+struct SolveCandidate {
+    int driver{-1};
+    int input{-1};
+    int teeth{};            ///< the driver's tooth count, found or estimated
+    bool estimated{false};  ///< `teeth` was worked out, not found in the geometry
+    double centre{};        ///< centre distance, mm
+    double module{};        ///< the module that centre distance and the two tooth counts give
+    double residual{};      ///< how far the pair's module and the driver's tip radius are from the gears' own: 0 is exact
+    double driver_rate{};   ///< turns per hour of the driver's mobile if it is the driver
+};
+
+/// A wheel of the train that turns at the rate of a hand.
+struct HandWheel {
+    std::string hand;         ///< "seconds", "minute" or "hour"
+    int mobile{-1};
+    std::string description;  ///< describe_mobile
+    double rate{};            ///< turns per hour
+};
+
+struct TrainSolution {
+    bool connected{false};     ///< the train already runs from the barrel to the escape wheel
+    double beat_rate_vph{};
+    int input{-1};             ///< the gear nothing drives, or -1
+    std::vector<SolveCandidate> candidates;  ///< best first; the barrel first when it fits
+    std::vector<HandWheel> hands;            ///< found from the escape wheel and the beat rate along the meshes of the train
+    std::vector<std::string> notes;          ///< what could not be worked out, and why
+};
+
+/// Works from the escape wheel back along the meshes already found, with the beat rate, to say how fast every wheel
+/// of the train turns (so which turn the seconds, minute and hour hands) and, if the train is broken, which part
+/// could drive the gear at its loose end. Changes nothing.
+TrainSolution solve_train(const model::Movement& movement, double beat_rate_vph, const RigOptions& options);
+
+/// Declares the mesh of a candidate (and stores the estimated tooth count of its driver).
+void apply_solution(model::Movement& movement, const SolveCandidate& candidate, const RigOptions& options);
+
 enum class Severity { Info, Warning, Error };
 
 struct Issue {

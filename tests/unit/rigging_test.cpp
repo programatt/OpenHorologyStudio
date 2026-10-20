@@ -318,6 +318,43 @@ TEST_CASE("a mesh left out of the train as winding work is not walked, and stays
     CHECK_FALSE(rigging::train_chain(m).connected);
 }
 
+TEST_CASE("solving the train finds the driver of its loose end, works out its teeth, and names the wheels of the hands") {
+    // The barrel's teeth are not found (a smooth drum in the CAD): the train stops at the centre pinion.
+    auto parts = test::synthetic_train();
+    for (auto& p : parts) {
+        if (p.name == "barrel") p.teeth = 0;
+    }
+    auto m = rigging::auto_rig("train", parts, {});
+    REQUIRE_FALSE(rigging::train_chain(m).connected);
+
+    const double vph = 21600;
+    const auto solution = rigging::solve_train(m, vph, {});
+    CHECK_FALSE(solution.connected);
+    REQUIRE(m.components[static_cast<std::size_t>(solution.input)].features.name == "center_pinion");
+    REQUIRE_FALSE(solution.candidates.empty());
+    const auto& best = solution.candidates.front();
+    CHECK(m.components[static_cast<std::size_t>(best.driver)].features.name == "barrel");
+    CHECK(best.estimated);
+    CHECK(std::abs(best.teeth - 80) <= 1);
+    CHECK(best.residual < 0.1);
+
+    rigging::apply_solution(m, best, {});
+    CHECK(rigging::train_chain(m).connected);
+    CHECK(m.components[static_cast<std::size_t>(best.driver)].features.teeth == best.teeth);
+    const auto done = rigging::solve_train(m, vph, {});
+    CHECK(done.connected);
+    CHECK(done.candidates.empty());
+    // The escape wheel turns vph / (2 * 15) times an hour; the rates of the others follow from the meshes.
+    CHECK_FALSE(done.notes.empty());  // no hour wheel is rigged in the synthetic train
+}
+
+TEST_CASE("solving the train needs an escape wheel and a beat rate") {
+    auto m = rigging::auto_rig("train", test::synthetic_train(), {});
+    const auto none = rigging::solve_train(m, 0.0, {});
+    REQUIRE_FALSE(none.notes.empty());
+    CHECK(none.notes.front().find("beat rate") != std::string::npos);
+}
+
 TEST_CASE("walking the train goes mesh by mesh from the barrel, and stops at the gap with what could fill it") {
     using Kind = rigging::WalkStep::Kind;
     const auto good = rigging::auto_rig("train", test::synthetic_train(), {});

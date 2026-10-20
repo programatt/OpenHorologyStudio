@@ -90,6 +90,12 @@ public:
     /// their mobiles and meshes, while the roles you set and the meshes you declared stay. With `reset` those are
     /// decided afresh too. The summary goes to the log and the status bar.
     bool rerig(bool reset = false);
+    /// `ohs rig solve`: works out which part drives the loose end of the train (a barrel drum with no teeth found,
+    /// say), asks before declaring the mesh unless `ask` is false, and reports the wheels that turn the hands.
+    /// Returns true when the train is connected afterwards.
+    bool solve_train(bool ask = true);
+    /// Records the beat rate (vibrations per hour) in the project (`ohs rig beat-rate`), undoable.
+    bool set_beat_rate(double vph);
     /// Declares every mesh the rig page suggests (`ohs rig suggest --apply`) as one undoable edit. Returns false when
     /// there is none to declare.
     bool accept_suggested_meshes();
@@ -165,6 +171,7 @@ public:
     QPlainTextEdit* explain_panel() const { return explain_; }
     QPlainTextEdit* log_console() const { return log_; }
     QPlainTextEdit* results() const { return results_; }
+    QDockWidget* results_dock() const { return results_dock_; }
     QString project() const { return project_; }
     QSlider* timeline() const { return timeline_; }
     QSlider* explode_slider() const { return explode_; }
@@ -290,6 +297,8 @@ private:
     QListWidget* issue_list_{};
     QListWidget* suggestion_list_{};
     QPushButton* rerig_button_{};
+    QPushButton* solve_button_{};
+    QComboBox* beat_box_{};  ///< Rig tab: the project's beat rate in vph, editable
     QPushButton* accept_suggestion_{};
     QPushButton* accept_all_{};
     // The walk through the train.

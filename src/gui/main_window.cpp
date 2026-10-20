@@ -10,6 +10,9 @@
 #include <QCoreApplication>
 #include <QListWidget>
 #include <QThread>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMessageBox>
 #include <QSignalBlocker>
 #include <QUndoCommand>
@@ -48,6 +51,7 @@
 #include <QTableWidget>
 #include <QTabWidget>
 #include <QTextStream>
+#include <QIntValidator>
 #include <QLineEdit>
 #include <QShortcut>
 #include <QTimer>
@@ -486,6 +490,22 @@ QWidget* MainWindow::build_rig_page() {
     gap_layout->addLayout(gap_row);
     train_layout->addWidget(gap_box_);
 
+    auto* beat_row = new QHBoxLayout;
+    beat_row->addWidget(new QLabel(tr("Beat rate")));
+    beat_box_ = new QComboBox;
+    beat_box_->setEditable(true);
+    beat_box_->setInsertPolicy(QComboBox::NoInsert);
+    beat_box_->setValidator(new QIntValidator(1, 200000, beat_box_));
+    for (const int vph : {14400, 18000, 19800, 21600, 25200, 28800, 36000}) {
+        beat_box_->addItem(QString::number(vph), vph);
+    }
+    beat_box_->lineEdit()->setPlaceholderText(tr("not set: type vibrations per hour"));
+    beat_box_->setToolTip(tr("Vibrations per hour of the balance (28800 is 4 Hz, 21600 is 3 Hz). The animation, the simulations and "
+                             "Solve the train need it. Pick one or type a number and press Enter (undoable)"));
+    beat_row->addWidget(beat_box_, 1);
+    beat_row->addWidget(new QLabel(tr("vph")));
+    train_layout->addLayout(beat_row);
+
     auto* step_row = new QHBoxLayout;
     prev_step_ = new QPushButton(tr("◀ Previous"));
     next_step_ = new QPushButton(tr("Next ▶"));
@@ -506,6 +526,11 @@ QWidget* MainWindow::build_rig_page() {
     rerig_button_ = new QPushButton(tr("Re-run auto-rig"));
     rerig_button_->setToolTip(tr("Classify and rig the parts again: newly recognised parts join their mobiles and "
                                  "meshes. The roles you set and the meshes you declared are kept (undoable)"));
+    solve_button_ = new QPushButton(tr("Solve the train"));
+    solve_button_->setToolTip(tr("Work back from the escape wheel with the beat rate to find what drives the loose end of the "
+                                 "train (a barrel whose teeth were not found, say) and which wheels turn the hands. It asks "
+                                 "before declaring anything (undoable)"));
+    step_row->addWidget(solve_button_);
     step_row->addWidget(rerig_button_);
     train_layout->addLayout(step_row);
     train_layout->addWidget(rig_overlay_);
@@ -514,6 +539,14 @@ QWidget* MainWindow::build_rig_page() {
     connect(escape, &QShortcut::activated, this, [this] { cancel_pick(); });
     connect(rig_overlay_, &QCheckBox::toggled, this, [this](bool on) { set_show_rig(on); });
     connect(rerig_button_, &QPushButton::clicked, this, [this] { rerig(false); });
+    connect(solve_button_, &QPushButton::clicked, this, [this] { solve_train(true); });
+    const auto beat_entered = [this] {
+        if (!scene_ || rebuilding_) return;
+        const double vph = beat_box_->lineEdit()->text().trimmed().toDouble();
+        if (vph > 0) set_beat_rate(vph);
+    };
+    connect(beat_box_, QOverload<int>::of(&QComboBox::activated), this, beat_entered);
+    connect(beat_box_->lineEdit(), &QLineEdit::editingFinished, this, beat_entered);
     connect(leave_out_, &QPushButton::clicked, this, [this] {
         if (!scene_) return;
         const auto& walk = scene_->review().walk;
@@ -1107,6 +1140,64 @@ bool MainWindow::rerig(bool reset) {
     return true;
 }
 
+bool MainWindow::set_beat_rate(double vph) {
+    if (!scene_ || !(vph > 0.0)) return false;
+    if (scene_->movement().beat_rate_vph == vph) return true;
+    return edit_project(tr("Beat rate %1 vph").arg(vph, 0, 'f', 0), {"rig", "beat-rate", project_, QString::number(vph, 'f', 0)});
+}
+
+bool MainWindow::solve_train(bool ask) {
+    if (!scene_) return false;
+    if (scene_->movement().beat_rate_vph <= 0.0) {
+        statusBar()->showMessage(tr("The project has no beat rate yet: set it in the Beat rate box above, then solve again"), 10000);
+        beat_box_->setFocus();
+        return false;
+    }
+    QString out;
+    if (run_command({"--json", "rig", "solve", project_}, &out) != 0) return false;
+    const QJsonObject solution = QJsonDocument::fromJson(out.toUtf8()).object();
+    QStringList report;
+    for (const QJsonValue& h : solution["hands"].toArray()) {
+        const QJsonObject hand = h.toObject();
+        report << tr("%1 wheel: %2").arg(hand["hand"].toString(), hand["mobile"].toString());
+    }
+    for (const QJsonValue& n : solution["notes"].toArray()) report << n.toString();
+    const QJsonArray candidates = solution["candidates"].toArray();
+    bool joined = solution["connected"].toBool();
+    if (!candidates.isEmpty()) {
+        const QJsonObject best = candidates.first().toObject();
+        const QString text = tr("%1 probably drives %2: %3 teeth%4, centre distance %5 mm, turning %6 times an hour.\n\nDeclare that mesh?")
+                                 .arg(best["driver"].toString(), best["input"].toString())
+                                 .arg(best["teeth"].toInt())
+                                 .arg(best["estimated"].toBool() ? tr(" (worked out: none were found)") : QString())
+                                 .arg(best["centre_distance"].toDouble(), 0, 'f', 2)
+                                 .arg(best["driver_turns_per_hour"].toDouble(), 0, 'f', 3);
+        if (!ask || QMessageBox::question(this, tr("Solve the train"), text) == QMessageBox::Yes) {
+            QString applied;
+            joined = edit_project(tr("Solve the train: %1 drives %2").arg(best["driver"].toString(), best["input"].toString()),
+                                  {"rig", "solve", project_, "--apply"}, &applied);
+            if (joined) {
+                report.clear();
+                QString again;
+                if (run_command({"--json", "rig", "solve", project_}, &again) == 0) {
+                    const QJsonObject after = QJsonDocument::fromJson(again.toUtf8()).object();
+                    for (const QJsonValue& h : after["hands"].toArray()) {
+                        const QJsonObject hand = h.toObject();
+                        report << tr("%1 wheel: %2").arg(hand["hand"].toString(), hand["mobile"].toString());
+                    }
+                    for (const QJsonValue& n : after["notes"].toArray()) report << n.toString();
+                    joined = after["connected"].toBool();
+                }
+            }
+        }
+    } else if (!solution["connected"].toBool() && report.isEmpty()) {
+        report << tr("Nothing fits as the driver: declare the mesh by hand.");
+    }
+    for (const QString& line : report) append_log(line);
+    statusBar()->showMessage(joined ? tr("The train is connected. %1").arg(report.join("; ")) : tr("The train is not connected. %1").arg(report.join("; ")), 15000);
+    return joined;
+}
+
 bool MainWindow::accept_suggested_meshes() {
     if (!scene_ || scene_->review().suggestions.empty()) {
         statusBar()->showMessage(tr("No suggested meshes to declare"), 4000);
@@ -1452,6 +1543,17 @@ void MainWindow::refresh_panels() {
         }
         rig_table_->setItem(static_cast<int>(row), 2, confidence);
         rig_table_->setItem(static_cast<int>(row), 3, new QTableWidgetItem(QString::fromStdString(c.role_source)));
+    }
+    {
+        // The beat rate box shows the project's: a listed rate by its entry, any other as the number.
+        const QSignalBlocker block(beat_box_);
+        const double vph = m.beat_rate_vph;
+        const int at = vph > 0 ? beat_box_->findData(static_cast<int>(vph)) : -1;
+        if (at >= 0) beat_box_->setCurrentIndex(at);
+        else {
+            beat_box_->setCurrentIndex(-1);
+            beat_box_->lineEdit()->setText(vph > 0 ? QString::number(vph, 'f', 0) : QString());
+        }
     }
     apply_parts_filter();
     const QString partner = mesh_box_->currentText();
@@ -1852,7 +1954,10 @@ QString MainWindow::worker_program() {
 
 int MainWindow::unfinished_jobs() const { return queue_->unfinished(); }
 
-void MainWindow::submit(const QString& label, const QStringList& args) { queue_->submit(label, args); }
+void MainWindow::submit(const QString& label, const QStringList& args) {
+    queue_->submit(label, args);
+    statusBar()->showMessage(tr("Started: %1. The result appears in the Results panel.").arg(label), 5000);
+}
 
 bool MainWindow::cancel_job(int index) { return queue_->cancel(index); }
 
@@ -1914,6 +2019,10 @@ void MainWindow::show_result(const QStringList& args, const QString& out, int co
         return;
     }
     results_->setPlainText(out + (code == 0 ? QString() : tr("\n(exit code %1: see the log)").arg(code)));
+    // The panel may be closed, or behind the Log or Jobs tab: bring it forward so that a run is seen to have finished.
+    results_dock_->show();
+    results_dock_->raise();
+    statusBar()->showMessage(code == 0 ? tr("Finished: the result is in the Results panel") : tr("Failed (exit code %1): see the Results and Log panels").arg(code), 8000);
 }
 
 void MainWindow::wait_for_jobs() { queue_->wait(); }

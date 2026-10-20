@@ -57,8 +57,6 @@ bool is_rotating_role(Role role) {
            role == Role::Roller || role == Role::DateRing;
 }
 
-namespace {
-
 // Parts of the winding work, which a mesh of the going train never passes through.
 bool is_winding_part(const Component& c) {
     for (const std::string* text : {&c.label, &c.features.name}) {
@@ -70,8 +68,6 @@ bool is_winding_part(const Component& c) {
     }
     return false;
 }
-
-}  // namespace
 
 bool Movement::in_train(const MeshJoint& joint) const {
     return !joint.winding && !is_winding_part(components[static_cast<std::size_t>(joint.a)]) &&

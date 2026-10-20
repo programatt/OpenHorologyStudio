@@ -114,6 +114,19 @@ TEST_CASE("ohs CLI end to end") {
         CHECK(run("rig winding " + proj + " barrel fourth_wheel", dir).exit_code == 2);  // not meshed
         CHECK(run("rig winding " + proj + " barrel center_pinion --in-train", dir).output.find("is connected") != std::string::npos);
 
+        CHECK(run("rig beat-rate " + proj + " 25200", dir).exit_code == 0);
+        CHECK(run("rig beat-rate " + proj + " 0", dir).exit_code == 2);
+        CHECK(nlohmann::json::parse(run("--json rig solve " + proj, dir).output)["beat_rate_vph"] == 25200);
+        CHECK(run("rig beat-rate " + proj + " 21600", dir).exit_code == 0);
+
+        // Solving the train:the rates of the wheels from the beat rate, and nothing to declare when it is connected.
+        CHECK(run("rig solve " + proj, dir).exit_code == 0);  // the project's own beat rate
+        const auto solved = nlohmann::json::parse(run("--json rig solve " + proj + " --beat-rate 21600", dir).output);
+        CHECK(solved["connected"] == true);
+        CHECK(solved["candidates"].empty());
+        CHECK(solved["beat_rate_vph"] == 21600);
+        CHECK(run("rig solve " + proj + " --apply --pick 7", dir).exit_code == 0);  // nothing to apply: no error
+
         CHECK(run("rig set " + proj + " fourth_wheel --role screw", dir).exit_code == 0);
         CHECK(nlohmann::json::parse(run("--json rig check " + proj, dir).output)["components"].size() == 15);
         CHECK(run("kinematics " + proj, dir).output.find("warning") != std::string::npos);
