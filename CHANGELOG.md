@@ -27,6 +27,9 @@ Measured on the 166-part OM10 file (18.7 MB STEP) and the generated demonstratio
   every insert (4.4 s per edit at 400 parts, 0.9 s at 166; now 30 ms). A rig edit no longer waits for queued jobs:
   the project is saved through a temporary file and a rename, and each job reads a copy of the project made when it
   was queued. Two jobs run at once, so a quick analysis does not wait behind a long one.
+- The part sections are cached too (`sections.bin`, keyed by the CAD file, part and tolerances): a second `ohs dfm`
+  takes 0.8 s, a second `ohs collisions` 1.3 s. A role edit in the window runs on the scene's own rig (9 ms at 400 parts).
+  Another placement of a shape that differs by a translation only gets the first one's features, moved.
 - Timekeeping and the timegrapher run once for their text and their plot or screen (`--json-out FILE`), not twice.
 - Opening the demonstration movement builds it once per version and opens it from its cache afterwards
   (43 s the first time and every time before, 0.06 s after). The import in the window shows its progress

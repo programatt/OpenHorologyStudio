@@ -286,6 +286,38 @@ model::PartFeatures extract_features(const ImportedPart& part, const FeatureOpti
     return f;
 }
 
+bool translate_features(const ImportedPart& from, const model::PartFeatures& f, const ImportedPart& to,
+                        const FeatureOptions& options, model::PartFeatures& out) {
+    const TopoDS_Shape a = orient_dial_axis_to_z(from.shape, options.dial_axis);
+    const TopoDS_Shape b = orient_dial_axis_to_z(to.shape, options.dial_axis);
+    if (a.IsNull() || b.IsNull() || a.TShape() != b.TShape() || a.Orientation() != b.Orientation()) return false;
+    const gp_Trsf t = (b.Location() * a.Location().Inverted()).Transformation();
+    if (std::abs(t.ScaleFactor() - 1.0) > 1e-9) return false;
+    for (int i = 1; i <= 3; ++i) {
+        for (int j = 1; j <= 3; ++j) {
+            if (std::abs(t.Value(i, j) - (i == j ? 1.0 : 0.0)) > 1e-9) return false;  // a turn or a mirror: not a translation
+        }
+    }
+    const double tx = t.Value(1, 4), ty = t.Value(2, 4), tz = t.Value(3, 4);
+    out = f;
+    out.name = to.name;
+    if (f.volume < 1e-12) return true;
+    out.center.x += tx;
+    out.center.y += ty;
+    out.z_min += tz;
+    out.z_max += tz;
+    for (model::Hole& h : out.holes) {
+        h.x += tx;
+        h.y += ty;
+    }
+    Bnd_Box box;
+    BRepBndLib::AddOptimal(b, box, false, false);
+    double bounds[6];
+    box.Get(bounds[0], bounds[1], bounds[2], bounds[3], bounds[4], bounds[5]);
+    out.fingerprint = fingerprint(f.volume, bounds);
+    return true;
+}
+
 const char* axis_name(Axis axis) {
     return axis == Axis::X ? "x" : axis == Axis::Y ? "y" : "z";
 }

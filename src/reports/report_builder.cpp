@@ -240,10 +240,12 @@ report::Document build_report(const model::Movement& m, const ReportOptions& o) 
         }
         // The sections are the slow part and independent of each other: on threads, each into its own slot.
         std::vector<char> ok(built.size(), 0);
+        geometry::SectionCache cache(o.cache_project, o.step_file, o.update_cache);
         geometry::parallel_for_shapes(shapes, [&](std::size_t k) {
             const auto& f = m.components[static_cast<std::size_t>(built[k].component)].features;
             try {
-                built[k].geometry.region = geometry::section_region(shapes[k], 0.5 * (f.z_min + f.z_max), 0.001, 0.002);
+                built[k].geometry.region = cache.get(built[k].geometry.name, static_cast<char>('0' + static_cast<int>(o.up)), shapes[k],
+                                                     0.5 * (f.z_min + f.z_max), 0.001, 0.002);
                 ok[k] = 1;
             } catch (const Error&) {
             }

@@ -29,4 +29,11 @@ TopoDS_Shape orient_dial_axis_to_z(const TopoDS_Shape& shape, Axis axis);
 /// Parts without volume (surfaces) come back with volume 0 and no teeth.
 model::PartFeatures extract_features(const ImportedPart& part, const FeatureOptions& options = {});
 
+/// The features of `to` from those of `from` (worked out by extract_features with the same options), when the two are
+/// instances of one shape that differ only by a translation: a movement's screws and jewels are many placements of
+/// a few shapes, and only the centre, the heights, the holes and the fingerprint move with the placement. False (nothing
+/// written) for anything else, which the caller extracts in full.
+bool translate_features(const ImportedPart& from, const model::PartFeatures& features, const ImportedPart& to,
+                        const FeatureOptions& options, model::PartFeatures& out);
+
 }  // namespace ohs::geometry

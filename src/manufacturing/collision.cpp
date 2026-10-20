@@ -10,6 +10,7 @@
 
 #include "core/error.hpp"
 #include "core/parallel.hpp"
+#include "geometry/part_cache.hpp"
 #include "geometry/section.hpp"
 #include "geometry/shape_groups.hpp"
 
@@ -274,7 +275,7 @@ CollisionReport sweep_collisions(const model::Movement& m, const kinematics::Tra
 }
 
 std::vector<CollisionPart> collision_parts(const model::Movement& m, const std::vector<geometry::ImportedPart>& step_parts, geometry::Axis axis,
-                                           double tol) {
+                                           double tol, geometry::SectionCache* cache) {
     std::map<std::string, const geometry::ImportedPart*> by_name;
     for (const auto& p : step_parts) by_name[p.name] = &p;
     std::vector<CollisionPart> out;
@@ -296,7 +297,9 @@ std::vector<CollisionPart> collision_parts(const model::Movement& m, const std::
     std::vector<std::exception_ptr> failed(out.size());
     geometry::parallel_for_shapes(shapes, [&](std::size_t k) {
         try {
-            out[k].region = geometry::section_region(shapes[k], 0.5 * (out[k].z0 + out[k].z1), tol * 0.5, tol);
+            const double z = 0.5 * (out[k].z0 + out[k].z1);
+            out[k].region = cache ? cache->get(out[k].name, static_cast<char>('0' + static_cast<int>(axis)), shapes[k], z, tol * 0.5, tol)
+                                  : geometry::section_region(shapes[k], z, tol * 0.5, tol);
         } catch (...) {
             failed[k] = std::current_exception();
         }

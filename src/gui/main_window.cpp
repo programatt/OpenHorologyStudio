@@ -68,6 +68,8 @@
 #include <nlohmann/json.hpp>
 
 #include "cli/cli_run.hpp"
+#include "model/rig_io.hpp"
+#include "rigging/rigging.hpp"
 #include "core/error.hpp"
 #include "explain/explain.hpp"
 #include "geometry/procedural.hpp"
@@ -998,12 +1000,13 @@ bool MainWindow::load_project(const QString& project, const QString& step) {
     }
 }
 
-bool MainWindow::reload_rig() {
+bool MainWindow::reload_rig(std::optional<model::Movement> rig) {
     if (!scene_) return false;
     const QString selected = QString::fromStdString(viewport_->selected());
     bool reused = false;
     try {
-        reused = scene_->reload_rig(project_.toStdString());  // metadata only: the geometry is kept
+        // Metadata only: the geometry is kept.
+        reused = rig ? scene_->reload_rig(std::move(*rig)) : scene_->reload_rig(project_.toStdString());
     } catch (const std::exception& e) {
         append_log(tr("Cannot open %1: %2").arg(project_, e.what()));
         return false;
@@ -1973,27 +1976,62 @@ bool MainWindow::change_role(const QString& part, const QString& role) {
     if (!scene_) return false;
     const int index = scene_->movement().find_component(part.toStdString());
     if (index < 0) return false;
-    const QString from = QString::fromUtf8(model::to_string(scene_->movement().components[index].role).data());
-    if (from == role) return true;
-    return edit_project(tr("Role of %1: %2 to %3").arg(part, from, role), {"rig", "set", project_, part, "--role", role});
+    return change_roles({part}, role);
 }
 
 bool MainWindow::change_roles(const QStringList& parts, const QString& role) {
     if (!scene_ || parts.isEmpty()) return false;
-    if (parts.size() == 1) return change_role(parts.first(), role);
+    const auto next = model::role_from_string(role.toStdString());
+    if (!next) return false;
+    std::vector<std::pair<std::string, model::Role>> roles;
     QStringList args{"rig", "set", project_};
-    int changing = 0;
+    QString from;
     for (const QString& part : parts) {
         const int index = scene_->movement().find_component(part.toStdString());
         if (index < 0) return false;
-        const QString from = QString::fromUtf8(model::to_string(scene_->movement().components[static_cast<std::size_t>(index)].role).data());
-        if (from == role) continue;
+        const model::Role current = scene_->movement().components[static_cast<std::size_t>(index)].role;
+        if (current == *next) continue;
+        roles.emplace_back(part.toStdString(), *next);
         args << part;
-        ++changing;
+        from = QString::fromUtf8(model::to_string(current).data());
     }
-    if (changing == 0) return true;
+    if (roles.empty()) return true;
     args << "--role" << role;
-    return edit_project(tr("Role of %n part(s): %1", nullptr, changing).arg(role), args);
+    const QString label = roles.size() == 1 ? tr("Role of %1: %2 to %3").arg(parts.first(), from, role)
+                                            : tr("Role of %n part(s): %1", nullptr, static_cast<int>(roles.size())).arg(role);
+    // Not while a command or a load is under way: those go through the command line as before.
+    if (!in_command_ && !importing_) return change_roles_in_memory(roles, role, label);
+    return edit_project(label, args);
+}
+
+bool MainWindow::change_roles_in_memory(const std::vector<std::pair<std::string, model::Role>>& roles, const QString& role,
+                                        const QString& label) {
+    const QByteArray before = read_file(project_);
+    model::Movement rig = scene_->movement();
+    QStringList args{"rig", "set", project_};
+    for (const auto& entry : roles) args << QString::fromStdString(entry.first);
+    args << "--role" << role;
+    QStringList quoted;
+    for (const QString& s : args) quoted << shell_quote(s);
+    const QString line = "ohs " + quoted.join(' ');
+    append_log("$ " + line);
+    try {
+        rigging::set_roles(rig, roles, {});
+        model::save_rig(rig, project_.toStdString());
+    } catch (const std::exception& e) {
+        append_log(QString::fromUtf8(e.what()));
+        append_log(tr("exit code %1").arg(2));
+        return false;
+    }
+    append_log(tr("exit code %1").arg(0));
+    history_ << line;
+    const QByteArray after = read_file(project_);
+    if (!reload_rig(std::move(rig))) {
+        restore_project(before);
+        return false;
+    }
+    if (after != before) undo_->push(new ProjectEdit(this, label, before, after));
+    return true;
 }
 
 bool MainWindow::change_label(const QString& part, const QString& label) {

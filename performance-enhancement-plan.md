@@ -419,12 +419,18 @@ out-of-range pressure angle (57° and 45.7°) is no longer stored by the gear fi
 project. The shared-shape tessellation crash cannot occur: the scene's tessellation groups by shape, and a test pins the
 grouping.
 
+Added afterwards:
+
+| Section | What | Result |
+| --- | --- | --- |
+| 5.4 | `sections.bin` in the cache (`geometry::SectionCache`), keyed by the CAD fingerprint, part, axis, height and both tolerances; used by `dfm`, `collisions` and `report` | warm `dfm` 1.65 s → 0.76 s, `collisions` 1.9 s → 1.3 s; output identical |
+| 2.3 | `geometry::translate_features`: another placement of a shape that differs by a translation only gets the first one's features, moved (centre, heights, holes, fingerprint) | tested against a full extraction. OM10 has few such pairs (10 of 166), so the import time does not change |
+| 3.4 | A role edit in the window runs on the scene's own rig (`Scene::reload_rig(Movement)`), is written once and logged as the `ohs rig set` it stands for | rig edit at 400 parts 27 ms → 9 ms |
+
 Not done, and why:
-- **5.4's on-disk section cache.** With the sections on threads `dfm` is 1.5 s, of which the STEP read used to be most; a cache
-  keyed by three tolerance pairs would save under a second.
-- **6.2 (read one part from the STEP).** Moot with the cache, as the plan says.
-- **3.4 (the edit path in memory)**, which the plan marks "later": an edit is 22 ms of work plus the panel refresh.
+- **6.2 (read one part from the STEP).** The cache makes it moot, as the plan says: a command that needs one part no longer
+  reads the STEP file at all (`fea --case shock` 12.2 s → 0.3 s). The XCAF reader cannot transfer one label of a flat assembly
+  more cheaply than the cache loads the lot.
 - **7 (the daemon).** The plan says to build it only if start-up still shows after sections 2, 3 and 5. A rig command on
   OM10 takes 128 ms in all (62 ms of it the process start), the window runs rig commands in-process, and `dfm`
-  is 1.5 s, so start-up is not what a user waits for. Revisit for scripts of hundreds of commands.
-- Instances of one shape reusing each other's features (2.3, "later refinement").
+  is 0.8 s warm, so start-up is not what a user waits for. Revisit for scripts of hundreds of commands.

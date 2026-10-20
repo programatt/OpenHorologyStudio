@@ -2,10 +2,14 @@
 #pragma once
 
 #include <filesystem>
+#include <map>
+#include <mutex>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "geometry/step_io.hpp"
+#include "mesh/mesh2d.hpp"
 
 namespace ohs::geometry {
 
@@ -39,5 +43,31 @@ void write_parts_cache(const std::filesystem::path& project, const std::filesyst
 /// Writes `data` to `path` through a temporary file and a rename, so a reader sees the old or the new file,
 /// never half of one. Returns false on failure.
 bool write_file_atomic(const std::filesystem::path& path, const std::string& data);
+
+/// The part sections (`section_region`) of a project, kept in `sections.bin` in its cache and keyed by the CAD file's
+/// fingerprint, the part, its height and the two tolerances: the DFM, collision and report commands each need them,
+/// with their own tolerances, and cutting a section is the slow step once the CAD file is cached. Thread safe: the
+/// sections are cut on threads. Nothing is read or written when `project` is empty; a damaged or stale file is ignored.
+class SectionCache {
+public:
+    SectionCache(const std::filesystem::path& project, const std::filesystem::path& cad_file, bool writable = true);
+    ~SectionCache();
+    SectionCache(const SectionCache&) = delete;
+    SectionCache& operator=(const SectionCache&) = delete;
+
+    /// The section from the cache, or cut from `shape` (already turned so the dial axis is Z) and remembered.
+    /// Throws what section_region throws.
+    mesh::Region get(const std::string& part, char axis, const TopoDS_Shape& shape, double z, double deflection, double simplify);
+    /// Writes the cache when something was added. Called by the destructor too.
+    void save();
+
+private:
+    using Key = std::tuple<std::string, char, double, double, double>;
+    std::filesystem::path project_;
+    std::string fingerprint_;
+    bool writable_{false}, dirty_{false};
+    std::mutex mutex_;
+    std::map<Key, mesh::Region> sections_;
+};
 
 }  // namespace ohs::geometry

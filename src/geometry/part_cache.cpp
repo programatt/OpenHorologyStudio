@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <regex>
 #include <sstream>
@@ -18,6 +19,7 @@
 #include <spdlog/spdlog.h>
 
 #include "geometry/cad_io.hpp"
+#include "geometry/section.hpp"
 
 namespace fs = std::filesystem;
 
@@ -203,6 +205,122 @@ std::vector<ImportedPart> load_parts(const fs::path& cad_file, const fs::path& p
     parts = import_cad(cad_file);
     if (update_cache) write_parts_cache(project, cad_file, parts);
     return parts;
+}
+
+// ---- the section cache -----------------------------------------------------------------------------------------------
+// sections.bin: magic, version, fingerprint, count, then per section the part, axis, z, tolerances and the rings.
+
+namespace {
+constexpr std::uint32_t kSectionMagic = 0x4e434553;  // "SECN"
+constexpr std::uint32_t kSectionVersion = 1;
+fs::path sections_path(const fs::path& project) { return cache_dir(project) / "sections.bin"; }
+
+template <class T>
+void put(std::string& out, const T& v) { out.append(reinterpret_cast<const char*>(&v), sizeof v); }
+}  // namespace
+
+SectionCache::SectionCache(const fs::path& project, const fs::path& cad_file, bool writable) : project_(project), writable_(writable) {
+    if (project.empty()) return;
+    fingerprint_ = cad_fingerprint(cad_file);
+    if (fingerprint_.empty()) return;
+    std::ifstream in(sections_path(project), std::ios::binary);
+    if (!in) return;
+    const std::string data((std::istreambuf_iterator<char>(in)), {});
+    std::size_t at = 0;
+    bool ok = true;
+    auto take = [&](auto& v) {
+        if (!ok || at + sizeof v > data.size()) return ok = false;
+        std::memcpy(&v, data.data() + at, sizeof v);
+        at += sizeof v;
+        return true;
+    };
+    auto take_string = [&](std::string& v) {
+        std::uint32_t n = 0;
+        if (!take(n) || at + n > data.size()) return ok = false;
+        v.assign(data, at, n);
+        at += n;
+        return true;
+    };
+    std::uint32_t magic = 0, version = 0, count = 0;
+    std::string stored;
+    if (!take(magic) || magic != kSectionMagic || !take(version) || version != kSectionVersion) return;
+    if (!take_string(stored) || stored != fingerprint_ || !take(count)) return;
+    std::map<Key, mesh::Region> loaded;
+    for (std::uint32_t i = 0; i < count && ok; ++i) {
+        std::string part;
+        char axis = 'z';
+        double z = 0, d = 0, s = 0;
+        std::uint32_t rings = 0;
+        if (!take_string(part) || !take(axis) || !take(z) || !take(d) || !take(s) || !take(rings)) return;
+        mesh::Region region;
+        for (std::uint32_t r = 0; r < rings && ok; ++r) {
+            std::uint32_t points = 0;
+            if (!take(points) || at + static_cast<std::size_t>(points) * 2 * sizeof(double) > data.size()) return;
+            mesh::Ring ring(points);
+            for (auto& p : ring) {
+                take(p.x);
+                take(p.y);
+            }
+            region.rings.push_back(std::move(ring));
+        }
+        loaded[{part, axis, z, d, s}] = std::move(region);
+    }
+    if (ok) sections_ = std::move(loaded);
+}
+
+SectionCache::~SectionCache() {
+    try {
+        save();
+    } catch (...) {
+    }
+}
+
+mesh::Region SectionCache::get(const std::string& part, char axis, const TopoDS_Shape& shape, double z, double deflection, double simplify) {
+    const Key key{part, axis, z, deflection, simplify};
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto found = sections_.find(key);
+        if (found != sections_.end()) return found->second;
+    }
+    mesh::Region region = section_region(shape, z, deflection, simplify);
+    if (!fingerprint_.empty()) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        sections_[key] = region;
+        dirty_ = true;
+    }
+    return region;
+}
+
+void SectionCache::save() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!dirty_ || !writable_ || fingerprint_.empty() || project_.empty()) return;
+    dirty_ = false;
+    std::error_code ec;
+    fs::create_directories(cache_dir(project_), ec);
+    std::string out;
+    put(out, kSectionMagic);
+    put(out, kSectionVersion);
+    put(out, static_cast<std::uint32_t>(fingerprint_.size()));
+    out.append(fingerprint_);
+    put(out, static_cast<std::uint32_t>(sections_.size()));
+    for (const auto& [key, region] : sections_) {
+        const auto& [part, axis, z, d, s] = key;
+        put(out, static_cast<std::uint32_t>(part.size()));
+        out.append(part);
+        put(out, axis);
+        put(out, z);
+        put(out, d);
+        put(out, s);
+        put(out, static_cast<std::uint32_t>(region.rings.size()));
+        for (const auto& ring : region.rings) {
+            put(out, static_cast<std::uint32_t>(ring.size()));
+            for (const auto& p : ring) {
+                put(out, p.x);
+                put(out, p.y);
+            }
+        }
+    }
+    write_file_atomic(sections_path(project_), out);
 }
 
 }  // namespace ohs::geometry

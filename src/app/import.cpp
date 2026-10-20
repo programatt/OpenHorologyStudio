@@ -34,15 +34,23 @@ model::Movement import_movement(const std::filesystem::path& step_file, const Im
     for (const auto& part : parts) shapes.push_back(part.shape);
     std::vector<model::PartFeatures> features(parts.size());
     std::atomic<std::size_t> done{0};
-    geometry::parallel_for_shapes(shapes, [&](std::size_t i) {
-        if (options.cancel && options.cancel->load()) throw Error("import cancelled");
-        const auto start = std::chrono::steady_clock::now();
-        features[i] = geometry::extract_features(parts[i], feature_options);
-        const std::size_t n = ++done;
-        spdlog::debug("part {} of {}: {}: volume {:.3f} mm3, {} teeth, {:.2f} s", n, parts.size(), parts[i].name,
-                      features[i].volume, features[i].teeth,
-                      std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
-        if (options.progress) options.progress(n, parts.size());
+    geometry::parallel_for_shape_groups(shapes, [&](const std::vector<std::size_t>& group) {
+        for (std::size_t k = 0; k < group.size(); ++k) {
+            const std::size_t i = group[k];
+            if (options.cancel && options.cancel->load()) throw Error("import cancelled");
+            const auto start = std::chrono::steady_clock::now();
+            // Another placement of a shape already done, moved by a translation only: its features are that part's, moved.
+            bool reused = false;
+            for (std::size_t before = 0; before < k && !reused; ++before) {
+                reused = geometry::translate_features(parts[group[before]], features[group[before]], parts[i], feature_options, features[i]);
+            }
+            if (!reused) features[i] = geometry::extract_features(parts[i], feature_options);
+            const std::size_t n = ++done;
+            spdlog::debug("part {} of {}: {}: volume {:.3f} mm3, {} teeth, {:.2f} s{}", n, parts.size(), parts[i].name,
+                          features[i].volume, features[i].teeth,
+                          std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(), reused ? " (from another instance)" : "");
+            if (options.progress) options.progress(n, parts.size());
+        }
     });
 
     rigging::RigOptions rig = options.rig;

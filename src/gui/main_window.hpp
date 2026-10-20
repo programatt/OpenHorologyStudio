@@ -5,6 +5,7 @@
 #include <deque>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -80,6 +81,10 @@ public:
     bool change_role(const QString& part, const QString& role);
     /// The same for several parts at once: one command, one undo step.
     bool change_roles(const QStringList& parts, const QString& role);
+    /// A role edit made on the scene's own rig: no process or command-line parse, the project written once, and the scene
+    /// takes the result without reading it again. The command it stands for is logged and kept in the session script.
+    bool change_roles_in_memory(const std::vector<std::pair<std::string, model::Role>>& roles, const QString& role,
+                                const QString& label);
     /// Gives a part a label shown in place of its name in every view (empty clears it). Undoable.
     bool change_label(const QString& part, const QString& label);
     /// Declares that two toothed parts mesh (`ohs rig mesh`), undoable.
@@ -236,7 +241,9 @@ private:
     void update_animate_labels();
     bool load_project(const QString& project, const QString& step);
     /// Re-reads the rig from the project file, keeping the geometry, view, visibility and selection.
-    bool reload_rig();
+    /// Re-reads the rig into the scene and the panels: from the project file, or from `rig` when the edit was made in
+    /// this process (then the file was written already and is not read again).
+    bool reload_rig(std::optional<model::Movement> rig = std::nullopt);
     bool install_scene(const QString& project, const QString& step, std::shared_ptr<Scene> scene);
     /// Runs `ohs <commands>` in order, then loads `project`, on a worker thread, and installs the scene when
     /// done. One at a time; `message` shows in the status bar meanwhile.

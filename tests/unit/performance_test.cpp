@@ -10,6 +10,7 @@
 
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <TopLoc_Location.hxx>
+#include <gp_Ax1.hxx>
 #include <gp_Trsf.hxx>
 
 #include <catch2/catch_approx.hpp>
@@ -141,6 +142,41 @@ TEST_CASE("the geometry cache gives the parts back, and goes stale with the CAD 
     fs::remove_all(dir);
 }
 
+TEST_CASE("sections are cut once and read back from the cache while the CAD file is unchanged") {
+    const fs::path dir = fresh("sections");
+    const fs::path step = dir / "movement.step", project = dir / "movement.hsproj";
+    geometry::export_step(geometry::make_test_movement(), step);
+    const auto parts = geometry::import_step(step);
+    const double z = 0.5 * (geometry::extract_features(parts[2], {}).z_min + geometry::extract_features(parts[2], {}).z_max);
+
+    mesh::Region cut;
+    {
+        geometry::SectionCache cache(project, step);
+        cut = cache.get(parts[2].name, '2', parts[2].shape, z, 0.002, 0.002);
+        REQUIRE_FALSE(cut.rings.empty());
+    }  // saved on destruction
+    CHECK(fs::exists(geometry::cache_dir(project) / "sections.bin"));
+
+    // Read back: given a shape that would throw if it were cut (an empty one), the cached section still comes out equal.
+    geometry::SectionCache again(project, step);
+    const mesh::Region cached = again.get(parts[2].name, '2', TopoDS_Shape{}, z, 0.002, 0.002);
+    REQUIRE(cached.rings.size() == cut.rings.size());
+    for (std::size_t r = 0; r < cut.rings.size(); ++r) {
+        REQUIRE(cached.rings[r].size() == cut.rings[r].size());
+        for (std::size_t i = 0; i < cut.rings[r].size(); ++i) {
+            CHECK(cached.rings[r][i].x == cut.rings[r][i].x);
+            CHECK(cached.rings[r][i].y == cut.rings[r][i].y);
+        }
+    }
+    // Another tolerance is another section; a changed CAD file empties the cache.
+    CHECK_THROWS(again.get(parts[2].name, '2', TopoDS_Shape{}, z, 0.001, 0.002));
+    again.save();
+    std::ofstream(step, std::ios::binary | std::ios::app) << "\n/* edited */\n";
+    geometry::SectionCache stale(project, step);
+    CHECK_THROWS(stale.get(parts[2].name, '2', TopoDS_Shape{}, z, 0.002, 0.002));
+    fs::remove_all(dir);
+}
+
 TEST_CASE("an atomic write leaves the old file or the new one") {
     const fs::path dir = fresh("atomic");
     const fs::path file = dir / "project.hsproj";
@@ -197,6 +233,41 @@ TEST_CASE("an import reports its progress, stops when asked, and writes the cach
         CHECK(std::string(e.what()).find("cancelled") != std::string::npos);
     }
     fs::remove_all(dir);
+}
+
+TEST_CASE("another placement of a shape gets the first one's features, moved; a turned one is extracted in full") {
+    const auto parts = geometry::make_test_movement();
+    // The arbor placed three ways: the same shape moved by a translation, and turned about the dial axis.
+    const TopoDS_Shape base = parts[0].shape;
+    auto placed = [&](double dx, double dy, double dz, double turn) {
+        gp_Trsf t;
+        t.SetRotation(gp_Ax1(gp::Origin(), gp::DZ()), turn);
+        gp_Trsf m;
+        m.SetTranslation(gp_Vec(dx, dy, dz));
+        return geometry::ImportedPart{"copy", base.Moved(TopLoc_Location(m * t))};
+    };
+    const geometry::ImportedPart first{"first", base.Moved(TopLoc_Location())};
+    const geometry::ImportedPart moved = placed(7.0, -3.0, 0.5, 0.0), turned = placed(7.0, -3.0, 0.5, 0.7);
+    geometry::FeatureOptions options;
+    const model::PartFeatures f = geometry::extract_features(first, options);
+    model::PartFeatures out;
+    REQUIRE(geometry::translate_features(first, f, moved, options, out));
+    const model::PartFeatures full = geometry::extract_features(moved, options);
+    CHECK(out.name == "copy");
+    CHECK(out.center.x == Catch::Approx(full.center.x).margin(1e-6));
+    CHECK(out.center.y == Catch::Approx(full.center.y).margin(1e-6));
+    CHECK(out.z_min == Catch::Approx(full.z_min).margin(1e-6));
+    CHECK(out.z_max == Catch::Approx(full.z_max).margin(1e-6));
+    CHECK(out.teeth == full.teeth);
+    CHECK(out.volume == Catch::Approx(full.volume).epsilon(1e-9));
+    CHECK(out.fingerprint == full.fingerprint);
+    REQUIRE(out.holes.size() == full.holes.size());
+    for (std::size_t i = 0; i < out.holes.size(); ++i) {
+        CHECK(out.holes[i].x == Catch::Approx(full.holes[i].x).margin(1e-6));
+        CHECK(out.holes[i].y == Catch::Approx(full.holes[i].y).margin(1e-6));
+    }
+    CHECK_FALSE(geometry::translate_features(first, f, turned, options, out));  // turned: not a translation
+    CHECK_FALSE(geometry::translate_features(first, f, geometry::ImportedPart{parts[1].name, parts[1].shape}, options, out));  // another shape
 }
 
 TEST_CASE("holes are found once per part: a plate keeps the holes it was made with") {

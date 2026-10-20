@@ -291,7 +291,10 @@ void Scene::update_review() {
 }
 
 bool Scene::reload_rig(const std::filesystem::path& project, double beat_rate_vph) {
-    model::Movement m = model::load_rig(project);
+    return reload_rig(model::load_rig(project), beat_rate_vph);
+}
+
+bool Scene::reload_rig(model::Movement m, double beat_rate_vph) {
     if (m.dial_axis != movement_.dial_axis || m.components.size() != parts_.size()) return false;
     for (std::size_t c = 0; c < m.components.size(); ++c) {
         if (m.components[c].features.name != parts_[c].name) return false;

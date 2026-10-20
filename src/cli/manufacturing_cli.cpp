@@ -267,10 +267,13 @@ int cmd_dfm(const MfgOptions& o, bool as_json) {
         built.push_back(std::move(g));
     }
     std::vector<char> ok(built.size(), 0);
+    const std::string cad = o.step_override.empty() ? (fs::path(o.project).parent_path() / m.source_geometry).string() : o.step_override;
+    geometry::SectionCache cache(o.project, cad, o.step_override.empty());
+    const char axis_char = static_cast<char>('0' + static_cast<int>(axis_of(o.up, m)));
     geometry::parallel_for_shapes(shapes, [&](std::size_t k) {
         const auto& f = m.components[from[k]].features;
         try {
-            built[k].region = geometry::section_region(shapes[k], 0.5 * (f.z_min + f.z_max), 0.002, 0.002);
+            built[k].region = cache.get(built[k].name, axis_char, shapes[k], 0.5 * (f.z_min + f.z_max), 0.002, 0.002);
             ok[k] = 1;
         } catch (const Error&) {
         }
@@ -312,7 +315,9 @@ int cmd_collisions(const MfgOptions& o, bool as_json) {
     const model::Movement m = model::load_rig(o.project);
     const double vph = o.beat_rate > 0 ? o.beat_rate : m.beat_rate_vph;
     const auto train = kinematics::analyze_train(m, vph);
-    const auto parts = manufacturing::collision_parts(m, load_parts(o, m), axis_of(o.up, m));
+    const std::string cad = o.step_override.empty() ? (fs::path(o.project).parent_path() / m.source_geometry).string() : o.step_override;
+    geometry::SectionCache cache(o.project, cad, o.step_override.empty());
+    const auto parts = manufacturing::collision_parts(m, load_parts(o, m), axis_of(o.up, m), 0.003, &cache);
     const auto r = manufacturing::sweep_collisions(m, train, parts);
     if (as_json) {
         json j = {{"pairs_checked", r.pairs_checked}, {"overlaps", r.overlaps}, {"close_calls", r.close_calls}, {"pairs", json::array()}};

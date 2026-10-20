@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "geometry/features.hpp"
+#include "geometry/part_cache.hpp"
 #include "geometry/step_io.hpp"
 #include "kinematics/kinematics.hpp"
 #include "mesh/mesh2d.hpp"
@@ -55,6 +56,7 @@ CollisionReport sweep_collisions(const model::Movement& movement, const kinemati
 
 /// Section outlines of every component with a part in `step_parts` of the same name.
 std::vector<CollisionPart> collision_parts(const model::Movement& movement, const std::vector<geometry::ImportedPart>& step_parts,
-                                           geometry::Axis dial_axis, double outline_tolerance = 0.003);
+                                           geometry::Axis dial_axis, double outline_tolerance = 0.003,
+                                           geometry::SectionCache* cache = nullptr);
 
 }  // namespace ohs::manufacturing
